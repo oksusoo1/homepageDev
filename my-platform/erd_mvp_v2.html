@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MVP DB ERD v2</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0f;
+      color: #e2e8f0;
+      font-family: 'Apple SD Gothic Neo', 'Pretendard', sans-serif;
+      min-height: 100vh;
+    }
+    header {
+      background: #0d0d14;
+      border-bottom: 1px solid #1e293b;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+    .title { font-size: 14px; font-weight: 600; color: #94a3b8; letter-spacing: 2px; }
+    .badge {
+      margin-left: auto;
+      font-size: 11px;
+      background: #1e40af22;
+      color: #60a5fa;
+      padding: 3px 10px;
+      border-radius: 4px;
+    }
+    .legend {
+      display: flex;
+      gap: 24px;
+      padding: 12px 32px;
+      background: #0d0d14;
+      border-bottom: 1px solid #1e293b;
+      font-size: 12px;
+      color: #64748b;
+    }
+    .legend span { display: flex; align-items: center; gap: 6px; }
+    .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+    #erd-container {
+      padding: 32px;
+      overflow: auto;
+    }
+    .mermaid {
+      background: transparent;
+    }
+    .table-summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      padding: 24px 32px;
+      border-top: 1px solid #1e293b;
+    }
+    .table-card {
+      background: #111827;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .table-card .tname {
+      font-size: 13px;
+      font-weight: 600;
+      color: #60a5fa;
+      margin-bottom: 6px;
+    }
+    .table-card .pk {
+      font-size: 11px;
+      color: #f59e0b;
+      margin-bottom: 4px;
+    }
+    .table-card .desc {
+      font-size: 11px;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="dot"></div>
+  <span class="title">MY PLATFORM</span>
+  <span style="color:#334155;font-size:12px">MVP DB ERD v2</span>
+  <span class="badge">PK: 테이블명_id 규칙</span>
+</header>
+
+<div class="legend">
+  <span><div class="legend-dot" style="background:#f59e0b"></div> PK (Primary Key)</span>
+  <span><div class="legend-dot" style="background:#60a5fa"></div> FK (Foreign Key)</span>
+  <span>||--|| 1:1 관계</span>
+  <span>||--o{ 1:N 관계</span>
+</div>
+
+<div id="erd-container">
+  <div class="mermaid">
+erDiagram
+  customers {
+    uuid customer_id PK
+    string email
+    string name
+    string phone
+    string status
+    timestamp created_at
+  }
+  templates {
+    uuid template_id PK
+    string name
+    string category
+    boolean is_active
+    int sort_order
+  }
+  sites {
+    uuid site_id PK
+    string site_code
+    uuid customer_id FK
+    uuid template_id FK
+    string name
+    string subdomain
+    string domain
+    string build_type
+    string status
+    string deploy_status
+    timestamp created_at
+  }
+  one_time_payments {
+    uuid payment_id PK
+    uuid customer_id FK
+    uuid site_id FK
+    string type
+    int amount
+    string status
+    timestamp paid_at
+  }
+  customer_payment_methods {
+    uuid payment_method_id PK
+    uuid customer_id FK
+    string pg_provider
+    string pg_customer_id
+    string card_last4
+    string card_brand
+    boolean is_default
+  }
+  subscriptions {
+    uuid subscription_id PK
+    uuid customer_id FK
+    uuid site_id FK
+    int amount
+    int billing_day
+    string payment_method
+    string status
+    date next_billing_date
+  }
+  billing_history {
+    uuid billing_id PK
+    uuid subscription_id FK
+    string period
+    int amount
+    string status
+    string payment_method
+    string pg_transaction_id
+    timestamp paid_at
+  }
+  support_tickets {
+    uuid ticket_id PK
+    uuid site_id FK
+    uuid customer_id FK
+    string title
+    string category
+    string status
+    string priority
+    timestamp deadline_at
+  }
+  posts {
+    uuid post_id PK
+    uuid site_id FK
+    string title
+    string content
+    string author
+    timestamp created_at
+  }
+
+  customers ||--o{ sites : "customer_id"
+  customers ||--o{ subscriptions : "customer_id"
+  customers ||--o{ one_time_payments : "customer_id"
+  customers ||--o{ customer_payment_methods : "customer_id"
+  customers ||--o{ support_tickets : "customer_id"
+  templates ||--o{ sites : "template_id"
+  sites ||--|| subscriptions : "site_id"
+  sites ||--o{ one_time_payments : "site_id"
+  sites ||--o{ support_tickets : "site_id"
+  sites ||--o{ posts : "site_id"
+  subscriptions ||--o{ billing_history : "subscription_id"
+  </div>
+</div>
+
+<!-- 테이블 요약 -->
+<div class="table-summary">
+  <div class="table-card">
+    <div class="tname">customers</div>
+    <div class="pk">PK: customer_id</div>
+    <div class="desc">고객 계정. 모든 테이블의 시작점.</div>
+  </div>
+  <div class="table-card">
+    <div class="tname">templates</div>
+    <div class="pk">PK: template_id</div>
+    <div class="desc">업종별 고정 템플릿 (카페/미용실 등).</div>
+  </div>
+  <div class="table-card">
+    <div class="tname">sites</div>
+    <div class="pk">PK: site_id / site_code (URL용)</div>
+    <div class="desc">고객 사이트. 중심 허브 테이블.</div>
+  </div>
+  <div class="table-card">
+    <div class="tname">subscriptions</div>
+    <div class="pk">PK: subscription_id</div>
+    <div class="desc">월 3만원 구독 계약. 사이트당 1개.</div>
+  </div>
+  <div class="table-card">
+    <div class="tname">billing_history</div>
+    <div class="pk">PK: billing_id</div>
+    <div class="desc">월별 청구 내역. 매월 1건 생성.</div>
+  </div>
+  <div class="table-card">
+    <div class="tname">one_time_payments</div>
+    <div class="pk">PK: payment_id</div>
+    <div class="desc">개발비/도메인 대행 1회성 결제.</div>
+  </div>
+  <div class="table-card">
+    <div class="tname">customer_payment_methods</div>
+    <div class="pk">PK: payment_method_id</div>
+    <div class="desc">카드 빌링키. 카드번호 저장 안 함.</div>
+  </div>
+  <div class="table-card">
+    <div class="tname">support_tickets</div>
+    <div class="pk">PK: ticket_id</div>
+    <div class="desc">수정 요청. 3일 내 처리 기한.</div>
+  </div>
+  <div class="table-card">
+    <div class="tname">posts</div>
+    <div class="pk">PK: post_id</div>
+    <div class="desc">사이트 게시판 글.</div>
+  </div>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      fontSize: '13px',
+      lineColor: '#4b5563',
+      textColor: '#9ca3af',
+    }
+  });
+</script>
+</body>
+</html>

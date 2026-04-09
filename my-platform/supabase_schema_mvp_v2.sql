@@ -1,0 +1,315 @@
+-- ================================================
+-- supabase_schema_mvp_v2.sql
+-- PK 명명규칙: 테이블명_id
+-- sites.site_id (UUID PK) / sites.site_code (VARCHAR 식별자)
+-- ================================================
+
+
+-- ================================================
+-- 기존 테이블 초기화 (처음부터 다시)
+-- ================================================
+DROP TABLE IF EXISTS posts CASCADE;
+DROP TABLE IF EXISTS support_tickets CASCADE;
+DROP TABLE IF EXISTS billing_history CASCADE;
+DROP TABLE IF EXISTS subscriptions CASCADE;
+DROP TABLE IF EXISTS one_time_payments CASCADE;
+DROP TABLE IF EXISTS customer_payment_methods CASCADE;
+DROP TABLE IF EXISTS sites CASCADE;
+DROP TABLE IF EXISTS templates CASCADE;
+DROP TABLE IF EXISTS customers CASCADE;
+
+DROP FUNCTION IF EXISTS set_ticket_deadline() CASCADE;
+DROP FUNCTION IF EXISTS sync_site_status() CASCADE;
+
+
+-- ================================================
+-- 1. customers
+-- ================================================
+
+CREATE TABLE customers (
+  customer_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email         VARCHAR(200) UNIQUE NOT NULL,
+  name          VARCHAR(100) NOT NULL,
+  phone         VARCHAR(50),
+  status        VARCHAR(20) NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'suspended', 'withdrawn')),
+  created_at    TIMESTAMP DEFAULT NOW(),
+  updated_at    TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_customers_email ON customers(email);
+
+
+-- ================================================
+-- 2. templates
+-- ================================================
+
+CREATE TABLE templates (
+  template_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name             VARCHAR(100) NOT NULL,
+  category         VARCHAR(50) NOT NULL,
+  thumbnail_url    VARCHAR(500),
+  default_content  JSONB,
+  is_active        BOOLEAN NOT NULL DEFAULT true,
+  sort_order       INTEGER DEFAULT 0,
+  created_at       TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_templates_category ON templates(category);
+CREATE INDEX idx_templates_active   ON templates(is_active);
+
+INSERT INTO templates (name, category, sort_order) VALUES
+  ('카페 기본형',     'cafe',       1),
+  ('식당 심플',       'restaurant', 2),
+  ('미용실 모던',     'salon',      3),
+  ('병원/의원 클린',  'clinic',     4),
+  ('학원 밝은',       'academy',    5),
+  ('일반 소개 기본',  'general',    6);
+
+
+-- ================================================
+-- 3. sites
+-- ================================================
+
+CREATE TABLE sites (
+  site_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  site_code       VARCHAR(50) UNIQUE NOT NULL,   -- URL 식별자 (예: 'hongcafe_001')
+  customer_id     UUID NOT NULL REFERENCES customers(customer_id) ON DELETE RESTRICT,
+  template_id     UUID REFERENCES templates(template_id),
+  name            VARCHAR(200) NOT NULL,
+  subdomain       VARCHAR(100) UNIQUE NOT NULL,  -- 서브도메인 (예: 'hong')
+  domain          VARCHAR(200) UNIQUE,           -- 커스텀 도메인
+  description     TEXT,
+  address         VARCHAR(300),
+  phone           VARCHAR(50),
+  email           VARCHAR(200),
+  build_type      VARCHAR(20) NOT NULL DEFAULT 'self'
+                  CHECK (build_type IN ('self', 'managed')),
+  content         JSONB,
+  status          VARCHAR(20) NOT NULL DEFAULT 'draft'
+                  CHECK (status IN ('draft', 'published', 'suspended', 'cancelled')),
+  deploy_status   VARCHAR(20) NOT NULL DEFAULT 'pending'
+                  CHECK (deploy_status IN ('pending', 'building', 'live', 'failed')),
+  created_at      TIMESTAMP DEFAULT NOW(),
+  updated_at      TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_sites_customer_id ON sites(customer_id);
+CREATE INDEX idx_sites_site_code   ON sites(site_code);
+CREATE INDEX idx_sites_subdomain   ON sites(subdomain);
+CREATE INDEX idx_sites_status      ON sites(status);
+
+
+-- ================================================
+-- 4. one_time_payments
+-- ================================================
+
+CREATE TABLE one_time_payments (
+  payment_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id   UUID NOT NULL REFERENCES customers(customer_id) ON DELETE RESTRICT,
+  site_id       UUID REFERENCES sites(site_id) ON DELETE RESTRICT,
+  type          VARCHAR(50) NOT NULL
+                CHECK (type IN ('domain_setup', 'dev_fee', 'extra')),
+  amount        INTEGER NOT NULL,
+  status        VARCHAR(20) NOT NULL DEFAULT 'unpaid'
+                CHECK (status IN ('unpaid', 'paid')),
+  note          TEXT,
+  paid_at       TIMESTAMP,
+  created_at    TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_one_time_customer_id ON one_time_payments(customer_id);
+CREATE INDEX idx_one_time_site_id     ON one_time_payments(site_id);
+CREATE INDEX idx_one_time_status      ON one_time_payments(status);
+
+
+-- ================================================
+-- 5. customer_payment_methods
+-- ================================================
+
+CREATE TABLE customer_payment_methods (
+  payment_method_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id         UUID NOT NULL REFERENCES customers(customer_id) ON DELETE RESTRICT,
+  pg_provider         VARCHAR(50),
+  pg_customer_id      VARCHAR(200) NOT NULL,  -- PG사 빌링키
+  card_last4          VARCHAR(4),
+  card_brand          VARCHAR(50),
+  card_name           VARCHAR(100),
+  is_default          BOOLEAN NOT NULL DEFAULT true,
+  is_active           BOOLEAN NOT NULL DEFAULT true,
+  registered_at       TIMESTAMP DEFAULT NOW(),
+  created_at          TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_pay_methods_customer_id ON customer_payment_methods(customer_id);
+CREATE INDEX idx_pay_methods_active      ON customer_payment_methods(is_active);
+
+
+-- ================================================
+-- 6. subscriptions
+-- ================================================
+
+CREATE TABLE subscriptions (
+  subscription_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id       UUID NOT NULL REFERENCES customers(customer_id) ON DELETE RESTRICT,
+  site_id           UUID NOT NULL REFERENCES sites(site_id) ON DELETE RESTRICT,
+  amount            INTEGER NOT NULL DEFAULT 30000,
+  billing_day       INTEGER NOT NULL DEFAULT 1
+                    CHECK (billing_day BETWEEN 1 AND 28),
+  payment_method    VARCHAR(20) NOT NULL DEFAULT 'manual'
+                    CHECK (payment_method IN ('manual', 'card')),
+  status            VARCHAR(20) NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'paused', 'cancelled')),
+  started_at        TIMESTAMP DEFAULT NOW(),
+  next_billing_date DATE,
+  cancelled_at      TIMESTAMP,
+  created_at        TIMESTAMP DEFAULT NOW(),
+  updated_at        TIMESTAMP DEFAULT NOW(),
+
+  UNIQUE (site_id)  -- 사이트당 구독 1개
+);
+
+CREATE INDEX idx_subscriptions_customer_id  ON subscriptions(customer_id);
+CREATE INDEX idx_subscriptions_site_id      ON subscriptions(site_id);
+CREATE INDEX idx_subscriptions_status       ON subscriptions(status);
+
+
+-- ================================================
+-- 7. billing_history
+-- ================================================
+
+CREATE TABLE billing_history (
+  billing_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subscription_id     UUID NOT NULL REFERENCES subscriptions(subscription_id) ON DELETE RESTRICT,
+  period              VARCHAR(7) NOT NULL,      -- '2026-03'
+  amount              INTEGER NOT NULL,
+  status              VARCHAR(20) NOT NULL DEFAULT 'unpaid'
+                      CHECK (status IN ('unpaid', 'paid', 'overdue')),
+  payment_method      VARCHAR(20) NOT NULL DEFAULT 'manual'
+                      CHECK (payment_method IN ('manual', 'card')),
+  paid_at             TIMESTAMP,
+  pg_transaction_id   VARCHAR(200),
+  note                TEXT,
+  created_at          TIMESTAMP DEFAULT NOW(),
+
+  UNIQUE (subscription_id, period)
+);
+
+CREATE INDEX idx_billing_subscription_id ON billing_history(subscription_id);
+CREATE INDEX idx_billing_period          ON billing_history(period);
+CREATE INDEX idx_billing_status          ON billing_history(status);
+
+
+-- ================================================
+-- 8. support_tickets
+-- ================================================
+
+CREATE TABLE support_tickets (
+  ticket_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  site_id         UUID NOT NULL REFERENCES sites(site_id) ON DELETE RESTRICT,
+  customer_id     UUID NOT NULL REFERENCES customers(customer_id) ON DELETE RESTRICT,
+  title           VARCHAR(300) NOT NULL,
+  content         TEXT NOT NULL,
+  category        VARCHAR(50)
+                  CHECK (category IN ('text_change', 'image', 'page_add', 'feature', 'etc')),
+  status          VARCHAR(20) NOT NULL DEFAULT 'open'
+                  CHECK (status IN ('open', 'in_progress', 'resolved')),
+  priority        VARCHAR(20) NOT NULL DEFAULT 'normal'
+                  CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  deadline_days   INTEGER NOT NULL DEFAULT 3,
+  deadline_at     TIMESTAMP NOT NULL,
+  resolved_at     TIMESTAMP,
+  created_at      TIMESTAMP DEFAULT NOW(),
+  updated_at      TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_tickets_site_id     ON support_tickets(site_id);
+CREATE INDEX idx_tickets_customer_id ON support_tickets(customer_id);
+CREATE INDEX idx_tickets_status      ON support_tickets(status);
+CREATE INDEX idx_tickets_deadline    ON support_tickets(deadline_at);
+
+
+-- ================================================
+-- 9. posts
+-- ================================================
+
+CREATE TABLE posts (
+  post_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  site_id     UUID NOT NULL REFERENCES sites(site_id) ON DELETE RESTRICT,
+  title       VARCHAR(500) NOT NULL,
+  content     TEXT NOT NULL,
+  author      VARCHAR(100) NOT NULL DEFAULT '관리자',
+  created_at  TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_posts_site_id ON posts(site_id);
+
+
+-- ================================================
+-- 10. RLS
+-- ================================================
+
+ALTER TABLE customers                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE templates                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sites                    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE one_time_payments        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer_payment_methods ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscriptions            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE billing_history          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE support_tickets          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE posts                    ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "customers_all"      ON customers                FOR ALL USING (true);
+CREATE POLICY "templates_select"   ON templates                FOR SELECT USING (true);
+CREATE POLICY "sites_all"          ON sites                    FOR ALL USING (true);
+CREATE POLICY "one_time_all"       ON one_time_payments        FOR ALL USING (true);
+CREATE POLICY "pay_methods_all"    ON customer_payment_methods FOR ALL USING (true);
+CREATE POLICY "subscriptions_all"  ON subscriptions            FOR ALL USING (true);
+CREATE POLICY "billing_hist_all"   ON billing_history          FOR ALL USING (true);
+CREATE POLICY "tickets_all"        ON support_tickets          FOR ALL USING (true);
+CREATE POLICY "posts_all"          ON posts                    FOR ALL USING (true);
+
+
+-- ================================================
+-- 11. 트리거
+-- ================================================
+
+-- 티켓 생성 시 deadline_at 자동 계산
+CREATE OR REPLACE FUNCTION set_ticket_deadline()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.deadline_at := NOW() + (NEW.deadline_days || ' days')::INTERVAL;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_set_ticket_deadline
+BEFORE INSERT ON support_tickets
+FOR EACH ROW EXECUTE FUNCTION set_ticket_deadline();
+
+-- 구독 취소/정지 시 사이트 status 자동 동기화
+CREATE OR REPLACE FUNCTION sync_site_status()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.status = 'cancelled' THEN
+    UPDATE sites SET status = 'cancelled', updated_at = NOW()
+    WHERE site_id = NEW.site_id;
+  ELSIF NEW.status = 'paused' THEN
+    UPDATE sites SET status = 'suspended', updated_at = NOW()
+    WHERE site_id = NEW.site_id;
+  ELSIF NEW.status = 'active' THEN
+    UPDATE sites SET status = 'published', updated_at = NOW()
+    WHERE site_id = NEW.site_id AND status = 'suspended';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_sync_site_status
+AFTER UPDATE OF status ON subscriptions
+FOR EACH ROW EXECUTE FUNCTION sync_site_status();
+
+
+-- ================================================
+-- 완료
+-- ================================================
