@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { use } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { deploySite as deployAction } from '@/lib/deploy'
 import Link from 'next/link'
 
 const TABS = ['내 사이트', '수정 요청', '요청 현황', '결제']
@@ -112,40 +113,20 @@ export default function CustomerPortal({ params }) {
     }
   }
 
-  async function deploySite() {
+  async function handleDeploy() {
     setDeploying(true)
-    const now = new Date()
-    const trialEnds = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
-    const nextBilling = new Date(trialEnds)
-    nextBilling.setMonth(nextBilling.getMonth() + 1)
-    nextBilling.setDate(1)
-
-    const { error } = await supabase.from('sites')
-      .update({
-        status: 'published', deploy_status: 'live',
-        trial_started_at: now.toISOString(),
-        trial_ends_at: trialEnds.toISOString(),
-        updated_at: now.toISOString(),
-      })
-      .eq('site_id', site.site_id)
+    const { error, trialEndsAt } = await deployAction(site.site_id, site.customer_id, subscription)
 
     if (!error) {
       if (!subscription) {
-        const { data: newSub } = await supabase.from('subscriptions').insert({
-          customer_id: site.customer_id,
-          site_id: site.site_id,
-          amount: 30000, billing_day: 1,
-          payment_method: 'manual', status: 'trial',
-          next_billing_date: nextBilling.toISOString().split('T')[0],
-        }).select().single()
+        // 새로 생성된 구독 조회
+        const { data: newSub } = await supabase.from('subscriptions')
+          .select('*').eq('site_id', site.site_id).maybeSingle()
         setSubscription(newSub)
       } else {
-        await supabase.from('subscriptions')
-          .update({ status: 'trial', next_billing_date: nextBilling.toISOString().split('T')[0] })
-          .eq('site_id', site.site_id)
         setSubscription(prev => ({ ...prev, status: 'trial' }))
       }
-      setSite(prev => ({ ...prev, status: 'published', deploy_status: 'live', trial_ends_at: trialEnds.toISOString() }))
+      setSite(prev => ({ ...prev, status: 'published', deploy_status: 'live', trial_ends_at: trialEndsAt }))
       setShowDeployModal(true)
     }
     setDeploying(false)
@@ -211,36 +192,36 @@ export default function CustomerPortal({ params }) {
       )}
 
       {/* 헤더 */}
-      <div style={{ background: 'white', borderBottom: '1px solid #e5e7eb', padding: '0 32px', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Link href="/my" style={{ fontSize: 12, color: '#9ca3af', textDecoration: 'none' }}>← 내 사이트</Link>
-          <span style={{ color: '#e5e7eb' }}>|</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 7, background: '#111827', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'white', fontWeight: 700 }}>
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-8 py-3 sm:py-0 sm:h-[60px] flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0">
+        <div className="flex items-center gap-3">
+          <Link href="/my" className="text-xs text-gray-400 no-underline">← 내 사이트</Link>
+          <span className="text-gray-200 hidden sm:inline">|</span>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-gray-900 flex items-center justify-center text-xs text-white font-bold">
               {site.name?.charAt(0)}
             </div>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{site.name}</div>
-              <div style={{ fontSize: 11, color: '#9ca3af' }}>{site.subdomain}.myplatform.com</div>
+              <div className="text-[13px] font-bold text-gray-900">{site.name}</div>
+              <div className="text-[11px] text-gray-400">{site.subdomain}.myplatform.com</div>
             </div>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <a href={`/preview/${subdomain}`} target="_blank" style={{ fontSize: 12, color: '#6b7280', textDecoration: 'none', padding: '5px 12px', border: '1px solid #e5e7eb', borderRadius: 6 }}>사이트 보기 →</a>
-          <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, fontWeight: 600, background: site.status === 'published' ? '#22c55e18' : '#f59e0b18', color: site.status === 'published' ? '#16a34a' : '#d97706' }}>
+        <div className="flex items-center gap-2 sm:gap-2.5">
+          <a href={`/preview/${subdomain}`} target="_blank" className="text-xs text-gray-500 no-underline px-3 py-1 border border-gray-200 rounded-md hidden sm:inline-block">사이트 보기 →</a>
+          <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold ${site.status === 'published' ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'}`}>
             {site.status === 'published' ? '● 운영중' : '● ' + site.status}
           </span>
-          <button onClick={handleLogout} style={{ fontSize: 12, color: '#9ca3af', background: 'none', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 12px', cursor: 'pointer' }}>로그아웃</button>
+          <button onClick={handleLogout} className="text-xs text-gray-400 bg-transparent border border-gray-200 rounded-md px-3 py-1 cursor-pointer">로그아웃</button>
         </div>
       </div>
 
-      <div style={{ maxWidth: 800, margin: '0 auto', padding: '32px 20px' }}>
+      <div className="max-w-[800px] mx-auto px-4 sm:px-5 py-6 sm:py-8">
         {/* 탭 */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 28, background: 'white', borderRadius: 10, padding: 4, border: '1px solid #e5e7eb', width: 'fit-content' }}>
+        <div className="flex gap-1 mb-6 sm:mb-7 bg-white rounded-lg p-1 border border-gray-200 w-full sm:w-fit overflow-x-auto">
           {TABS.map((t, i) => (
             <button key={t} onClick={() => setTab(i)} style={{
-              padding: '8px 20px', borderRadius: 7, border: 'none', cursor: 'pointer',
-              fontSize: 13, fontWeight: 600, position: 'relative',
+              padding: '8px 14px', borderRadius: 7, border: 'none', cursor: 'pointer',
+              fontSize: 13, fontWeight: 600, position: 'relative', whiteSpace: 'nowrap',
               background: tab === i ? '#111827' : 'transparent',
               color: tab === i ? 'white' : '#6b7280',
             }}>
@@ -260,7 +241,7 @@ export default function CustomerPortal({ params }) {
             <div style={css.card}>
               <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: '#111827' }}>기본 정보 수정</h3>
               <form onSubmit={saveSiteInfo}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                   {[
                     { key: 'name', label: '사이트명 *', ph: '홍길동 카페', req: true },
                     { key: 'phone', label: '전화번호', ph: '02-0000-0000', req: false },
@@ -320,7 +301,7 @@ export default function CustomerPortal({ params }) {
                     <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 700, color: 'white' }}>🚀 사이트 배포하기</h3>
                     <p style={{ margin: 0, fontSize: 13, color: '#99f6e4' }}>배포하면 누구나 사이트를 볼 수 있어요</p>
                   </div>
-                  <button onClick={deploySite} disabled={deploying}
+                  <button onClick={handleDeploy} disabled={deploying}
                     style={{ padding: '10px 22px', background: 'white', color: '#0f766e', borderRadius: 8, border: 'none', fontSize: 13, fontWeight: 700, cursor: deploying ? 'default' : 'pointer', opacity: deploying ? 0.7 : 1, whiteSpace: 'nowrap', marginLeft: 20 }}>
                     {deploying ? '배포 중...' : '배포하기'}
                   </button>

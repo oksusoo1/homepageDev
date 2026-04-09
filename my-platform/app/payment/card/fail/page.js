@@ -1,7 +1,8 @@
 'use client'
+import { Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
-export default function CardFailPage() {
+function CardFailForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const siteId  = searchParams.get('site_id')
@@ -26,5 +27,13 @@ export default function CardFailPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function CardFailPage() {
+  return (
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#f8f7f4' }} />}>
+      <CardFailForm />
+    </Suspense>
   )
 }

@@ -28,6 +28,7 @@ DROP FUNCTION IF EXISTS sync_site_status() CASCADE;
 
 CREATE TABLE customers (
   customer_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  auth_id       UUID UNIQUE,                       -- FK → auth.users(id)
   email         VARCHAR(200) UNIQUE NOT NULL,
   name          VARCHAR(100) NOT NULL,
   phone         VARCHAR(50),
@@ -90,6 +91,8 @@ CREATE TABLE sites (
                   CHECK (status IN ('draft', 'published', 'suspended', 'cancelled')),
   deploy_status   VARCHAR(20) NOT NULL DEFAULT 'pending'
                   CHECK (deploy_status IN ('pending', 'building', 'live', 'failed')),
+  trial_started_at TIMESTAMP,
+  trial_ends_at    TIMESTAMP,
   created_at      TIMESTAMP DEFAULT NOW(),
   updated_at      TIMESTAMP DEFAULT NOW()
 );
@@ -159,7 +162,7 @@ CREATE TABLE subscriptions (
   payment_method    VARCHAR(20) NOT NULL DEFAULT 'manual'
                     CHECK (payment_method IN ('manual', 'card')),
   status            VARCHAR(20) NOT NULL DEFAULT 'active'
-                    CHECK (status IN ('active', 'paused', 'cancelled')),
+                    CHECK (status IN ('pending', 'trial', 'active', 'paused', 'cancelled')),
   started_at        TIMESTAMP DEFAULT NOW(),
   next_billing_date DATE,
   cancelled_at      TIMESTAMP,
@@ -297,7 +300,7 @@ BEGIN
   ELSIF NEW.status = 'paused' THEN
     UPDATE sites SET status = 'suspended', updated_at = NOW()
     WHERE site_id = NEW.site_id;
-  ELSIF NEW.status = 'active' THEN
+  ELSIF NEW.status IN ('active', 'trial') THEN
     UPDATE sites SET status = 'published', updated_at = NOW()
     WHERE site_id = NEW.site_id AND status = 'suspended';
   END IF;

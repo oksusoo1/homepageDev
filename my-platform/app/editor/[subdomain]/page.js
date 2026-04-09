@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { use } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { deploySite as deployAction } from '@/lib/deploy'
 import Link from 'next/link'
 
 const PRESET_COLORS = ['#1c1917', '#1e3a5f', '#14532d', '#4c1d95', '#7f1d1d', '#0f172a']
@@ -187,6 +188,7 @@ export default function EditorPage({ params }) {
   const [activeSection, setActiveSection] = useState('hero')
   const [activeField, setActiveField] = useState(null)   // 현재 포커스된 필드
   const [previewDevice, setPreviewDevice] = useState('desktop')
+  const [mobileView, setMobileView] = useState('preview') // 'panel' | 'preview' (모바일 전용)
 
   useEffect(() => { init() }, [subdomain])
 
@@ -224,9 +226,15 @@ export default function EditorPage({ params }) {
         bgColor:  saved.hero?.bgColor  ?? '#1c1917',
       },
       sections: {
-        showInfo:  saved.sections?.showInfo  ?? true,
-        showBoard: saved.sections?.showBoard ?? true,
+        showInfo:    saved.sections?.showInfo    ?? true,
+        showBoard:   saved.sections?.showBoard   ?? true,
+        showHours:   saved.sections?.showHours   ?? true,
+        showGallery: saved.sections?.showGallery ?? true,
+        showSns:     saved.sections?.showSns     ?? true,
       },
+      hours: saved.hours || {},
+      sns:   saved.sns   || {},
+      gallery: saved.gallery || [],
     })
 
     setLoading(false)
@@ -256,40 +264,16 @@ export default function EditorPage({ params }) {
     setContent(prev => ({ ...prev, sections: { ...prev.sections, [key]: value } }))
   }
 
-  async function deploySite() {
+  async function handleDeploy() {
     setDeploying(true)
-    const now = new Date()
-    const trialEnds = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
-    const nextBilling = new Date(trialEnds)
-    nextBilling.setMonth(nextBilling.getMonth() + 1)
-    nextBilling.setDate(1)
+    // 기존 구독 조회
+    const { data: existingSub } = await supabase
+      .from('subscriptions').select('subscription_id').eq('site_id', site.site_id).maybeSingle()
 
-    const { error } = await supabase.from('sites')
-      .update({
-        status: 'published', deploy_status: 'live',
-        trial_started_at: now.toISOString(),
-        trial_ends_at: trialEnds.toISOString(),
-        updated_at: now.toISOString(),
-      })
-      .eq('site_id', site.site_id)
+    const { error, trialEndsAt } = await deployAction(site.site_id, site.customer_id, existingSub)
 
     if (!error) {
-      const { data: existingSub } = await supabase
-        .from('subscriptions').select('subscription_id').eq('site_id', site.site_id).maybeSingle()
-      if (!existingSub) {
-        await supabase.from('subscriptions').insert({
-          customer_id: site.customer_id,
-          site_id: site.site_id,
-          amount: 30000, billing_day: 1,
-          payment_method: 'manual', status: 'trial',
-          next_billing_date: nextBilling.toISOString().split('T')[0],
-        })
-      } else {
-        await supabase.from('subscriptions')
-          .update({ status: 'trial', next_billing_date: nextBilling.toISOString().split('T')[0] })
-          .eq('site_id', site.site_id)
-      }
-      setSite(prev => ({ ...prev, status: 'published', deploy_status: 'live' }))
+      setSite(prev => ({ ...prev, status: 'published', deploy_status: 'live', trial_ends_at: trialEndsAt }))
       setShowDeployModal(true)
     }
     setDeploying(false)
@@ -300,6 +284,8 @@ export default function EditorPage({ params }) {
     setActiveField(field)
     if (field.startsWith('hero'))    setActiveSection('hero')
     if (field.startsWith('contact')) setActiveSection('contact')
+    if (field.startsWith('hours'))   setActiveSection('hours')
+    if (field.startsWith('sns'))     setActiveSection('sns')
   }
 
   if (loading || !content) return (
@@ -309,8 +295,10 @@ export default function EditorPage({ params }) {
   )
 
   const NAV_ITEMS = [
-    { id: 'hero',    icon: '🏠', label: '히어로' },
-    { id: 'contact', icon: '📍', label: '연락처' },
+    { id: 'hero',     icon: '🏠', label: '히어로' },
+    { id: 'contact',  icon: '📍', label: '연락처' },
+    { id: 'hours',    icon: '🕐', label: '영업시간' },
+    { id: 'sns',      icon: '🔗', label: 'SNS' },
     { id: 'sections', icon: '👁', label: '섹션' },
   ]
 
@@ -336,30 +324,30 @@ export default function EditorPage({ params }) {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#0f172a', fontFamily: "'Pretendard', -apple-system, sans-serif" }}>
+    <div className="min-h-screen flex flex-col bg-[#0f172a] font-sans">
 
       {/* 배포 완료 모달 */}
       {showDeployModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: 'white', borderRadius: 16, padding: '40px 36px', maxWidth: 420, width: '90%', textAlign: 'center', boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
-            <div style={{ fontSize: 52, marginBottom: 16 }}>🎉</div>
-            <h2 style={{ margin: '0 0 10px', fontSize: 20, fontWeight: 800, color: '#111827' }}>배포 완료!</h2>
-            <p style={{ margin: '0 0 8px', fontSize: 14, color: '#6b7280', lineHeight: 1.7 }}>사이트가 공개되었습니다.</p>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[1000]">
+          <div className="bg-white rounded-2xl p-8 sm:p-10 max-w-[420px] w-[90%] text-center shadow-2xl">
+            <div className="text-5xl mb-4">🎉</div>
+            <h2 className="text-xl font-extrabold text-gray-900 mb-2">배포 완료!</h2>
+            <p className="text-sm text-gray-500 leading-relaxed mb-2">사이트가 공개되었습니다.</p>
             <a href={`/preview/${subdomain}`} target="_blank"
-              style={{ display: 'inline-block', marginBottom: 24, fontSize: 13, color: '#3b82f6', textDecoration: 'none', fontWeight: 600 }}>
+              className="inline-block mb-6 text-[13px] text-blue-500 no-underline font-semibold">
               {subdomain}.myplatform.com →
             </a>
-            <div style={{ background: '#f9fafb', borderRadius: 10, padding: '16px 20px', marginBottom: 24, textAlign: 'left' }}>
-              <p style={{ margin: '0 0 4px', fontSize: 13, fontWeight: 700, color: '#111827' }}>💳 카드를 등록하면 사이트가 계속 유지돼요</p>
-              <p style={{ margin: 0, fontSize: 12, color: '#9ca3af' }}>월 30,000원 · 언제든지 해지 가능</p>
+            <div className="bg-gray-50 rounded-lg p-4 mb-6 text-left">
+              <p className="text-[13px] font-bold text-gray-900 mb-1">💳 카드를 등록하면 사이트가 계속 유지돼요</p>
+              <p className="text-xs text-gray-400 m-0">월 30,000원 · 언제든지 해지 가능</p>
             </div>
-            <div style={{ display: 'flex', gap: 10 }}>
+            <div className="flex gap-2.5">
               <button onClick={() => setShowDeployModal(false)}
-                style={{ flex: 1, padding: '11px 0', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>
+                className="flex-1 py-2.5 bg-white text-gray-500 border border-gray-200 rounded-lg text-[13px] cursor-pointer">
                 나중에
               </button>
               <button onClick={() => { setShowDeployModal(false); router.push(`/payment/card?site_id=${site.site_id}`) }}
-                style={{ flex: 2, padding: '11px 0', background: '#111827', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                className="flex-[2] py-2.5 bg-gray-900 text-white border-none rounded-lg text-[13px] font-bold cursor-pointer">
                 카드 등록하기 →
               </button>
             </div>
@@ -368,22 +356,18 @@ export default function EditorPage({ params }) {
       )}
 
       {/* 상단 툴바 */}
-      <div style={{
-        height: 52, background: '#111827',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0 20px', borderBottom: '1px solid #1f2937', flexShrink: 0,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <Link href={`/my/${subdomain}`} style={{ fontSize: 12, color: '#6b7280', textDecoration: 'none' }}>
+      <div className="h-[52px] bg-[#111827] flex items-center justify-between px-3 sm:px-5 border-b border-[#1f2937] shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3.5">
+          <Link href={`/my/${subdomain}`} className="text-xs text-gray-500 no-underline">
             ← 포털
           </Link>
-          <span style={{ color: '#1f2937' }}>|</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'white' }}>에디터</span>
-          <span style={{ fontSize: 12, color: '#4b5563' }}>{site.name}</span>
+          <span className="text-[#1f2937] hidden sm:inline">|</span>
+          <span className="text-[13px] font-bold text-white hidden sm:inline">에디터</span>
+          <span className="text-xs text-gray-600 hidden sm:inline">{site.name}</span>
         </div>
 
-        {/* 디바이스 전환 */}
-        <div style={{ display: 'flex', background: '#1f2937', borderRadius: 8, padding: 3, gap: 2 }}>
+        {/* 디바이스 전환 — 데스크톱만 */}
+        <div className="hidden md:flex bg-[#1f2937] rounded-lg p-[3px] gap-0.5">
           {[{ id: 'desktop', icon: '🖥', label: 'PC' }, { id: 'mobile', icon: '📱', label: '모바일' }].map(d => (
             <button key={d.id} onClick={() => setPreviewDevice(d.id)} style={{
               padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
@@ -396,51 +380,52 @@ export default function EditorPage({ params }) {
           ))}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="flex items-center gap-1.5 sm:gap-2.5">
           {saveMsg && (
-            <span style={{ fontSize: 12, color: saveMsg.startsWith('✅') ? '#4ade80' : '#f87171' }}>
+            <span className={`text-xs ${saveMsg.startsWith('✅') ? 'text-green-400' : 'text-red-400'}`}>
               {saveMsg}
             </span>
           )}
-          <a href={`/preview/${subdomain}`} target="_blank" style={{
-            fontSize: 12, color: '#9ca3af', textDecoration: 'none',
-            padding: '5px 12px', border: '1px solid #374151', borderRadius: 6,
-          }}>
+          <a href={`/preview/${subdomain}`} target="_blank" className="hidden sm:inline-block text-xs text-gray-400 no-underline px-3 py-1 border border-[#374151] rounded-md">
             실제 사이트 →
           </a>
-          <button onClick={save} disabled={saving} style={{
-            padding: '7px 20px', background: '#374151', color: 'white',
-            border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600,
-            cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.7 : 1,
-          }}>
-            {saving ? '저장 중...' : '저장하기'}
+          <button onClick={save} disabled={saving} className="px-3 sm:px-5 py-1.5 bg-[#374151] text-white border-none rounded-lg text-[13px] font-semibold cursor-pointer disabled:opacity-70">
+            {saving ? '저장 중...' : '저장'}
           </button>
           {site.deploy_status !== 'live' ? (
-            <button onClick={deploySite} disabled={deploying} style={{
-              padding: '7px 20px', background: '#0d9488', color: 'white',
-              border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 700,
-              cursor: deploying ? 'default' : 'pointer', opacity: deploying ? 0.7 : 1,
-            }}>
-              {deploying ? '배포 중...' : '🚀 배포하기'}
+            <button onClick={handleDeploy} disabled={deploying} className="px-3 sm:px-5 py-1.5 bg-teal-600 text-white border-none rounded-lg text-[13px] font-bold cursor-pointer disabled:opacity-70">
+              {deploying ? '배포 중...' : '🚀 배포'}
             </button>
           ) : (
-            <span style={{ fontSize: 12, color: '#4ade80', fontWeight: 600 }}>✅ 배포됨</span>
+            <span className="text-xs text-green-400 font-semibold">✅ 배포됨</span>
           )}
         </div>
       </div>
 
-      {/* 메인 영역 */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      {/* 모바일 뷰 전환 탭 — md 이하에서만 표시 */}
+      <div className="flex md:hidden bg-[#111827] border-b border-[#1f2937]">
+        {[
+          { id: 'panel', label: '편집 패널' },
+          { id: 'preview', label: '미리보기' },
+        ].map(v => (
+          <button key={v.id} onClick={() => setMobileView(v.id)}
+            className={`flex-1 py-2.5 text-[13px] font-semibold border-none cursor-pointer ${
+              mobileView === v.id
+                ? 'bg-[#1e293b] text-blue-400 border-b-2 border-blue-400'
+                : 'bg-transparent text-gray-500'
+            }`}>
+            {v.label}
+          </button>
+        ))}
+      </div>
 
-        {/* 섹션 탭 (아이콘) */}
-        <div style={{
-          width: 56, background: '#111827',
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          paddingTop: 12, gap: 4,
-          borderRight: '1px solid #1f2937', flexShrink: 0,
-        }}>
+      {/* 메인 영역 */}
+      <div className="flex-1 flex overflow-hidden">
+
+        {/* 섹션 탭 (아이콘) — 데스크톱만 */}
+        <div className="hidden md:flex w-14 bg-[#111827] flex-col items-center pt-3 gap-1 border-r border-[#1f2937] shrink-0">
           {NAV_ITEMS.map(item => (
-            <button key={item.id} onClick={() => setActiveSection(item.id)} title={item.label} style={{
+            <button key={item.id} onClick={() => { setActiveSection(item.id); setMobileView('panel') }} title={item.label} style={{
               width: 40, height: 40, borderRadius: 8, border: 'none', cursor: 'pointer',
               fontSize: 18, background: activeSection === item.id ? '#3b82f6' : 'transparent',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
@@ -452,11 +437,20 @@ export default function EditorPage({ params }) {
         </div>
 
         {/* 컨트롤 패널 */}
-        <div style={{
-          width: 280, background: '#111827',
-          borderRight: '1px solid #1f2937',
-          overflow: 'auto', flexShrink: 0,
-        }}>
+        <div className={`${mobileView === 'panel' ? 'flex' : 'hidden'} md:flex w-full md:w-[280px] bg-[#111827] md:border-r md:border-[#1f2937] overflow-auto shrink-0 flex-col`}>
+
+          {/* 모바일 섹션 탭 (가로) */}
+          <div className="flex md:hidden border-b border-[#1f2937]">
+            {NAV_ITEMS.map(item => (
+              <button key={item.id} onClick={() => setActiveSection(item.id)}
+                className={`flex-1 py-2 text-xs font-semibold border-none cursor-pointer ${
+                  activeSection === item.id ? 'bg-blue-600 text-white' : 'bg-transparent text-gray-500'
+                }`}>
+                {item.icon} {item.label}
+              </button>
+            ))}
+          </div>
+
           <div style={{ padding: 20 }}>
 
             {/* 히어로 섹션 컨트롤 */}
@@ -580,6 +574,73 @@ export default function EditorPage({ params }) {
               </>
             )}
 
+            {/* 영업시간 컨트롤 */}
+            {activeSection === 'hours' && (
+              <>
+                <h3 style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700, color: 'white' }}>영업시간</h3>
+                <p style={{ margin: '0 0 20px', fontSize: 12, color: '#6b7280', lineHeight: 1.6 }}>
+                  요일별 영업시간을 입력하세요. 비워두면 표시되지 않아요.
+                </p>
+
+                {[
+                  { key: 'mon', label: '월요일' },
+                  { key: 'tue', label: '화요일' },
+                  { key: 'wed', label: '수요일' },
+                  { key: 'thu', label: '목요일' },
+                  { key: 'fri', label: '금요일' },
+                  { key: 'sat', label: '토요일' },
+                  { key: 'sun', label: '일요일' },
+                ].map(({ key, label }) => (
+                  <div key={key} style={{ marginBottom: 10 }}>
+                    <label style={labelStyle(`hours.${key}`)}>{label}</label>
+                    <input
+                      value={content.hours?.[key] || ''}
+                      onChange={e => setContent(prev => ({
+                        ...prev,
+                        hours: { ...prev.hours, [key]: e.target.value }
+                      }))}
+                      onFocus={() => setActiveField(`hours.${key}`)}
+                      onBlur={() => setActiveField(null)}
+                      placeholder="09:00 - 22:00 또는 휴무"
+                      style={inputStyle(`hours.${key}`)}
+                    />
+                  </div>
+                ))}
+              </>
+            )}
+
+            {/* SNS 링크 컨트롤 */}
+            {activeSection === 'sns' && (
+              <>
+                <h3 style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 700, color: 'white' }}>SNS 링크</h3>
+                <p style={{ margin: '0 0 20px', fontSize: 12, color: '#6b7280', lineHeight: 1.6 }}>
+                  SNS 링크를 입력하면 사이트에 표시돼요.
+                </p>
+
+                {[
+                  { key: 'instagram', label: 'Instagram', icon: '📸', ph: 'https://instagram.com/...' },
+                  { key: 'kakao', label: 'KakaoTalk', icon: '💬', ph: 'https://pf.kakao.com/...' },
+                  { key: 'naver', label: 'Naver Blog', icon: '📝', ph: 'https://blog.naver.com/...' },
+                  { key: 'youtube', label: 'YouTube', icon: '🎬', ph: 'https://youtube.com/...' },
+                ].map(({ key, label, icon, ph }) => (
+                  <div key={key} style={{ marginBottom: 14 }}>
+                    <label style={labelStyle(`sns.${key}`)}>{icon} {label}</label>
+                    <input
+                      value={content.sns?.[key] || ''}
+                      onChange={e => setContent(prev => ({
+                        ...prev,
+                        sns: { ...prev.sns, [key]: e.target.value }
+                      }))}
+                      onFocus={() => setActiveField(`sns.${key}`)}
+                      onBlur={() => setActiveField(null)}
+                      placeholder={ph}
+                      style={inputStyle(`sns.${key}`)}
+                    />
+                  </div>
+                ))}
+              </>
+            )}
+
             {/* 섹션 표시 컨트롤 */}
             {activeSection === 'sections' && (
               <>
@@ -589,8 +650,11 @@ export default function EditorPage({ params }) {
                 </p>
 
                 {[
-                  { key: 'showInfo', label: '연락처 정보 카드', desc: '주소 · 전화 · 이메일 카드' },
-                  { key: 'showBoard', label: '최근 게시물', desc: '게시판 최근 3개 표시' },
+                  { key: 'showInfo',    label: '연락처 정보 카드', desc: '주소 · 전화 · 이메일 카드' },
+                  { key: 'showBoard',   label: '최근 게시물',     desc: '게시판 최근 3개 표시' },
+                  { key: 'showHours',   label: '영업시간',        desc: '요일별 영업시간 표시' },
+                  { key: 'showGallery', label: '갤러리',          desc: '이미지 갤러리 (최대 4장)' },
+                  { key: 'showSns',     label: 'SNS 링크',       desc: '인스타, 카카오, 블로그 등' },
                 ].map(({ key, label, desc }) => (
                   <div key={key} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -627,22 +691,13 @@ export default function EditorPage({ params }) {
         </div>
 
         {/* 미리보기 영역 */}
-        <div style={{
-          flex: 1, overflow: 'auto', background: '#0f172a',
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          padding: '24px 24px 40px',
-        }}>
-          <div style={{ fontSize: 11, color: '#374151', marginBottom: 14, letterSpacing: 1 }}>
+        <div className={`${mobileView === 'preview' ? 'flex' : 'hidden'} md:flex flex-1 overflow-auto bg-[#0f172a] flex-col items-center p-4 md:p-6 pb-10`}>
+          <div className="hidden md:block text-[11px] text-[#374151] mb-3.5 tracking-wider">
             PREVIEW — {previewDevice === 'mobile' ? '모바일 (390px)' : 'PC'}
           </div>
-          <div style={{
-            width: '100%',
+          <div className="w-full rounded-xl overflow-hidden shadow-2xl transition-all duration-200" style={{
             maxWidth: previewDevice === 'mobile' ? 390 : 960,
             background: '#fafaf9',
-            borderRadius: 12,
-            overflow: 'hidden',
-            boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
-            transition: 'max-width 0.2s',
           }}>
             <SitePreview site={site} content={content} contact={contact} activeField={activeField} onFieldClick={handlePreviewFieldClick} />
           </div>

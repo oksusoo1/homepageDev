@@ -42,15 +42,15 @@ export default async function CustomerSitePage({ params }) {
   // 정지된 사이트 안내 페이지
   if (site.status === 'suspended') {
     return (
-      <div style={{ minHeight: '100vh', background: '#f8f7f4', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Pretendard', -apple-system, sans-serif" }}>
-        <div style={{ textAlign: 'center', padding: '40px 20px' }}>
-          <div style={{ fontSize: 56, marginBottom: 20 }}>🔒</div>
-          <h1 style={{ margin: '0 0 12px', fontSize: 24, fontWeight: 800, color: '#111827' }}>사이트 준비 중입니다</h1>
-          <p style={{ margin: '0 0 8px', fontSize: 15, color: '#6b7280', lineHeight: 1.8 }}>
+      <div className="min-h-screen bg-surface flex items-center justify-center font-sans">
+        <div className="text-center px-5 py-10">
+          <div className="text-6xl mb-5">🔒</div>
+          <h1 className="text-2xl font-extrabold text-gray-900 mb-3">사이트 준비 중입니다</h1>
+          <p className="text-[15px] text-gray-500 leading-relaxed mb-2">
             현재 이 사이트는 일시적으로 운영이 중단되었습니다.<br />
             사이트 운영자에게 문의해 주세요.
           </p>
-          <p style={{ margin: '24px 0 0', fontSize: 12, color: '#9ca3af' }}>Powered by MyPlatform</p>
+          <p className="text-xs text-gray-400 mt-6">Powered by MyPlatform</p>
         </div>
       </div>
     )
@@ -60,33 +60,52 @@ export default async function CustomerSitePage({ params }) {
 
   const c = site.content || {}
   const hero = { title: '', subtitle: '', ctaText: '문의하기', bgColor: '#1c1917', ...c.hero }
-  const sections = { showInfo: true, showBoard: true, ...c.sections }
+  const sections = { showInfo: true, showBoard: true, showHours: true, showGallery: true, showSns: true, ...c.sections }
+  const hours = c.hours || null
+  const gallery = c.gallery || []
+  const sns = c.sns || {}
 
   const heroBg = hero.bgColor || '#1c1917'
   const heroTitle = hero.title || site.name
   const heroSubtitle = hero.subtitle || site.description
   const ctaText = hero.ctaText || '문의하기'
 
+  const hasInfo = site.address || site.phone || site.email
+  const hasHours = hours && Object.keys(hours).length > 0
+  const hasGallery = gallery.length > 0
+  const hasSns = Object.values(sns).some(v => v)
+
+  const DAY_LABELS = {
+    mon: '월요일', tue: '화요일', wed: '수요일', thu: '목요일',
+    fri: '금요일', sat: '토요일', sun: '일요일',
+  }
+
+  const SNS_ICONS = {
+    instagram: { label: 'Instagram', icon: '📸' },
+    kakao: { label: 'KakaoTalk', icon: '💬' },
+    naver: { label: 'Naver Blog', icon: '📝' },
+    youtube: { label: 'YouTube', icon: '🎬' },
+  }
+
   return (
-    <div style={{ minHeight: '100vh', background: '#fafaf9', fontFamily: "'Georgia', serif" }}>
+    <div className="min-h-screen bg-[#fafaf9] font-serif">
 
       {/* 헤더 */}
-      <header style={{
-        background: heroBg, color: 'white',
-        padding: '0 40px', height: 64,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: '-0.5px' }}>
+      <header
+        className="flex items-center justify-between px-5 sm:px-10 h-16"
+        style={{ background: heroBg }}
+      >
+        <h1 className="text-lg sm:text-xl font-semibold text-white tracking-tight m-0">
           {site.name}
         </h1>
-        <nav style={{ display: 'flex', gap: 28 }}>
+        <nav className="flex gap-4 sm:gap-7">
           {[
-            { label: '홈',    href: `/preview/${domain}` },
+            { label: '홈', href: `/preview/${domain}` },
             { label: '게시판', href: `/preview/${domain}/board` },
-            { label: '문의',   href: `/preview/${domain}/contact` },
+            { label: '문의', href: `/preview/${domain}/contact` },
           ].map(({ label, href }) => (
             <Link key={label} href={href}
-              style={{ color: '#d6d3d1', textDecoration: 'none', fontSize: 14 }}>
+              className="text-stone-300 no-underline text-xs sm:text-sm">
               {label}
             </Link>
           ))}
@@ -94,51 +113,92 @@ export default async function CustomerSitePage({ params }) {
       </header>
 
       {/* 히어로 */}
-      <section style={{
-        background: `linear-gradient(135deg, ${heroBg} 0%, #292524 60%, #44403c 100%)`,
-        color: 'white', padding: '100px 40px', textAlign: 'center',
-      }}>
-        <div style={{ maxWidth: 640, margin: '0 auto' }}>
-          <p style={{ fontSize: 11, letterSpacing: 4, color: '#a8a29e', marginBottom: 20, textTransform: 'uppercase' }}>
+      <section
+        className="text-white py-16 sm:py-24 md:py-28 px-5 sm:px-10 text-center"
+        style={{ background: `linear-gradient(135deg, ${heroBg} 0%, #292524 60%, #44403c 100%)` }}
+      >
+        <div className="max-w-[640px] mx-auto">
+          <p className="text-[11px] tracking-[4px] text-stone-400 mb-5 uppercase">
             Welcome
           </p>
-          <h2 style={{ fontSize: 44, fontWeight: 700, margin: '0 0 24px', lineHeight: 1.2 }}>
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold leading-tight mb-5 sm:mb-6">
             {heroTitle}
           </h2>
           {heroSubtitle && (
-            <p style={{ fontSize: 16, color: '#d6d3d1', lineHeight: 1.9, margin: '0 0 36px' }}>
+            <p className="text-sm sm:text-base text-stone-300 leading-relaxed mb-8 sm:mb-9">
               {heroSubtitle}
             </p>
           )}
-          <Link href={`/preview/${domain}/contact`} style={{
-            display: 'inline-block', padding: '14px 32px',
-            background: 'white', color: '#1c1917',
-            borderRadius: 8, textDecoration: 'none', fontSize: 14, fontWeight: 600,
-          }}>
+          <Link href={`/preview/${domain}/contact`}
+            className="inline-block px-7 sm:px-8 py-3 sm:py-3.5 bg-white text-stone-900 rounded-lg no-underline text-sm font-semibold">
             {ctaText}
           </Link>
         </div>
       </section>
 
       {/* 정보 카드 */}
-      {sections.showInfo && (
-        <section style={{ maxWidth: 800, margin: '60px auto', padding: '0 20px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
+      {sections.showInfo && hasInfo && (
+        <section className="max-w-[800px] mx-auto mt-12 sm:mt-16 px-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
             {[
-              { icon: '📍', label: '주소',   value: site.address },
-              { icon: '📞', label: '전화',   value: site.phone },
+              { icon: '📍', label: '주소', value: site.address },
+              { icon: '📞', label: '전화', value: site.phone },
               { icon: '✉️', label: '이메일', value: site.email },
             ].map(({ icon, label, value }) => value && (
-              <div key={label} style={{
-                background: 'white', borderRadius: 12, padding: '28px 20px',
-                textAlign: 'center', border: '1px solid #e7e5e4',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-              }}>
-                <div style={{ fontSize: 28, marginBottom: 12 }}>{icon}</div>
-                <div style={{ fontSize: 11, color: '#a8a29e', letterSpacing: 2, marginBottom: 8, textTransform: 'uppercase' }}>
+              <div key={label}
+                className="bg-white rounded-xl p-6 sm:p-7 text-center border border-stone-200 shadow-sm">
+                <div className="text-2xl sm:text-3xl mb-3">{icon}</div>
+                <div className="text-[10px] sm:text-[11px] text-stone-400 tracking-widest mb-2 uppercase">
                   {label}
                 </div>
-                <div style={{ fontSize: 14, color: '#1c1917', fontWeight: 500 }}>{value}</div>
+                <div className="text-sm text-stone-900 font-medium">{value}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 영업시간 */}
+      {sections.showHours && hasHours && (
+        <section className="max-w-[800px] mx-auto mt-12 sm:mt-16 px-5">
+          <h3 className="text-xl sm:text-2xl font-bold text-stone-900 mb-5 sm:mb-6 text-center">
+            영업시간
+          </h3>
+          <div className="bg-white rounded-xl border border-stone-200 shadow-sm overflow-hidden max-w-[480px] mx-auto">
+            {Object.entries(DAY_LABELS).map(([key, label], i, arr) => {
+              const value = hours[key]
+              if (!value) return null
+              const isToday = new Date().getDay() === ([0, 1, 2, 3, 4, 5, 6].indexOf(
+                ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(key)
+              ))
+              return (
+                <div key={key}
+                  className={`flex justify-between items-center px-5 sm:px-6 py-3 sm:py-3.5 text-sm ${
+                    i < arr.length - 1 ? 'border-b border-stone-100' : ''
+                  } ${isToday ? 'bg-stone-50 font-semibold' : ''}`}>
+                  <span className="text-stone-500">{label}</span>
+                  <span className={`${value === '휴무' ? 'text-red-500' : 'text-stone-900'}`}>
+                    {value}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* 갤러리 */}
+      {sections.showGallery && hasGallery && (
+        <section className="max-w-[800px] mx-auto mt-12 sm:mt-16 px-5">
+          <h3 className="text-xl sm:text-2xl font-bold text-stone-900 mb-5 sm:mb-6 text-center">
+            갤러리
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            {gallery.slice(0, 4).map((url, i) => (
+              <div key={i}
+                className="aspect-square rounded-xl overflow-hidden bg-stone-200 border border-stone-200">
+                <img src={url} alt={`갤러리 ${i + 1}`}
+                  className="w-full h-full object-cover" />
               </div>
             ))}
           </div>
@@ -147,28 +207,27 @@ export default async function CustomerSitePage({ params }) {
 
       {/* 최근 게시글 */}
       {sections.showBoard && posts.length > 0 && (
-        <section style={{ maxWidth: 800, margin: '0 auto 80px', padding: '0 20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <h3 style={{ margin: 0, fontSize: 22, color: '#1c1917' }}>최근 공지</h3>
+        <section className="max-w-[800px] mx-auto mt-12 sm:mt-16 mb-16 sm:mb-20 px-5">
+          <div className="flex justify-between items-center mb-5 sm:mb-6">
+            <h3 className="text-xl sm:text-2xl font-bold text-stone-900 m-0">최근 공지</h3>
             <Link href={`/preview/${domain}/board`}
-              style={{ fontSize: 13, color: '#78716c', textDecoration: 'none' }}>
+              className="text-[13px] text-stone-500 no-underline">
               전체보기 →
             </Link>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <div className="flex flex-col">
             {posts.map((post, i) => (
-              <Link key={post.post_id} href={`/preview/${domain}/board/${post.post_id}`} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '20px 24px', background: 'white', textDecoration: 'none', color: '#1c1917',
-                borderRadius: i === 0 ? '12px 12px 0 0' : i === posts.length - 1 ? '0 0 12px 12px' : 0,
-                border: '1px solid #e7e5e4',
-                borderTop: i > 0 ? 'none' : '1px solid #e7e5e4',
-              }}>
+              <Link key={post.post_id} href={`/preview/${domain}/board/${post.post_id}`}
+                className={`flex justify-between items-center px-5 sm:px-6 py-4 sm:py-5 bg-white no-underline text-stone-900 border border-stone-200 ${
+                  i === 0 ? 'rounded-t-xl' : ''
+                } ${i === posts.length - 1 ? 'rounded-b-xl' : ''} ${
+                  i > 0 ? '-mt-px' : ''
+                }`}>
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>{post.title}</div>
-                  <div style={{ fontSize: 12, color: '#a8a29e' }}>{post.author}</div>
+                  <div className="text-sm sm:text-[15px] font-medium mb-1">{post.title}</div>
+                  <div className="text-xs text-stone-400">{post.author}</div>
                 </div>
-                <div style={{ fontSize: 12, color: '#a8a29e' }}>
+                <div className="text-xs text-stone-400 shrink-0 ml-4">
                   {new Date(post.created_at).toLocaleDateString('ko-KR')}
                 </div>
               </Link>
@@ -177,10 +236,35 @@ export default async function CustomerSitePage({ params }) {
         </section>
       )}
 
+      {/* SNS 링크 */}
+      {sections.showSns && hasSns && (
+        <section className="max-w-[800px] mx-auto mb-16 sm:mb-20 px-5 text-center">
+          <h3 className="text-xl sm:text-2xl font-bold text-stone-900 mb-5 sm:mb-6">
+            SNS
+          </h3>
+          <div className="flex justify-center gap-4 sm:gap-5 flex-wrap">
+            {Object.entries(SNS_ICONS).map(([key, { label, icon }]) => {
+              const url = sns[key]
+              if (!url) return null
+              return (
+                <a key={key} href={url} target="_blank" rel="noopener noreferrer"
+                  className="flex flex-col items-center gap-2 px-4 py-3 bg-white rounded-xl border border-stone-200 no-underline shadow-sm hover:shadow-md transition-shadow min-w-[80px]">
+                  <span className="text-2xl">{icon}</span>
+                  <span className="text-xs text-stone-500 font-medium">{label}</span>
+                </a>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
       {/* 푸터 */}
-      <footer style={{ background: heroBg, color: '#78716c', textAlign: 'center', padding: '32px', fontSize: 12 }}>
-        <p style={{ margin: '0 0 6px' }}>© {new Date().getFullYear()} {site.name}</p>
-        <p style={{ margin: 0, fontSize: 11 }}>Powered by MyPlatform</p>
+      <footer
+        className="text-center py-8 px-5 text-xs"
+        style={{ background: heroBg, color: '#78716c' }}
+      >
+        <p className="m-0 mb-1.5">&copy; {new Date().getFullYear()} {site.name}</p>
+        <p className="m-0 text-[11px]">Powered by MyPlatform</p>
       </footer>
     </div>
   )

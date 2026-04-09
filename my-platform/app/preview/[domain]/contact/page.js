@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { use } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
+import SiteHeader from '@/components/SiteHeader'
 
 const CATEGORIES = [
   { value: 'text_change', label: '텍스트 수정' },
@@ -69,19 +70,7 @@ export default function ContactPage({ params }) {
   return (
     <div style={{ minHeight: '100vh', background: '#fafaf9', fontFamily: "'Georgia', serif" }}>
 
-      <header style={{
-        background: '#1c1917', color: 'white', padding: '0 40px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64,
-      }}>
-        <Link href={`/preview/${domain}`} style={{ color: 'white', textDecoration: 'none', fontSize: 20, fontWeight: 600 }}>
-          홈
-        </Link>
-        <nav style={{ display: 'flex', gap: 28 }}>
-          <Link href={`/preview/${domain}`} style={{ color: '#d6d3d1', textDecoration: 'none', fontSize: 14 }}>홈</Link>
-          <Link href={`/preview/${domain}/board`} style={{ color: '#d6d3d1', textDecoration: 'none', fontSize: 14 }}>게시판</Link>
-          <Link href={`/preview/${domain}/contact`} style={{ color: 'white', textDecoration: 'none', fontSize: 14, fontWeight: 600 }}>문의</Link>
-        </nav>
-      </header>
+      <SiteHeader siteName="홈" domain={domain} activePage="contact" />
 
       <div style={{ maxWidth: 640, margin: '0 auto', padding: '60px 20px' }}>
         <h2 style={{ margin: '0 0 8px', fontSize: 28, color: '#1c1917' }}>문의 / 수정 요청</h2>

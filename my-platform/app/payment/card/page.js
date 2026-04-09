@@ -1,12 +1,12 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
 // TODO: 실제 서비스 시 아래 플래그를 false로 변경 후 토스 연동
 const MOCK_MODE = true
 
-export default function CardRegisterPage() {
+function CardRegisterForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const siteId = searchParams.get('site_id')
@@ -70,15 +70,13 @@ export default function CardRegisterPage() {
     const last4 = cardNum.replace(/\s/g, '').slice(-4)
     const mockBillingKey = `MOCK_BILLING_${customer.customer_id}_${Date.now()}`
 
-    console.log('[카드등록] 시작', { customerId: customer.customer_id, last4, siteId })
-
     // 기존 카드 비활성화
     await supabase.from('customer_payment_methods')
       .update({ is_default: false, is_active: false })
       .eq('customer_id', customer.customer_id)
 
     // 새 카드 insert
-    const { data: pmData, error: pmError } = await supabase.from('customer_payment_methods').insert({
+    await supabase.from('customer_payment_methods').insert({
       customer_id:    customer.customer_id,
       pg_provider:    'toss',
       pg_customer_id: mockBillingKey,
@@ -88,17 +86,17 @@ export default function CardRegisterPage() {
       is_default:     true,
       is_active:      true,
     })
-    console.log('[카드등록] customer_payment_methods 결과', { pmData, pmError })
 
-    // 구독 payment_method → 'card' 업데이트
+    // 구독 payment_method → 'card', status → 'active' 업데이트
     if (siteId) {
-      const { data: subData, error: subError } = await supabase.from('subscriptions')
-        .update({ payment_method: 'card', updated_at: new Date().toISOString() })
+      await supabase.from('subscriptions')
+        .update({
+          payment_method: 'card',
+          status: 'active',
+          updated_at: new Date().toISOString(),
+        })
         .eq('site_id', siteId)
-      console.log('[카드등록] subscriptions 업데이트 결과', { subData, subError })
     }
-
-    console.log('[카드등록] 완료 → success 페이지 이동')
     router.push(`/payment/card/success?site_id=${siteId}&mock=true`)
   }
 
@@ -196,5 +194,13 @@ export default function CardRegisterPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+export default function CardRegisterPage() {
+  return (
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#f8f7f4' }} />}>
+      <CardRegisterForm />
+    </Suspense>
   )
 }

@@ -1,3 +1,5 @@
+import './globals.css'
+
 export const metadata = {
   title: 'My Platform',
   description: '노코드 웹빌더 플랫폼',

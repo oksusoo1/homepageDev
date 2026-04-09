@@ -54,11 +54,15 @@ export async function POST(req) {
 
     if (pmError) throw new Error(pmError.message)
 
-    // 구독 payment_method → 'card' 업데이트
+    // 구독 payment_method → 'card', status → 'active' 업데이트
     if (siteId) {
       await supabase
         .from('subscriptions')
-        .update({ payment_method: 'card', updated_at: new Date().toISOString() })
+        .update({
+          payment_method: 'card',
+          status: 'active',
+          updated_at: new Date().toISOString(),
+        })
         .eq('site_id', siteId)
     }
 

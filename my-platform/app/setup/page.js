@@ -114,14 +114,7 @@ function SetupForm() {
 
       if (sErr) throw new Error(sErr.message)
 
-      // subscriptions 생성 (draft 상태로)
-      await supabase.from('subscriptions').insert([{
-        customer_id: customer.customer_id,
-        site_id: site.site_id,
-        amount: 30000,
-        payment_method: 'manual',
-        status: 'pending',
-      }])
+      // 구독은 배포(deploySite) 시 자동 생성됨 — 여기서는 사이트만 생성
 
       // 완료 → 내 사이트로
       router.push('/my?created=1')
