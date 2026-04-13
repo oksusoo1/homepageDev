@@ -18,6 +18,10 @@ function LoginForm() {
   useEffect(() => {
     if (searchParams.get('tab') === 'signup') setTab('signup')
     if (searchParams.get('error') === 'withdrawn') setError('탈퇴한 계정입니다. 이용해 주셔서 감사했습니다.')
+    if (searchParams.get('error') === 'withdraw_pending') {
+      const until = searchParams.get('until')
+      setError(`탈퇴가 신청되었습니다. ${until ? until + '까지' : '구독 만료일까지'} 사이트를 계속 이용하실 수 있습니다.`)
+    }
   }, [searchParams])
 
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })

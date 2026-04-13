@@ -28,6 +28,24 @@ export default function MySitesPage() {
       setLoading(false)
       return
     }
+
+    // withdraw_at이 과거 → 실제 탈퇴 처리
+    if (cust.withdraw_at && new Date(cust.withdraw_at) <= new Date()) {
+      const { data: custSites } = await supabase
+        .from('sites').select('site_id').eq('customer_id', cust.customer_id)
+      if (custSites?.length) {
+        const siteIds = custSites.map(s => s.site_id)
+        await supabase.from('sites').update({ status: 'cancelled' }).in('site_id', siteIds)
+      }
+      await supabase.from('customers')
+        .update({ status: 'withdrawn', withdraw_at: null })
+        .eq('customer_id', cust.customer_id)
+      setCustomer({ ...cust, status: 'withdrawn' })
+      setIsWithdrawn(true)
+      setLoading(false)
+      return
+    }
+
     setCustomer(cust)
 
     const { data: siteList } = await supabase

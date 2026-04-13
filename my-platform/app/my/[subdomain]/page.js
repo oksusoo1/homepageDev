@@ -173,27 +173,51 @@ export default function CustomerPortal({ params }) {
   async function handleWithdraw() {
     if (withdrawInput !== '탈퇴') return
     setWithdrawing(true)
-    // 1. 이 고객의 모든 사이트 조회
+
+    const now = new Date()
     const { data: allSites } = await supabase
       .from('sites').select('site_id').eq('customer_id', customer.customer_id)
-    if (allSites?.length) {
-      const siteIds = allSites.map(s => s.site_id)
-      // 2. 구독 전부 취소
-      await supabase.from('subscriptions')
-        .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancels_at: null })
-        .in('site_id', siteIds)
-      // 3. 사이트 전부 비활성화
-      await supabase.from('sites')
-        .update({ status: 'cancelled' })
-        .in('site_id', siteIds)
+    const siteIds = allSites?.map(s => s.site_id) || []
+
+    const isActiveSubscription =
+      subscription?.status === 'active' &&
+      subscription?.payment_method === 'card' &&
+      subscription?.next_billing_date
+
+    if (isActiveSubscription) {
+      // ── 구독 중 탈퇴: 잔여 기간(next_billing_date) 보장 ──
+      const withdrawAt = new Date(subscription.next_billing_date).toISOString()
+
+      // 구독 pending cancel (cancels_at = next_billing_date)
+      if (siteIds.length) {
+        await supabase.from('subscriptions')
+          .update({ cancelled_at: now.toISOString(), cancels_at: subscription.next_billing_date })
+          .in('site_id', siteIds)
+      }
+      // 고객에 탈퇴 예정일 기록 (status는 active 유지 → 잔여 기간 로그인 가능)
+      await supabase.from('customers')
+        .update({ withdraw_at: withdrawAt })
+        .eq('customer_id', customer.customer_id)
+
+      await supabase.auth.signOut()
+      router.push('/login?error=withdraw_pending&until=' + subscription.next_billing_date)
+    } else {
+      // ── Trial 중 또는 구독 없음: 즉시 탈퇴 ──
+      if (siteIds.length) {
+        await supabase.from('subscriptions')
+          .update({ status: 'cancelled', cancelled_at: now.toISOString(), cancels_at: null })
+          .in('site_id', siteIds)
+        await supabase.from('sites')
+          .update({ status: 'cancelled' })
+          .in('site_id', siteIds)
+      }
+      await supabase.from('customers')
+        .update({ status: 'withdrawn' })
+        .eq('customer_id', customer.customer_id)
+
+      await supabase.auth.signOut()
+      router.push('/login?error=withdrawn')
     }
-    // 4. 고객 탈퇴 처리 (데이터는 보관)
-    await supabase.from('customers')
-      .update({ status: 'withdrawn' })
-      .eq('customer_id', customer.customer_id)
-    // 5. 로그아웃
-    await supabase.auth.signOut()
-    router.push('/login?error=withdrawn')
   }
 
   const css = {
