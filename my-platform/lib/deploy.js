@@ -2,23 +2,33 @@ import { supabase } from '@/lib/supabase'
 
 /**
  * 사이트 배포 처리
- * - sites.status → published, deploy_status → live
- * - trial 14일 설정
- * - 구독 자동 생성 또는 trial로 업데이트
+ * - trial 최초 1회만 제공 (site.trial_started_at 기준)
+ * - trial 재사용 시: 배포만 처리, 카드 등록 요구 (requireCard: true)
  *
- * @param {string} siteId - site UUID
- * @param {string} customerId - customer UUID
- * @param {object|null} existingSubscription - 기존 구독 (없으면 null)
- * @returns {{ error: string|null, trialEndsAt: string|null }}
+ * @param {string} siteId
+ * @param {string} customerId
+ * @param {object|null} existingSubscription
+ * @param {object} site - sites 행 (trial_started_at 확인용)
+ * @returns {{ error: string|null, trialEndsAt: string|null, requireCard: boolean }}
  */
-export async function deploySite(siteId, customerId, existingSubscription) {
+export async function deploySite(siteId, customerId, existingSubscription, site) {
   const now = new Date()
+  const trialAlreadyUsed = !!site?.trial_started_at
+
+  // ── Trial 재사용 불가: 배포만 처리 ──
+  if (trialAlreadyUsed) {
+    const { error: siteError } = await supabase.from('sites')
+      .update({ status: 'published', deploy_status: 'live', updated_at: now.toISOString() })
+      .eq('site_id', siteId)
+    if (siteError) return { error: siteError.message, trialEndsAt: null, requireCard: false }
+    return { error: null, trialEndsAt: null, requireCard: true }
+  }
+
+  // ── 최초 배포: trial 14일 설정 ──
   const trialEnds = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
   const nextBilling = new Date(trialEnds)
   nextBilling.setMonth(nextBilling.getMonth() + 1)
-  nextBilling.setDate(1)
 
-  // 1. 사이트 상태 업데이트
   const { error: siteError } = await supabase.from('sites')
     .update({
       status: 'published',
@@ -29,9 +39,8 @@ export async function deploySite(siteId, customerId, existingSubscription) {
     })
     .eq('site_id', siteId)
 
-  if (siteError) return { error: siteError.message, trialEndsAt: null }
+  if (siteError) return { error: siteError.message, trialEndsAt: null, requireCard: false }
 
-  // 2. 구독 생성 또는 업데이트
   if (!existingSubscription) {
     const { error: subError } = await supabase.from('subscriptions').insert({
       customer_id: customerId,
@@ -42,16 +51,13 @@ export async function deploySite(siteId, customerId, existingSubscription) {
       status: 'trial',
       next_billing_date: nextBilling.toISOString().split('T')[0],
     })
-    if (subError) return { error: subError.message, trialEndsAt: null }
+    if (subError) return { error: subError.message, trialEndsAt: null, requireCard: false }
   } else {
     const { error: subError } = await supabase.from('subscriptions')
-      .update({
-        status: 'trial',
-        next_billing_date: nextBilling.toISOString().split('T')[0],
-      })
+      .update({ status: 'trial', next_billing_date: nextBilling.toISOString().split('T')[0] })
       .eq('site_id', siteId)
-    if (subError) return { error: subError.message, trialEndsAt: null }
+    if (subError) return { error: subError.message, trialEndsAt: null, requireCard: false }
   }
 
-  return { error: null, trialEndsAt: trialEnds.toISOString() }
+  return { error: null, trialEndsAt: trialEnds.toISOString(), requireCard: false }
 }

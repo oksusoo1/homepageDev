@@ -33,6 +33,9 @@ export default function CustomerPortal({ params }) {
   const [billingHistory, setBillingHistory] = useState([])
   const [saveMsg, setSaveMsg] = useState('')
   const [ticketMsg, setTicketMsg] = useState('')
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false)
+  const [withdrawInput, setWithdrawInput] = useState('')
+  const [withdrawing, setWithdrawing] = useState(false)
   const [siteForm, setSiteForm] = useState({ name: '', description: '', address: '', phone: '', email: '' })
   const [ticketForm, setTicketForm] = useState({ title: '', content: '', category: 'etc' })
 
@@ -45,6 +48,10 @@ export default function CustomerPortal({ params }) {
     const { data: cust } = await supabase
       .from('customers').select('*').eq('auth_id', user.id).single()
     if (!cust) { router.push('/login'); return }
+    if (cust.status === 'withdrawn') {
+      router.push('/my')  // /my 에서 재활성화 UI 처리
+      return
+    }
     setCustomer(cust)
 
     const { data: siteData } = await supabase
@@ -115,26 +122,78 @@ export default function CustomerPortal({ params }) {
 
   async function handleDeploy() {
     setDeploying(true)
-    const { error, trialEndsAt } = await deployAction(site.site_id, site.customer_id, subscription)
+    const { error, trialEndsAt, requireCard } = await deployAction(site.site_id, site.customer_id, subscription, site)
 
     if (!error) {
-      if (!subscription) {
-        // 새로 생성된 구독 조회
-        const { data: newSub } = await supabase.from('subscriptions')
-          .select('*').eq('site_id', site.site_id).maybeSingle()
-        setSubscription(newSub)
-      } else {
-        setSubscription(prev => ({ ...prev, status: 'trial' }))
-      }
       setSite(prev => ({ ...prev, status: 'published', deploy_status: 'live', trial_ends_at: trialEndsAt }))
-      setShowDeployModal(true)
+      if (requireCard) {
+        // trial 이미 사용 → 즉시 카드 등록 페이지로
+        router.push(`/payment/card?site_id=${site.site_id}`)
+      } else {
+        if (!subscription) {
+          const { data: newSub } = await supabase.from('subscriptions')
+            .select('*').eq('site_id', site.site_id).maybeSingle()
+          setSubscription(newSub)
+        } else {
+          setSubscription(prev => ({ ...prev, status: 'trial' }))
+        }
+        setShowDeployModal(true)
+      }
     }
     setDeploying(false)
+  }
+
+  async function handleCancelSubscription() {
+    if (!subscription) return
+    if (!window.confirm('구독을 해지하시겠습니까?\n남은 기간까지는 계속 이용하실 수 있습니다.')) return
+    const { error } = await supabase.from('subscriptions').update({
+      cancelled_at: new Date().toISOString(),
+      cancels_at: subscription.next_billing_date,
+    }).eq('subscription_id', subscription.subscription_id)
+    if (!error) setSubscription(prev => ({
+      ...prev,
+      cancelled_at: new Date().toISOString(),
+      cancels_at: subscription.next_billing_date,
+    }))
+  }
+
+  async function handleReinstate() {
+    const { error } = await supabase.from('subscriptions').update({
+      cancelled_at: null,
+      cancels_at: null,
+    }).eq('subscription_id', subscription.subscription_id)
+    if (!error) setSubscription(prev => ({ ...prev, cancelled_at: null, cancels_at: null }))
   }
 
   async function handleLogout() {
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  async function handleWithdraw() {
+    if (withdrawInput !== '탈퇴') return
+    setWithdrawing(true)
+    // 1. 이 고객의 모든 사이트 조회
+    const { data: allSites } = await supabase
+      .from('sites').select('site_id').eq('customer_id', customer.customer_id)
+    if (allSites?.length) {
+      const siteIds = allSites.map(s => s.site_id)
+      // 2. 구독 전부 취소
+      await supabase.from('subscriptions')
+        .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancels_at: null })
+        .in('site_id', siteIds)
+      // 3. 사이트 전부 비활성화
+      await supabase.from('sites')
+        .update({ status: 'cancelled' })
+        .in('site_id', siteIds)
+    }
+    // 4. 고객 탈퇴 처리 (데이터는 보관)
+    await supabase.from('customers')
+      .update({ status: 'withdrawn' })
+      .eq('customer_id', customer.customer_id)
+    // 5. 로그아웃
+    await supabase.auth.signOut()
+    router.push('/login?error=withdrawn')
   }
 
   const css = {
@@ -157,6 +216,39 @@ export default function CustomerPortal({ params }) {
 
   return (
     <div style={css.page}>
+
+      {/* 회원탈퇴 확인 모달 */}
+      {showWithdrawModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: 'white', borderRadius: 16, padding: '36px 32px', maxWidth: 400, width: '90%' }}>
+            <div style={{ fontSize: 36, marginBottom: 12, textAlign: 'center' }}>⚠️</div>
+            <h2 style={{ margin: '0 0 10px', fontSize: 18, fontWeight: 800, color: '#111827', textAlign: 'center' }}>정말 탈퇴하시겠습니까?</h2>
+            <p style={{ margin: '0 0 20px', fontSize: 13, color: '#6b7280', lineHeight: 1.7, textAlign: 'center' }}>
+              모든 사이트가 즉시 비활성화됩니다.<br />
+              데이터는 보관되며 재가입은 현재 지원되지 않습니다.
+            </p>
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 14px', marginBottom: 20, fontSize: 13, color: '#991b1b' }}>
+              아래 입력란에 <b>탈퇴</b>를 입력하면 탈퇴가 진행됩니다.
+            </div>
+            <input
+              value={withdrawInput}
+              onChange={e => setWithdrawInput(e.target.value)}
+              placeholder="탈퇴"
+              style={{ width: '100%', padding: '10px 14px', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 15, outline: 'none', boxSizing: 'border-box', marginBottom: 16 }}
+            />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => { setShowWithdrawModal(false); setWithdrawInput('') }}
+                style={{ flex: 1, padding: '11px 0', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 14, cursor: 'pointer' }}>
+                취소
+              </button>
+              <button onClick={handleWithdraw} disabled={withdrawInput !== '탈퇴' || withdrawing}
+                style={{ flex: 1, padding: '11px 0', background: withdrawInput === '탈퇴' ? '#ef4444' : '#f3f4f6', color: withdrawInput === '탈퇴' ? 'white' : '#9ca3af', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: withdrawInput === '탈퇴' ? 'pointer' : 'default' }}>
+                {withdrawing ? '처리 중...' : '탈퇴하기'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 배포 완료 모달 */}
       {showDeployModal && (
@@ -371,19 +463,24 @@ export default function CustomerPortal({ params }) {
               <h3 style={{ margin: '0 0 18px', fontSize: 15, fontWeight: 700, color: '#111827' }}>구독 현황</h3>
               {subscription ? (() => {
                 const isTrial = subscription.status === 'trial'
+                const isPendingCancel = !!subscription.cancelled_at && !!subscription.cancels_at && subscription.status !== 'cancelled'
+                const isCancelled = subscription.status === 'cancelled'
                 const trialDaysLeft = site?.trial_ends_at
                   ? Math.ceil((new Date(site.trial_ends_at) - new Date()) / (1000 * 60 * 60 * 24))
                   : null
                 const statusText =
-                  subscription.status === 'trial'   ? `🟡 무료 체험중` :
-                  subscription.status === 'active'  ? '🟢 이용중' :
-                  subscription.status === 'paused'  ? '🟠 일시정지' : '⛔ 해지됨'
+                  isPendingCancel                     ? '🔴 해지 예정' :
+                  isCancelled                         ? '⛔ 해지됨' :
+                  subscription.status === 'trial'     ? '🟡 무료 체험중' :
+                  subscription.status === 'active'    ? '🟢 이용중' :
+                  subscription.status === 'paused'    ? '🟠 일시정지' : '-'
                 const rows = [
                   { label: '구독 상태', value: statusText },
-                  ...(isTrial && trialDaysLeft !== null ? [{ label: '체험 만료일', value: `${new Date(site.trial_ends_at).toLocaleDateString('ko-KR')} (D-${trialDaysLeft > 0 ? trialDaysLeft : 0})` }] : []),
+                  ...(isTrial && trialDaysLeft !== null ? [{ label: '체험 만료일', value: `${new Date(site.trial_ends_at).toLocaleDateString('ko-KR')} (D-${Math.max(trialDaysLeft, 0)})` }] : []),
+                  ...(isPendingCancel ? [{ label: '해지 적용일', value: `${new Date(subscription.cancels_at).toLocaleDateString('ko-KR')} (이날까지 이용 가능)` }] : []),
                   { label: '월 구독료', value: `${subscription.amount.toLocaleString()}원` },
                   { label: '결제 방식', value: subscription.payment_method === 'card' ? '💳 카드 자동결제' : '수동 결제' },
-                  { label: '다음 결제일', value: subscription.next_billing_date ? new Date(subscription.next_billing_date).toLocaleDateString('ko-KR') : '-' },
+                  ...(!isCancelled ? [{ label: '다음 결제일', value: subscription.next_billing_date ? new Date(subscription.next_billing_date).toLocaleDateString('ko-KR') : '-' }] : []),
                 ]
                 return (
                   <>
@@ -392,12 +489,43 @@ export default function CustomerPortal({ params }) {
                         ⏳ 무료 체험 기간입니다. 체험 종료 후 카드 등록 시 자동 구독 전환됩니다.
                       </div>
                     )}
+                    {isPendingCancel && (
+                      <div style={{ background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#be123c' }}>
+                        🔴 해지가 예약되었습니다. {new Date(subscription.cancels_at).toLocaleDateString('ko-KR')}까지 이용하실 수 있습니다.
+                      </div>
+                    )}
+                    {isCancelled && (
+                      <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#6b7280' }}>
+                        ⛔ 구독이 해지되었습니다. 재구독하면 사이트가 다시 활성화됩니다.
+                      </div>
+                    )}
                     {rows.map(({ label, value }, i) => (
                       <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 0', fontSize: 13, borderBottom: i < rows.length - 1 ? '1px solid #f3f4f6' : 'none' }}>
                         <span style={{ color: '#6b7280' }}>{label}</span>
                         <span style={{ color: '#111827', fontWeight: 600 }}>{value}</span>
                       </div>
                     ))}
+                    {/* 해지 / 철회 / 재구독 버튼 */}
+                    <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid #f3f4f6', display: 'flex', justifyContent: 'flex-end' }}>
+                      {!isCancelled && !isPendingCancel && subscription.status === 'active' && (
+                        <button onClick={handleCancelSubscription}
+                          style={{ fontSize: 12, color: '#ef4444', background: 'none', border: '1px solid #fecaca', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}>
+                          구독 해지
+                        </button>
+                      )}
+                      {isPendingCancel && (
+                        <button onClick={handleReinstate}
+                          style={{ fontSize: 12, color: '#16a34a', background: 'none', border: '1px solid #bbf7d0', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}>
+                          해지 철회하기
+                        </button>
+                      )}
+                      {isCancelled && (
+                        <button onClick={() => router.push(`/payment/card?site_id=${site.site_id}`)}
+                          style={{ fontSize: 12, color: 'white', background: '#111827', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontWeight: 600 }}>
+                          재구독하기 →
+                        </button>
+                      )}
+                    </div>
                   </>
                 )
               })() : (
@@ -435,6 +563,18 @@ export default function CustomerPortal({ params }) {
                   </button>
                 </div>
               )}
+            </div>
+
+            {/* 회원 탈퇴 */}
+            <div style={{ ...css.card, border: '1px solid #fee2e2' }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700, color: '#374151' }}>회원 탈퇴</h3>
+              <p style={{ margin: '0 0 16px', fontSize: 13, color: '#9ca3af', lineHeight: 1.6 }}>
+                탈퇴 시 모든 사이트가 즉시 비활성화됩니다. 고객 데이터는 보관됩니다.
+              </p>
+              <button onClick={() => setShowWithdrawModal(true)}
+                style={{ fontSize: 13, color: '#ef4444', background: 'none', border: '1px solid #fecaca', borderRadius: 7, padding: '7px 16px', cursor: 'pointer' }}>
+                회원 탈퇴
+              </button>
             </div>
 
             {/* 결제 내역 */}

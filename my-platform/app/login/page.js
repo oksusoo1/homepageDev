@@ -17,6 +17,7 @@ function LoginForm() {
   // URL 파라미터로 탭 초기값 설정 (?tab=signup 이면 회원가입 탭으로)
   useEffect(() => {
     if (searchParams.get('tab') === 'signup') setTab('signup')
+    if (searchParams.get('error') === 'withdrawn') setError('탈퇴한 계정입니다. 이용해 주셔서 감사했습니다.')
   }, [searchParams])
 
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })

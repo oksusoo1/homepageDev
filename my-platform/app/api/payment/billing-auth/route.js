@@ -54,16 +54,71 @@ export async function POST(req) {
 
     if (pmError) throw new Error(pmError.message)
 
-    // 구독 payment_method → 'card', status → 'active' 업데이트
+    // 구독 조회
+    let sub = null
     if (siteId) {
-      await supabase
+      const { data } = await supabase
         .from('subscriptions')
-        .update({
-          payment_method: 'card',
-          status: 'active',
-          updated_at: new Date().toISOString(),
-        })
+        .select('subscription_id, next_billing_date, cancelled_at')
         .eq('site_id', siteId)
+        .maybeSingle()
+      sub = data
+    }
+
+    // 즉시 결제 청구 (토스 빌링 API)
+    // next_billing_date는 deploy 시 trial_ends + 1달로 설정된 값 유지
+    const now = new Date()
+    const orderId = `order_${siteId}_${now.getTime()}`
+    const chargeRes = await fetch(`https://api.tosspayments.com/v1/billing/${billingKey}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${encoded}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        customerKey,
+        amount: 30000,
+        orderId,
+        orderName: '홈페이지 월 구독료',
+      }),
+    })
+    const chargeData = await chargeRes.json()
+    if (!chargeRes.ok) {
+      return NextResponse.json({ error: chargeData.message || '즉시 결제 실패' }, { status: 400 })
+    }
+
+    // 구독 업데이트 (재구독 시 cancelled_at/cancels_at 리셋 + next_billing_date 갱신)
+    const isResubscription = !!sub?.cancelled_at
+    const newNextBillingDate = (() => { const d = new Date(now); d.setMonth(d.getMonth() + 1); return d.toISOString().split('T')[0] })()
+
+    if (siteId) {
+      await supabase.from('subscriptions').update({
+        payment_method: 'card',
+        status: 'active',
+        cancelled_at: null,
+        cancels_at: null,
+        updated_at: now.toISOString(),
+        ...(isResubscription && { next_billing_date: newNextBillingDate }),
+      }).eq('site_id', siteId)
+
+      // 재구독 시 사이트도 published로 복원
+      if (isResubscription) {
+        await supabase.from('sites').update({ status: 'published', deploy_status: 'live' }).eq('site_id', siteId)
+      }
+    }
+
+    // billing_history — 이번 달 즉시 결제 'paid' 기록
+    if (sub?.subscription_id) {
+      const period = now.toISOString().slice(0, 7)
+      await supabase.from('billing_history').insert({
+        subscription_id: sub.subscription_id,
+        period,
+        amount: 30000,
+        status: 'paid',
+        payment_method: 'card',
+        paid_at: now.toISOString(),
+        pg_transaction_id: chargeData.paymentKey || null,
+      })
     }
 
     return NextResponse.json({

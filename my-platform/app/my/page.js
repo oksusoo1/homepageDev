@@ -9,6 +9,8 @@ export default function MySitesPage() {
   const [customer, setCustomer] = useState(null)
   const [sites, setSites] = useState([])
   const [loading, setLoading] = useState(true)
+  const [isWithdrawn, setIsWithdrawn] = useState(false)
+  const [reactivating, setReactivating] = useState(false)
 
   useEffect(() => { checkAuth() }, [])
 
@@ -19,6 +21,13 @@ export default function MySitesPage() {
     const { data: cust } = await supabase
       .from('customers').select('*').eq('auth_id', user.id).single()
     if (!cust) { router.push('/login'); return }
+
+    if (cust.status === 'withdrawn') {
+      setCustomer(cust)
+      setIsWithdrawn(true)
+      setLoading(false)
+      return
+    }
     setCustomer(cust)
 
     const { data: siteList } = await supabase
@@ -33,6 +42,22 @@ export default function MySitesPage() {
   async function handleLogout() {
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  async function handleReactivate() {
+    setReactivating(true)
+    await supabase.from('customers')
+      .update({ status: 'active' })
+      .eq('customer_id', customer.customer_id)
+    setIsWithdrawn(false)
+    setReactivating(false)
+    // 사이트 목록 다시 로드
+    const { data: siteList } = await supabase
+      .from('sites')
+      .select('*, subscriptions(status, amount, next_billing_date)')
+      .eq('customer_id', customer.customer_id)
+      .order('created_at', { ascending: false })
+    setSites(siteList || [])
   }
 
   const STATUS_COLOR = {
@@ -68,6 +93,39 @@ export default function MySitesPage() {
       background: '#f8f7f4', fontFamily: "'Pretendard', 'Apple SD Gothic Neo', -apple-system, sans-serif",
     }}>
       <div style={{ color: '#9ca3af', fontSize: 14 }}>로딩 중...</div>
+    </div>
+  )
+
+  if (isWithdrawn) return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: '#f8f7f4', fontFamily: "'Pretendard', 'Apple SD Gothic Neo', -apple-system, sans-serif",
+      padding: 20,
+    }}>
+      <div style={{ background: 'white', borderRadius: 16, padding: '48px 36px', maxWidth: 400, width: '100%', textAlign: 'center', boxShadow: '0 4px 24px rgba(0,0,0,0.06)' }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>👋</div>
+        <h2 style={{ margin: '0 0 10px', fontSize: 20, fontWeight: 800, color: '#111827' }}>다시 돌아오셨군요!</h2>
+        <p style={{ margin: '0 0 8px', fontSize: 14, color: '#6b7280', lineHeight: 1.7 }}>
+          {customer?.name}님의 계정이 탈퇴 상태입니다.<br />
+          재활성화하면 기존 사이트 데이터를 그대로 이용할 수 있어요.
+        </p>
+        <p style={{ margin: '0 0 28px', fontSize: 12, color: '#9ca3af' }}>
+          (기존 사이트는 해지 상태로 보관되어 있으며, 재구독 후 다시 운영할 수 있습니다)
+        </p>
+        <button onClick={handleReactivate} disabled={reactivating} style={{
+          width: '100%', padding: '13px 0', background: reactivating ? '#9ca3af' : '#111827',
+          color: 'white', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 700,
+          cursor: reactivating ? 'default' : 'pointer', marginBottom: 10,
+        }}>
+          {reactivating ? '처리 중...' : '계정 재활성화하기'}
+        </button>
+        <button onClick={handleLogout} style={{
+          width: '100%', padding: '12px 0', background: 'white', color: '#9ca3af',
+          border: '1px solid #e5e7eb', borderRadius: 10, fontSize: 14, cursor: 'pointer',
+        }}>
+          로그아웃
+        </button>
+      </div>
     </div>
   )
 

@@ -87,15 +87,43 @@ function CardRegisterForm() {
       is_active:      true,
     })
 
-    // 구독 payment_method → 'card', status → 'active' 업데이트
+    // 구독 업데이트 (재구독 여부에 따라 next_billing_date 갱신)
     if (siteId) {
-      await supabase.from('subscriptions')
-        .update({
+      const { data: sub } = await supabase
+        .from('subscriptions').select('subscription_id, cancelled_at').eq('site_id', siteId).maybeSingle()
+
+      const isResubscription = !!sub?.cancelled_at
+      const now = new Date()
+      const newNextBillingDate = (() => { const d = new Date(now); d.setMonth(d.getMonth() + 1); return d.toISOString().split('T')[0] })()
+
+      await supabase.from('subscriptions').update({
+        payment_method: 'card',
+        status: 'active',
+        cancelled_at: null,
+        cancels_at: null,
+        updated_at: now.toISOString(),
+        // 재구독이면 next_billing_date를 오늘+1달로 갱신, 첫 카드등록은 trial 기준 유지
+        ...(isResubscription && { next_billing_date: newNextBillingDate }),
+      }).eq('site_id', siteId)
+
+      // 재구독 시 사이트도 다시 published로
+      if (isResubscription) {
+        await supabase.from('sites').update({ status: 'published', deploy_status: 'live' }).eq('site_id', siteId)
+      }
+
+      // 즉시 결제 처리 — billing_history에 이번 달 'paid' 레코드 생성
+      if (sub?.subscription_id) {
+        const period = now.toISOString().slice(0, 7) // 'YYYY-MM'
+        await supabase.from('billing_history').insert({
+          subscription_id: sub.subscription_id,
+          period,
+          amount: 30000,
+          status: 'paid',
           payment_method: 'card',
-          status: 'active',
-          updated_at: new Date().toISOString(),
+          paid_at: now.toISOString(),
+          note: '[MOCK] 카드 등록 즉시 결제',
         })
-        .eq('site_id', siteId)
+      }
     }
     router.push(`/payment/card/success?site_id=${siteId}&mock=true`)
   }
