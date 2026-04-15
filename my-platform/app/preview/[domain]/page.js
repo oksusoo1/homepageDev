@@ -12,15 +12,34 @@ async function getSite(domain) {
     .eq('domain', domain)
     .neq('status', 'cancelled')
     .single()
-  if (data) return data
+  if (!data) {
+    // 서브도메인으로 조회
+    ;({ data } = await supabase
+      .from('sites')
+      .select('*')
+      .eq('subdomain', subdomain)
+      .neq('status', 'cancelled')
+      .single())
+  }
+  if (!data) return null
 
-  // 서브도메인으로 조회
-  ;({ data } = await supabase
-    .from('sites')
-    .select('*')
-    .eq('subdomain', subdomain)
-    .neq('status', 'cancelled')
-    .single())
+  // cancels_at 만료 체크 — 방문 시 자동 처리
+  const { data: sub } = await supabase
+    .from('subscriptions')
+    .select('subscription_id, cancels_at, status')
+    .eq('site_id', data.site_id)
+    .maybeSingle()
+
+  if (sub?.cancels_at && new Date(sub.cancels_at) <= new Date() && sub.status !== 'cancelled') {
+    await supabase.from('subscriptions')
+      .update({ status: 'cancelled' })
+      .eq('subscription_id', sub.subscription_id)
+    await supabase.from('sites')
+      .update({ status: 'suspended', updated_at: new Date().toISOString() })
+      .eq('site_id', data.site_id)
+    return { ...data, status: 'suspended' }
+  }
+
   return data
 }
 

@@ -140,6 +140,32 @@ export default function AdminConsole() {
     fetchAll()
   }
 
+  // 만료된 구독 일괄 처리: cancels_at 지났는데 아직 active인 구독 → cancelled
+  async function handleProcessExpired() {
+    const now = new Date().toISOString()
+
+    // 조건: 해지 예정일 경과 + 아직 cancelled 아님 + 해지 예약 있음
+    const { data: expired } = await supabase
+      .from('subscriptions')
+      .select('subscription_id, site_id')
+      .lt('cancels_at', now)
+      .neq('status', 'cancelled')
+      .not('cancels_at', 'is', null)
+
+    if (!expired?.length) { setMessage('만료된 구독이 없습니다.'); return }
+
+    for (const sub of expired) {
+      await supabase.from('subscriptions')
+        .update({ status: 'cancelled' })
+        .eq('subscription_id', sub.subscription_id)
+      await supabase.from('sites')
+        .update({ status: 'cancelled', updated_at: now })
+        .eq('site_id', sub.site_id)
+    }
+    setMessage(`✅ ${expired.length}건 처리 완료`)
+    fetchAll()
+  }
+
   async function markBillingPaid(subId, amount, period) {
     const { data: existing } = await supabase
       .from('billing_history')
@@ -481,13 +507,20 @@ export default function AdminConsole() {
         {/* ── 탭 1: 구독 현황 ── */}
         {tab === 1 && (
           <div style={css.card}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
-              구독 현황 — 이번달 예상 ₩{(activeSubCount * 30000).toLocaleString()}
-            </h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
+                구독 현황 — 이번달 예상 ₩{(activeSubCount * 30000).toLocaleString()}
+              </h3>
+              {/* 해지 예정일 지난 구독 일괄 cancelled 처리 */}
+              <button onClick={handleProcessExpired}
+                style={{ fontSize: 12, padding: '6px 14px', background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
+                만료 구독 처리
+              </button>
+            </div>
             <div className="overflow-x-auto -mx-6 px-6">
             <table style={css.table}>
               <thead>
-                <tr>{['고객', '사이트', '월 구독료', '결제방식', '다음 청구일', '상태', '이번달 납부'].map(h =>
+                <tr>{['고객', '사이트', '월 구독료', '결제방식', '다음 청구일', '상태', '서비스 종료일', '이번달 납부'].map(h =>
                   <th key={h} style={{ ...css.th, whiteSpace: 'nowrap' }}>{h}</th>)}
                 </tr>
               </thead>
@@ -501,9 +534,13 @@ export default function AdminConsole() {
                       {badge(sub.payment_method === 'card' ? '#22c55e' : '#f59e0b',
                         sub.payment_method === 'card' ? '카드' : '수동')}
                     </td>
-                    <td style={css.td}>{sub.next_billing_date}</td>
+                    <td style={css.td}>{sub.next_billing_date || '-'}</td>
                     <td style={css.td}>
-                      {badge(sub.status === 'active' ? '#22c55e' : '#ef4444', sub.status)}
+                      {badge(sub.status === 'active' ? '#22c55e' : sub.status === 'trial' ? '#f59e0b' : '#6b7280', sub.status)}
+                    </td>
+                    {/* 해지 예약된 경우 cancels_at 표시, 아니면 - */}
+                    <td style={{ ...css.td, color: sub.cancels_at ? '#ef4444' : '#475569' }}>
+                      {sub.cancels_at ? new Date(sub.cancels_at).toLocaleDateString('ko-KR') : '-'}
                     </td>
                     <td style={css.td}>
                       {btn('#16a34a', '납부 확인', () => markBillingPaid(sub.subscription_id, sub.amount, currentPeriod))}

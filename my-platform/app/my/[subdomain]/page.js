@@ -149,11 +149,13 @@ export default function CustomerPortal({ params }) {
     const { error } = await supabase.from('subscriptions').update({
       cancelled_at: new Date().toISOString(),
       cancels_at: subscription.next_billing_date,
+      next_billing_date: null,
     }).eq('subscription_id', subscription.subscription_id)
     if (!error) setSubscription(prev => ({
       ...prev,
       cancelled_at: new Date().toISOString(),
       cancels_at: subscription.next_billing_date,
+      next_billing_date: null,
     }))
   }
 
@@ -504,7 +506,7 @@ export default function CustomerPortal({ params }) {
                   ...(isPendingCancel ? [{ label: '해지 적용일', value: `${new Date(subscription.cancels_at).toLocaleDateString('ko-KR')} (이날까지 이용 가능)` }] : []),
                   { label: '월 구독료', value: `${subscription.amount.toLocaleString()}원` },
                   { label: '결제 방식', value: subscription.payment_method === 'card' ? '💳 카드 자동결제' : '수동 결제' },
-                  ...(!isCancelled ? [{ label: '다음 결제일', value: subscription.next_billing_date ? new Date(subscription.next_billing_date).toLocaleDateString('ko-KR') : '-' }] : []),
+                  ...(!isCancelled && !isPendingCancel ? [{ label: '다음 결제일', value: subscription.next_billing_date ? new Date(subscription.next_billing_date).toLocaleDateString('ko-KR') : '-' }] : []),
                 ]
                 return (
                   <>
@@ -590,16 +592,32 @@ export default function CustomerPortal({ params }) {
             </div>
 
             {/* 회원 탈퇴 */}
-            <div style={{ ...css.card, border: '1px solid #fee2e2' }}>
-              <h3 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700, color: '#374151' }}>회원 탈퇴</h3>
-              <p style={{ margin: '0 0 16px', fontSize: 13, color: '#9ca3af', lineHeight: 1.6 }}>
-                탈퇴 시 모든 사이트가 즉시 비활성화됩니다. 고객 데이터는 보관됩니다.
-              </p>
-              <button onClick={() => setShowWithdrawModal(true)}
-                style={{ fontSize: 13, color: '#ef4444', background: 'none', border: '1px solid #fecaca', borderRadius: 7, padding: '7px 16px', cursor: 'pointer' }}>
-                회원 탈퇴
-              </button>
-            </div>
+            {(() => {
+              const isPendingCancel = !!subscription?.cancelled_at && !!subscription?.cancels_at && subscription?.status !== 'cancelled'
+              if (isPendingCancel) {
+                return (
+                  <div style={{ ...css.card, border: '1px solid #e5e7eb', background: '#f9fafb' }}>
+                    <h3 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700, color: '#374151' }}>계정 종료 안내</h3>
+                    <p style={{ margin: 0, fontSize: 13, color: '#6b7280', lineHeight: 1.7 }}>
+                      구독 해지가 예약되어 있습니다.<br />
+                      <b>{new Date(subscription.cancels_at).toLocaleDateString('ko-KR')}</b> 이용 종료 후 계정이 자동으로 비활성화됩니다.
+                    </p>
+                  </div>
+                )
+              }
+              return (
+                <div style={{ ...css.card, border: '1px solid #fee2e2' }}>
+                  <h3 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700, color: '#374151' }}>회원 탈퇴</h3>
+                  <p style={{ margin: '0 0 16px', fontSize: 13, color: '#9ca3af', lineHeight: 1.6 }}>
+                    탈퇴 시 모든 사이트가 즉시 비활성화됩니다. 고객 데이터는 보관됩니다.
+                  </p>
+                  <button onClick={() => setShowWithdrawModal(true)}
+                    style={{ fontSize: 13, color: '#ef4444', background: 'none', border: '1px solid #fecaca', borderRadius: 7, padding: '7px 16px', cursor: 'pointer' }}>
+                    회원 탈퇴
+                  </button>
+                </div>
+              )
+            })()}
 
             {/* 결제 내역 */}
             <div style={css.card}>
