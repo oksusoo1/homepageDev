@@ -108,9 +108,10 @@ export async function POST(req) {
     }
 
     // billing_history — 이번 달 즉시 결제 'paid' 기록
+    // upsert: 이미 manual로 생성된 레코드가 있어도 card로 덮어씀
     if (sub?.subscription_id) {
       const period = now.toISOString().slice(0, 7)
-      await supabase.from('billing_history').insert({
+      await supabase.from('billing_history').upsert({
         subscription_id: sub.subscription_id,
         period,
         amount: 30000,
@@ -118,7 +119,7 @@ export async function POST(req) {
         payment_method: 'card',
         paid_at: now.toISOString(),
         pg_transaction_id: chargeData.paymentKey || null,
-      })
+      }, { onConflict: 'subscription_id,period' })
     }
 
     return NextResponse.json({

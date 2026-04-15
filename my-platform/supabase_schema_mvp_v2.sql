@@ -96,6 +96,7 @@ CREATE TABLE sites (
   -- deploy_status: pending(대기) | building(빌드중) | live(배포완료) | failed(실패)
   deploy_status   VARCHAR(20) NOT NULL DEFAULT 'pending'
                   CHECK (deploy_status IN ('pending', 'building', 'live', 'failed')),
+  inquiry_id       UUID,                                    -- 루트 B: 연결된 제작 문의 (FK는 inquiries 생성 후 추가)
   trial_started_at TIMESTAMP,
   trial_ends_at    TIMESTAMP,
   created_at      TIMESTAMP DEFAULT NOW(),
@@ -249,7 +250,42 @@ CREATE INDEX idx_tickets_deadline    ON support_tickets(deadline_at);
 
 
 -- ================================================
--- 9. posts
+-- 9. inquiries (본사 제작 문의 — 루트 B)
+-- ================================================
+
+CREATE TABLE inquiries (
+  inquiry_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id     UUID NOT NULL REFERENCES customers(customer_id) ON DELETE RESTRICT,
+  -- business_type: cafe | restaurant | salon | clinic | academy | general | etc
+  business_type   VARCHAR(50),
+  description     TEXT,                        -- 원하는 사이트 설명
+  phone           VARCHAR(50),                 -- 연락받을 연락처
+  -- status: received(접수) | reviewing(검토/견적) | building(제작중) | review(고객검수대기) | approved(잔금완료) | done(배포완료)
+  status          VARCHAR(20) NOT NULL DEFAULT 'received'
+                  CHECK (status IN ('received', 'reviewing', 'building', 'review', 'approved', 'done')),
+  dev_fee_total   INTEGER,                     -- 총 개발비 (견적 확정 시 입력)
+  down_paid_at    TIMESTAMP,                   -- 선금 50% 납부 확인일
+  final_paid_at   TIMESTAMP,                   -- 잔금 50% 납부 확인일
+  admin_note      TEXT,                        -- 관리자 메모
+  created_at      TIMESTAMP DEFAULT NOW(),
+  updated_at      TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_inquiries_customer_id ON inquiries(customer_id);
+CREATE INDEX idx_inquiries_status      ON inquiries(status);
+
+CREATE POLICY "inquiries_all" ON inquiries FOR ALL USING (true);
+ALTER TABLE inquiries ENABLE ROW LEVEL SECURITY;
+
+-- sites.inquiry_id FK (inquiries 생성 후 추가)
+ALTER TABLE sites ADD CONSTRAINT fk_sites_inquiry
+  FOREIGN KEY (inquiry_id) REFERENCES inquiries(inquiry_id);
+
+CREATE INDEX idx_sites_inquiry_id ON sites(inquiry_id);
+
+
+-- ================================================
+-- 10. posts
 -- ================================================
 
 CREATE TABLE posts (

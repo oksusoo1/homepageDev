@@ -2,6 +2,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { deploySite } from '@/lib/deploy'
 
 // TODO: 실제 서비스 시 아래 플래그를 false로 변경 후 토스 연동
 const MOCK_MODE = true
@@ -10,6 +11,7 @@ function CardRegisterForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const siteId = searchParams.get('site_id')
+  const redirectParam = searchParams.get('redirect')  // 'deploy' → 카드 등록 후 자동 배포
 
   const [site, setSite] = useState(null)
   const [customer, setCustomer] = useState(null)
@@ -111,10 +113,11 @@ function CardRegisterForm() {
         await supabase.from('sites').update({ status: 'published', deploy_status: 'live' }).eq('site_id', siteId)
       }
 
-      // 즉시 결제 처리 — billing_history에 이번 달 'paid' 레코드 생성
+      // 즉시 결제 처리 — billing_history에 이번 달 'paid' 레코드 upsert
+      // insert 대신 upsert: 이미 manual로 생성된 레코드가 있어도 card로 덮어씀
       if (sub?.subscription_id) {
         const period = now.toISOString().slice(0, 7) // 'YYYY-MM'
-        await supabase.from('billing_history').insert({
+        await supabase.from('billing_history').upsert({
           subscription_id: sub.subscription_id,
           period,
           amount: 30000,
@@ -122,9 +125,22 @@ function CardRegisterForm() {
           payment_method: 'card',
           paid_at: now.toISOString(),
           note: '[MOCK] 카드 등록 즉시 결제',
-        })
+        }, { onConflict: 'subscription_id,period' })
       }
     }
+    // redirect=deploy: 카드 등록 완료 후 자동 배포
+    if (redirectParam === 'deploy' && siteId && site && customer) {
+      await deploySite(site.site_id, customer.customer_id, subscription, site)
+      // 루트 B: inquiry가 연결돼 있으면 → done으로 변경
+      if (site.inquiry_id) {
+        await supabase.from('inquiries')
+          .update({ status: 'done', updated_at: new Date().toISOString() })
+          .eq('inquiry_id', site.inquiry_id)
+      }
+      router.push(`/my/${site.subdomain}`)
+      return
+    }
+
     router.push(`/payment/card/success?site_id=${siteId}&mock=true`)
   }
 

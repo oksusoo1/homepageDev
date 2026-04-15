@@ -11,6 +11,12 @@ export default function MySitesPage() {
   const [loading, setLoading] = useState(true)
   const [isWithdrawn, setIsWithdrawn] = useState(false)
   const [reactivating, setReactivating] = useState(false)
+  const [myInquiries, setMyInquiries] = useState([])   // 접수된 내 문의 목록
+  const [linkedSiteMap, setLinkedSiteMap] = useState({}) // { inquiry_id: site } — inquiry에 연결된 사이트
+  const [showInquiry, setShowInquiry] = useState(false)
+  const [inquiryForm, setInquiryForm] = useState({ business_type: '', description: '', phone: '' })
+  const [inquirySubmitting, setInquirySubmitting] = useState(false)
+  const [inquiryDone, setInquiryDone] = useState(false)
 
   useEffect(() => { checkAuth() }, [])
 
@@ -54,12 +60,56 @@ export default function MySitesPage() {
       .eq('customer_id', cust.customer_id)
       .order('created_at', { ascending: false })
     setSites(siteList || [])
+
+    // 내 제작 문의 조회
+    const { data: inqList } = await supabase
+      .from('inquiries')
+      .select('*')
+      .eq('customer_id', cust.customer_id)
+      .order('created_at', { ascending: false })
+    setMyInquiries(inqList || [])
+
+    // inquiry에 연결된 사이트 조회 (inquiry_id가 있는 사이트)
+    if (inqList?.length) {
+      const { data: linkedSites } = await supabase
+        .from('sites')
+        .select('site_id, subdomain, status, deploy_status, inquiry_id')
+        .eq('customer_id', cust.customer_id)
+        .not('inquiry_id', 'is', null)
+      if (linkedSites?.length) {
+        const map = {}
+        linkedSites.forEach(s => { map[s.inquiry_id] = s })
+        setLinkedSiteMap(map)
+      }
+    }
+
     setLoading(false)
   }
 
   async function handleLogout() {
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  // 본사 제작 문의 제출
+  async function handleInquirySubmit() {
+    if (!inquiryForm.business_type || !inquiryForm.description) {
+      alert('업종과 원하는 사이트 설명을 입력해주세요.'); return
+    }
+    setInquirySubmitting(true)
+    await supabase.from('inquiries').insert({
+      customer_id:   customer.customer_id,
+      business_type: inquiryForm.business_type,
+      description:   inquiryForm.description,
+      phone:         inquiryForm.phone || customer.phone,
+      status:        'received',
+    })
+    setInquirySubmitting(false)
+    setInquiryDone(true)
+    // 목록 갱신
+    const { data: inqList } = await supabase
+      .from('inquiries').select('*').eq('customer_id', customer.customer_id).order('created_at', { ascending: false })
+    setMyInquiries(inqList || [])
   }
 
   async function handleReactivate() {
@@ -147,11 +197,114 @@ export default function MySitesPage() {
     </div>
   )
 
+  const BUSINESS_TYPES = [
+    { value: 'cafe',       label: '카페',    icon: '☕' },
+    { value: 'restaurant', label: '식당',    icon: '🍽' },
+    { value: 'salon',      label: '미용실',  icon: '💇' },
+    { value: 'clinic',     label: '병원',    icon: '🏥' },
+    { value: 'academy',    label: '학원',    icon: '📚' },
+    { value: 'general',    label: '기타',    icon: '🏪' },
+  ]
+
   return (
     <div style={{
       minHeight: '100vh', background: '#f8f7f4',
       fontFamily: "'Pretendard', 'Apple SD Gothic Neo', -apple-system, sans-serif",
     }}>
+
+      {/* 본사 제작 문의 모달 */}
+      {showInquiry && (
+        <div onClick={() => setShowInquiry(false)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: 20,
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'white', borderRadius: 16, padding: '36px 32px',
+            width: '100%', maxWidth: 480, boxShadow: '0 8px 40px rgba(0,0,0,0.18)',
+          }}>
+            {inquiryDone ? (
+              /* 접수 완료 화면 */
+              <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+                <h3 style={{ margin: '0 0 10px', fontSize: 18, fontWeight: 800, color: '#111827' }}>
+                  문의가 접수되었어요!
+                </h3>
+                <p style={{ margin: '0 0 28px', fontSize: 14, color: '#6b7280', lineHeight: 1.7 }}>
+                  2~3 영업일 내로 담당자가 연락드릴게요.
+                </p>
+                <button onClick={() => setShowInquiry(false)} style={{
+                  padding: '11px 32px', background: '#111827', color: 'white',
+                  border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                }}>확인</button>
+              </div>
+            ) : (
+              /* 문의 폼 */
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#111827' }}>본사 제작 문의</h3>
+                  <button onClick={() => setShowInquiry(false)} style={{
+                    background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#9ca3af', lineHeight: 1,
+                  }}>✕</button>
+                </div>
+
+                {/* 업종 선택 */}
+                <p style={{ margin: '0 0 10px', fontSize: 12, fontWeight: 700, color: '#374151' }}>업종 선택 *</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 20 }}>
+                  {BUSINESS_TYPES.map(({ value, label, icon }) => (
+                    <button key={value} onClick={() => setInquiryForm(f => ({ ...f, business_type: value }))}
+                      style={{
+                        padding: '12px 8px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                        border: inquiryForm.business_type === value ? '2px solid #111827' : '2px solid #e5e7eb',
+                        background: inquiryForm.business_type === value ? '#111827' : 'white',
+                        color: inquiryForm.business_type === value ? 'white' : '#374151',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                      }}>
+                      <span style={{ fontSize: 22 }}>{icon}</span>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 사이트 설명 */}
+                <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: '#374151' }}>원하는 사이트 설명 *</p>
+                <textarea
+                  value={inquiryForm.description}
+                  onChange={e => setInquiryForm(f => ({ ...f, description: e.target.value }))}
+                  placeholder="예) 강남에 있는 카페인데요, 메뉴 소개랑 영업시간, 인스타 링크를 넣고 싶어요."
+                  rows={4}
+                  style={{
+                    width: '100%', padding: '10px 14px', border: '1px solid #e5e7eb', borderRadius: 8,
+                    fontSize: 13, outline: 'none', resize: 'vertical', boxSizing: 'border-box',
+                    color: '#111827', marginBottom: 16,
+                  }}
+                />
+
+                {/* 연락처 */}
+                <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: '#374151' }}>연락받을 연락처</p>
+                <input
+                  value={inquiryForm.phone}
+                  onChange={e => setInquiryForm(f => ({ ...f, phone: e.target.value }))}
+                  placeholder="010-0000-0000"
+                  style={{
+                    width: '100%', padding: '10px 14px', border: '1px solid #e5e7eb', borderRadius: 8,
+                    fontSize: 13, outline: 'none', boxSizing: 'border-box',
+                    color: '#111827', marginBottom: 24,
+                  }}
+                />
+
+                <button onClick={handleInquirySubmit} disabled={inquirySubmitting} style={{
+                  width: '100%', padding: '13px 0', background: inquirySubmitting ? '#9ca3af' : '#111827',
+                  color: 'white', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 700,
+                  cursor: inquirySubmitting ? 'default' : 'pointer',
+                }}>
+                  {inquirySubmitting ? '접수 중...' : '문의 접수하기'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 헤더 */}
       <div style={{
@@ -201,6 +354,111 @@ export default function MySitesPage() {
           )}
         </div>
 
+        {/* 진행 중인 제작 문의 상태 카드 */}
+        {myInquiries.filter(i => i.status !== 'done').map(inq => {
+          const STEP = [
+            { key: 'received',  label: '접수완료',  desc: '문의가 접수되었습니다.' },
+            { key: 'reviewing', label: '검토/견적',  desc: '담당자가 견적을 검토 중입니다.' },
+            { key: 'building',  label: '제작중',     desc: '사이트를 제작하고 있습니다.' },
+            { key: 'review',    label: '검수대기',   desc: '제작이 완료되었습니다. 미리보기를 확인해주세요.' },
+            { key: 'approved',  label: '승인완료',   desc: '잔금 납부 완료 후 배포 준비 중입니다.' },
+          ]
+          const currentStep = STEP.findIndex(s => s.key === inq.status)
+          const safeStep = currentStep === -1 ? 0 : currentStep
+          const BIZ_LABEL = { cafe: '☕ 카페', restaurant: '🍽 식당', salon: '💇 미용실', clinic: '🏥 병원', academy: '📚 학원', general: '🏪 일반', etc: '🏪 기타' }
+          const currentDesc = STEP[safeStep]?.desc || ''
+          return (
+            <div key={inq.inquiry_id} style={{
+              background: 'white', borderRadius: 14, border: '1px solid #e5e7eb',
+              padding: '20px 24px', marginBottom: 16,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                <div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', letterSpacing: 1, textTransform: 'uppercase' }}>본사 제작 문의</span>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', marginTop: 4 }}>
+                    {BIZ_LABEL[inq.business_type] || '기타'} 사이트 제작
+                  </div>
+                  <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 3 }}>
+                    접수일 {new Date(inq.created_at).toLocaleDateString('ko-KR')}
+                  </div>
+                </div>
+                {inq.dev_fee_total && (
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, color: '#9ca3af' }}>개발비</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>{inq.dev_fee_total.toLocaleString()}원</div>
+                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                      선금 {inq.down_paid_at ? '✓ 납부' : '미납'} · 잔금 {inq.final_paid_at ? '✓ 납부' : '미납'}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 진행 단계 표시 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 12 }}>
+                {STEP.map((step, i) => (
+                  <div key={step.key} style={{ display: 'flex', alignItems: 'center', flex: i < STEP.length - 1 ? 1 : 'none' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <div style={{
+                        width: 28, height: 28, borderRadius: '50%', fontSize: 12, fontWeight: 700,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: i <= safeStep ? '#111827' : '#f3f4f6',
+                        color: i <= safeStep ? 'white' : '#9ca3af',
+                      }}>{i < safeStep ? '✓' : i + 1}</div>
+                      <span style={{ fontSize: 10, color: i <= safeStep ? '#111827' : '#9ca3af', fontWeight: i === safeStep ? 700 : 400, whiteSpace: 'nowrap' }}>
+                        {step.label}
+                      </span>
+                    </div>
+                    {i < STEP.length - 1 && (
+                      <div style={{ flex: 1, height: 2, background: i < safeStep ? '#111827' : '#e5e7eb', margin: '0 4px', marginBottom: 16 }} />
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* 현재 단계 안내 */}
+              <div style={{ fontSize: 12, color: '#6b7280', background: '#f9fafb', borderRadius: 8, padding: '10px 14px', marginBottom: 10 }}>
+                💬 {currentDesc}
+              </div>
+
+              {/* 단계별 액션 버튼 */}
+              {(() => {
+                const linkedSite = linkedSiteMap[inq.inquiry_id]
+                if (inq.status === 'review' && linkedSite) {
+                  return (
+                    <a
+                      href={`/preview/${linkedSite.subdomain}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        padding: '10px 18px', background: '#eff6ff', color: '#2563eb',
+                        borderRadius: 8, fontSize: 13, fontWeight: 600,
+                        textDecoration: 'none', border: '1px solid #bfdbfe',
+                      }}>
+                      사이트 미리보기 확인하기 →
+                    </a>
+                  )
+                }
+                if (inq.status === 'approved' && linkedSite) {
+                  return (
+                    <button
+                      onClick={() => router.push(`/payment/card?site_id=${linkedSite.site_id}&redirect=deploy`)}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        padding: '11px 20px', background: '#111827', color: 'white',
+                        borderRadius: 8, fontSize: 14, fontWeight: 700,
+                        border: 'none', cursor: 'pointer',
+                      }}>
+                      카드 등록하고 서비스 시작하기 →
+                    </button>
+                  )
+                }
+                return null
+              })()}
+            </div>
+          )
+        })}
+
         {/* 사이트 없을 때 */}
         {sites.length === 0 ? (
           <div style={{
@@ -226,10 +484,17 @@ export default function MySitesPage() {
               템플릿 선택하러 가기 →
             </Link>
             <div style={{ marginTop: 20, fontSize: 12, color: '#d1d5db' }}>
-              또는 본사에 제작을 맡길 수 있어요 —{' '}
-              <a href="mailto:contact@myplatform.com" style={{ color: '#9ca3af', textDecoration: 'underline' }}>
-                문의하기
-              </a>
+              {myInquiries.some(i => i.status !== 'done') ? (
+                <span style={{ color: '#f59e0b' }}>⏳ 제작 문의가 진행 중입니다</span>
+              ) : (
+                <>
+                  또는 본사에 제작을 맡길 수 있어요 —{' '}
+                  <button onClick={() => { setShowInquiry(true); setInquiryDone(false); setInquiryForm({ business_type: '', description: '', phone: customer?.phone || '' }) }}
+                    style={{ color: '#9ca3af', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, padding: 0 }}>
+                    문의하기
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ) : (

@@ -181,6 +181,7 @@ erDiagram
     string build_type
     string status
     string deploy_status
+    uuid inquiry_id FK
     timestamp trial_started_at
     timestamp trial_ends_at
     timestamp created_at
@@ -243,6 +244,20 @@ erDiagram
     string author
     timestamp created_at
   }
+  inquiries {
+    uuid inquiry_id PK
+    uuid customer_id FK
+    string business_type
+    string description
+    string phone
+    string status
+    integer dev_fee_total
+    timestamp down_paid_at
+    timestamp final_paid_at
+    string admin_note
+    timestamp created_at
+    timestamp updated_at
+  }
 
   customers ||--o{ sites : "customer_id"
   customers ||--o{ subscriptions : "customer_id"
@@ -255,6 +270,8 @@ erDiagram
   sites ||--o{ support_tickets : "site_id"
   sites ||--o{ posts : "site_id"
   subscriptions ||--o{ billing_history : "subscription_id"
+  customers ||--o{ inquiries : "customer_id"
+  sites }o--o| inquiries : "inquiry_id"
   </div>
 </div>
 
@@ -304,6 +321,11 @@ erDiagram
     <div class="tname">posts</div>
     <div class="pk">PK: post_id</div>
     <div class="desc">사이트 게시판 글.</div>
+  </div>
+  <div class="table-card">
+    <div class="tname">inquiries</div>
+    <div class="pk">PK: inquiry_id</div>
+    <div class="desc">본사 제작 문의 (루트 B). 사이트 없는 고객의 제작 의뢰.</div>
   </div>
 </div>
 
@@ -366,6 +388,22 @@ erDiagram
       <div class="code-item"><span class="code-val">paid</span><span class="code-desc">납부 완료</span></div>
       <div class="code-item"><span class="code-val">overdue</span><span class="code-desc">연체</span></div>
       <div class="code-note">period 형식: 'YYYY-MM' (예: '2026-04')<br>구독당 월 1건 UNIQUE 제약</div>
+    </div>
+
+    <div class="code-card">
+      <div class="ctable">inquiries</div>
+      <div class="cfield">status</div>
+      <div class="code-item"><span class="code-val">received</span><span class="code-desc">접수 완료</span></div>
+      <div class="code-item"><span class="code-val">reviewing</span><span class="code-desc">검토 중 / 견적 협의</span></div>
+      <div class="code-item"><span class="code-val">building</span><span class="code-desc">제작 중 (선금 확인 후)</span></div>
+      <div class="code-item"><span class="code-val">review</span><span class="code-desc">고객 검수 대기</span></div>
+      <div class="code-item"><span class="code-val">approved</span><span class="code-desc">고객 승인 + 잔금 완료</span></div>
+      <div class="code-item"><span class="code-val">done</span><span class="code-desc">배포 완료</span></div>
+      <div class="cfield" style="margin-top:10px">business_type</div>
+      <div class="code-item"><span class="code-val">cafe / restaurant</span><span class="code-desc">카페 / 식당</span></div>
+      <div class="code-item"><span class="code-val">salon / clinic</span><span class="code-desc">미용실 / 병원</span></div>
+      <div class="code-item"><span class="code-val">academy / general / etc</span><span class="code-desc">학원 / 일반 / 기타</span></div>
+      <div class="code-note">dev_fee_total: 총 개발비 (견적 확정 시)<br>down_paid_at: 선금 50% 납부일 → building<br>final_paid_at: 잔금 50% 납부일 → approved</div>
     </div>
 
     <div class="code-card">

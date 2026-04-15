@@ -121,6 +121,19 @@ export default function CustomerPortal({ params }) {
   }
 
   async function handleDeploy() {
+    // 카드 등록 여부 확인 — 카드 없으면 등록 페이지로 이동 (배포 후 자동 복귀)
+    const { data: card } = await supabase
+      .from('customer_payment_methods')
+      .select('payment_method_id')
+      .eq('customer_id', customer.customer_id)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (!card) {
+      router.push(`/payment/card?site_id=${site.site_id}&redirect=deploy`)
+      return
+    }
+
     setDeploying(true)
     const { error, trialEndsAt, requireCard } = await deployAction(site.site_id, site.customer_id, subscription, site)
 
@@ -411,8 +424,8 @@ export default function CustomerPortal({ params }) {
               ))}
             </div>
 
-            {/* 배포 버튼 */}
-            {site.deploy_status !== 'live' ? (
+            {/* 배포 버튼 — self 사이트만 / managed는 /my 페이지에서 카드+배포 처리 */}
+            {site.build_type === 'managed' ? null : site.deploy_status !== 'live' ? (
               <div style={{ ...css.card, background: 'linear-gradient(135deg, #0f766e 0%, #0d9488 100%)', border: 'none' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>

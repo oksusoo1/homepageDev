@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { isAdminEmail } from '@/lib/auth'
 
-const TABS = ['사이트 관리', '구독 현황', '수정 요청', '1회성 결제']
+const TABS = ['사이트 관리', '구독 현황', '수정 요청', '1회성 결제', '제작 문의']
 
 export default function AdminConsole() {
   const router = useRouter()
@@ -13,7 +13,11 @@ export default function AdminConsole() {
   const [subscriptions, setSubscriptions] = useState([])
   const [tickets, setTickets] = useState([])
   const [oneTimePays, setOneTimePays] = useState([])
+  const [inquiries, setInquiries] = useState([])
   const [templates, setTemplates] = useState([])
+  const [expandedSubId, setExpandedSubId] = useState(null)     // 펼쳐진 구독 행
+  const [billingHistory, setBillingHistory] = useState({})      // { sub_id: [...records] }
+  const [inquiryDevFee, setInquiryDevFee] = useState({})        // { inquiry_id: 금액 } — 견적 편집용
   const [loading, setLoading] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const [message, setMessage] = useState('')
@@ -21,7 +25,7 @@ export default function AdminConsole() {
     customer_name: '', customer_email: '', customer_phone: '',
     site_name: '', subdomain: '', description: '',
     address: '', phone: '', email: '',
-    template_id: '', build_type: 'self'
+    template_id: '', build_type: 'self', inquiry_id: '',
   })
 
   useEffect(() => { checkAdminAuth() }, [])
@@ -37,7 +41,7 @@ export default function AdminConsole() {
   }
 
   async function fetchAll() {
-    const [s, sub, t, otp, tmpl] = await Promise.all([
+    const [s, sub, t, otp, tmpl, inq] = await Promise.all([
       supabase.from('sites')
         .select('*, customers(name, email, phone)')
         .order('created_at', { ascending: false }),
@@ -52,12 +56,16 @@ export default function AdminConsole() {
         .order('created_at', { ascending: false }),
       supabase.from('templates')
         .select('*').eq('is_active', true).order('sort_order'),
+      supabase.from('inquiries')
+        .select('*, customers(name, email, phone)')
+        .order('created_at', { ascending: false }),
     ])
     setSites(s.data || [])
     setSubscriptions(sub.data || [])
     setTickets(t.data || [])
     setOneTimePays(otp.data || [])
     setTemplates(tmpl.data || [])
+    setInquiries(inq.data || [])
   }
 
   async function createSite(e) {
@@ -65,21 +73,33 @@ export default function AdminConsole() {
     setLoading(true)
     setMessage('')
     try {
-      // 1. 고객 생성
-      const { data: customer, error: cErr } = await supabase
+      // 1. 기존 고객 조회 → 없으면 신규 생성
+      let customer
+      const { data: existing } = await supabase
         .from('customers')
-        .insert([{
-          email: form.customer_email,
-          name: form.customer_name,
-          phone: form.customer_phone,
-        }])
-        .select()
-        .single()
-      if (cErr) throw new Error('고객 생성 오류: ' + cErr.message)
+        .select('*')
+        .eq('email', form.customer_email)
+        .maybeSingle()
+
+      if (existing) {
+        customer = existing
+      } else {
+        const { data: newCust, error: cErr } = await supabase
+          .from('customers')
+          .insert([{
+            email: form.customer_email,
+            name: form.customer_name,
+            phone: form.customer_phone,
+          }])
+          .select()
+          .single()
+        if (cErr) throw new Error('고객 생성 오류: ' + cErr.message)
+        customer = newCust
+      }
 
       // 2. 사이트 생성
       const site_code = form.subdomain + '_' + Date.now()
-      const { data: site, error: sErr } = await supabase
+      const { error: sErr } = await supabase
         .from('sites')
         .insert([{
           site_code,
@@ -92,6 +112,7 @@ export default function AdminConsole() {
           phone: form.phone,
           email: form.email,
           build_type: form.build_type,
+          inquiry_id: form.inquiry_id || null,
           status: 'draft',
           deploy_status: 'pending',
         }])
@@ -99,27 +120,12 @@ export default function AdminConsole() {
         .single()
       if (sErr) throw new Error('사이트 생성 오류: ' + sErr.message)
 
-      // 3. 구독 생성
-      const nextMonth = new Date()
-      nextMonth.setMonth(nextMonth.getMonth() + 1)
-      const { error: subErr } = await supabase
-        .from('subscriptions')
-        .insert([{
-          customer_id: customer.customer_id,
-          site_id: site.site_id,
-          amount: 30000,
-          billing_day: 1,
-          payment_method: 'manual',
-          status: 'active',
-          next_billing_date: nextMonth.toISOString().split('T')[0],
-        }])
-      if (subErr) throw new Error('구독 생성 오류: ' + subErr.message)
-
+      // 구독은 고객이 카드 등록 + 배포 시점에 생성 (deploy.js에서 처리)
       setMessage('✅ 사이트가 생성되었습니다!')
       setForm({
         customer_name: '', customer_email: '', customer_phone: '',
         site_name: '', subdomain: '', description: '',
-        address: '', phone: '', email: '', template_id: '', build_type: 'self'
+        address: '', phone: '', email: '', template_id: '', build_type: 'self', inquiry_id: '',
       })
       fetchAll()
     } catch (err) {
@@ -129,7 +135,42 @@ export default function AdminConsole() {
   }
 
   async function updateSiteStatus(siteId, status) {
-    await supabase.from('sites').update({ status }).eq('site_id', siteId)
+    const now = new Date()
+    await supabase.from('sites').update({ status, updated_at: now.toISOString() }).eq('site_id', siteId)
+
+    if (status === 'published') {
+      // 사이트 build_type 조회
+      const { data: siteInfo } = await supabase
+        .from('sites').select('build_type, inquiry_id').eq('site_id', siteId).maybeSingle()
+
+      if (siteInfo?.build_type === 'managed') {
+        // 루트 B: 관리자 미리보기 배포 → inquiry → review (trial 시작 안 함)
+        if (siteInfo?.inquiry_id) {
+          await supabase.from('inquiries')
+            .update({ status: 'review', updated_at: now.toISOString() })
+            .eq('inquiry_id', siteInfo.inquiry_id)
+        }
+      } else {
+        // 루트 A: self 사이트 — pending 구독 있으면 trial 시작
+        const { data: sub } = await supabase
+          .from('subscriptions').select('subscription_id, status').eq('site_id', siteId).maybeSingle()
+        if (sub?.status === 'pending') {
+          const trialEnds = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
+          const nextBilling = new Date(trialEnds)
+          nextBilling.setMonth(nextBilling.getMonth() + 1)
+          await supabase.from('subscriptions').update({
+            status: 'trial',
+            next_billing_date: nextBilling.toISOString().split('T')[0],
+            updated_at: now.toISOString(),
+          }).eq('subscription_id', sub.subscription_id)
+          await supabase.from('sites').update({
+            trial_started_at: now.toISOString(),
+            trial_ends_at: trialEnds.toISOString(),
+          }).eq('site_id', siteId)
+        }
+      }
+    }
+
     fetchAll()
   }
 
@@ -166,28 +207,108 @@ export default function AdminConsole() {
     fetchAll()
   }
 
-  async function markBillingPaid(subId, amount, period) {
-    const { data: existing } = await supabase
-      .from('billing_history')
-      .select('billing_id')
-      .eq('subscription_id', subId)
-      .eq('period', period)
-      .single()
-
-    if (existing) {
-      await supabase.from('billing_history')
-        .update({ status: 'paid', paid_at: new Date().toISOString() })
-        .eq('billing_id', existing.billing_id)
-    } else {
-      await supabase.from('billing_history').insert([{
-        subscription_id: subId,
-        period,
-        amount,
-        status: 'paid',
-        payment_method: 'manual',
-        paid_at: new Date().toISOString(),
-      }])
+  // 구독 행 클릭 → 납부 내역 펼치기/접기
+  async function toggleExpand(subId) {
+    if (expandedSubId === subId) {
+      setExpandedSubId(null)
+      return
     }
+    setExpandedSubId(subId)
+    // 아직 로드 안 된 경우만 조회
+    if (!billingHistory[subId]) {
+      const { data } = await supabase
+        .from('billing_history')
+        .select('*')
+        .eq('subscription_id', subId)
+        .order('period', { ascending: false })
+      setBillingHistory(prev => ({ ...prev, [subId]: data || [] }))
+    }
+  }
+
+  // 납부 확인: billing_history upsert + next_billing_date +1달 (수동결제)
+  async function markBillingPaid(subId, amount, period, paymentMethod) {
+    try {
+      // 기존 레코드 확인 (maybeSingle: 없어도 에러 안 남)
+      const { data: existing } = await supabase
+        .from('billing_history')
+        .select('billing_id, status')
+        .eq('subscription_id', subId)
+        .eq('period', period)
+        .maybeSingle()
+
+      if (existing?.status === 'paid') {
+        setMessage('이미 납부 확인된 내역입니다.')
+        return
+      }
+
+      const now = new Date().toISOString()
+      if (existing) {
+        await supabase.from('billing_history')
+          .update({ status: 'paid', paid_at: now })
+          .eq('billing_id', existing.billing_id)
+      } else {
+        await supabase.from('billing_history').insert([{
+          subscription_id: subId, period, amount,
+          status: 'paid', payment_method: paymentMethod || 'manual', paid_at: now,
+        }])
+      }
+
+      // 수동결제는 next_billing_date를 현재 +1달로 갱신
+      if (!paymentMethod || paymentMethod === 'manual') {
+        const next = new Date()
+        next.setMonth(next.getMonth() + 1)
+        await supabase.from('subscriptions')
+          .update({ next_billing_date: next.toISOString().split('T')[0] })
+          .eq('subscription_id', subId)
+      }
+
+      setMessage(`✅ ${period} 납부 확인 완료`)
+      // 펼쳐진 내역 새로고침
+      const { data: updated } = await supabase
+        .from('billing_history')
+        .select('*')
+        .eq('subscription_id', subId)
+        .order('period', { ascending: false })
+      setBillingHistory(prev => ({ ...prev, [subId]: updated || [] }))
+      fetchAll()
+    } catch (err) {
+      setMessage('❌ 오류: ' + err.message)
+    }
+  }
+
+  // 문의 상태 업데이트
+  async function updateInquiryStatus(inquiryId, status) {
+    await supabase.from('inquiries')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('inquiry_id', inquiryId)
+    fetchAll()
+  }
+
+  // 견적 금액 저장
+  async function saveDevFee(inquiryId, amount) {
+    const num = parseInt(amount, 10)
+    if (isNaN(num) || num <= 0) { alert('올바른 금액을 입력해주세요.'); return }
+    await supabase.from('inquiries')
+      .update({ dev_fee_total: num, updated_at: new Date().toISOString() })
+      .eq('inquiry_id', inquiryId)
+    fetchAll()
+  }
+
+  // 선금 50% 확인 → building으로 전환
+  async function confirmDownPayment(inquiryId) {
+    if (!window.confirm('선금 50% 납부를 확인하셨나요?\n상태가 "제작중"으로 변경됩니다.')) return
+    await supabase.from('inquiries')
+      .update({ down_paid_at: new Date().toISOString(), status: 'building', updated_at: new Date().toISOString() })
+      .eq('inquiry_id', inquiryId)
+    fetchAll()
+  }
+
+  // 잔금 50% 확인 → approved로 전환
+  async function confirmFinalPayment(inquiryId) {
+    if (!window.confirm('잔금 50% 납부를 확인하셨나요?\n상태가 "고객승인완료"로 변경됩니다.')) return
+    await supabase.from('inquiries')
+      .update({ final_paid_at: new Date().toISOString(), status: 'approved', updated_at: new Date().toISOString() })
+      .eq('inquiry_id', inquiryId)
     fetchAll()
   }
 
@@ -433,7 +554,7 @@ export default function AdminConsole() {
                     border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 13,
                     fontWeight: 700, opacity: loading ? 0.6 : 1
                   }}>
-                    {loading ? '생성 중...' : '사이트 + 구독 생성'}
+                    {loading ? '생성 중...' : '사이트 개설'}
                   </button>
                   {message && (
                     <span style={{ fontSize: 13, color: message.startsWith('✅') ? '#22c55e' : '#ef4444' }}>
@@ -525,28 +646,100 @@ export default function AdminConsole() {
                 </tr>
               </thead>
               <tbody>
-                {subscriptions.map(sub => (
-                  <tr key={sub.subscription_id}>
-                    <td style={css.td}>{sub.customers?.name}</td>
-                    <td style={css.td}>{sub.sites?.site_name}</td>
-                    <td style={css.td}>₩{sub.amount?.toLocaleString()}</td>
-                    <td style={css.td}>
-                      {badge(sub.payment_method === 'card' ? '#22c55e' : '#f59e0b',
-                        sub.payment_method === 'card' ? '카드' : '수동')}
-                    </td>
-                    <td style={css.td}>{sub.next_billing_date || '-'}</td>
-                    <td style={css.td}>
-                      {badge(sub.status === 'active' ? '#22c55e' : sub.status === 'trial' ? '#f59e0b' : '#6b7280', sub.status)}
-                    </td>
-                    {/* 해지 예약된 경우 cancels_at 표시, 아니면 - */}
-                    <td style={{ ...css.td, color: sub.cancels_at ? '#ef4444' : '#475569' }}>
-                      {sub.cancels_at ? new Date(sub.cancels_at).toLocaleDateString('ko-KR') : '-'}
-                    </td>
-                    <td style={css.td}>
-                      {btn('#16a34a', '납부 확인', () => markBillingPaid(sub.subscription_id, sub.amount, currentPeriod))}
-                    </td>
-                  </tr>
-                ))}
+                {subscriptions.map(sub => {
+                  const isExpanded = expandedSubId === sub.subscription_id
+                  const history = billingHistory[sub.subscription_id] || []
+                  const COLS = 8
+
+                  return (
+                    <>
+                      {/* 메인 행 — 클릭하면 납부 내역 펼침 */}
+                      <tr key={sub.subscription_id}
+                        onClick={() => toggleExpand(sub.subscription_id)}
+                        style={{ cursor: 'pointer', background: isExpanded ? '#0f172a' : 'transparent' }}>
+                        <td style={css.td}>
+                          <span style={{ marginRight: 6, color: '#475569', fontSize: 11 }}>
+                            {isExpanded ? '▼' : '▶'}
+                          </span>
+                          {sub.customers?.name}
+                        </td>
+                        <td style={css.td}>{sub.sites?.site_name}</td>
+                        <td style={css.td}>₩{sub.amount?.toLocaleString()}</td>
+                        <td style={css.td}>
+                          {badge(sub.payment_method === 'card' ? '#22c55e' : '#f59e0b',
+                            sub.payment_method === 'card' ? '카드' : '수동')}
+                        </td>
+                        <td style={css.td}>{sub.next_billing_date || '-'}</td>
+                        <td style={css.td}>
+                          {badge(sub.status === 'active' ? '#22c55e' : sub.status === 'trial' ? '#f59e0b' : '#6b7280', sub.status)}
+                        </td>
+                        {/* 해지 예약된 경우 cancels_at 표시, 아니면 - */}
+                        <td style={{ ...css.td, color: sub.cancels_at ? '#ef4444' : '#475569' }}>
+                          {sub.cancels_at ? new Date(sub.cancels_at).toLocaleDateString('ko-KR') : '-'}
+                        </td>
+                        <td style={css.td} />
+                      </tr>
+
+                      {/* 펼침 행 — 월별 납부 내역 + 납부 확인 버튼 */}
+                      {isExpanded && (
+                        <tr key={sub.subscription_id + '_detail'}>
+                          <td colSpan={COLS} style={{ padding: 0, background: '#080810' }}>
+                            <div style={{ padding: '12px 32px 16px' }}>
+                              <table style={{ ...css.table, fontSize: 12 }}>
+                                <thead>
+                                  <tr>
+                                    {['기간', '금액', '상태', '결제방식', '납부일', '처리'].map(h => (
+                                      <th key={h} style={{ ...css.th, fontSize: 10, padding: '6px 10px' }}>{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {history.length === 0 ? (
+                                    <tr>
+                                      <td colSpan={6} style={{ ...css.td, color: '#334155', fontSize: 12, textAlign: 'center', padding: '10px' }}>
+                                        납부 내역이 없습니다
+                                      </td>
+                                    </tr>
+                                  ) : history.map(bh => (
+                                    <tr key={bh.billing_id}>
+                                      <td style={{ ...css.td, padding: '8px 10px', fontFamily: 'monospace' }}>{bh.period}</td>
+                                      <td style={{ ...css.td, padding: '8px 10px' }}>₩{bh.amount?.toLocaleString()}</td>
+                                      <td style={{ ...css.td, padding: '8px 10px' }}>
+                                        {badge(
+                                          bh.status === 'paid' ? '#22c55e' : bh.status === 'overdue' ? '#ef4444' : '#f59e0b',
+                                          bh.status === 'paid' ? '납부완료' : bh.status === 'overdue' ? '연체' : '미납'
+                                        )}
+                                      </td>
+                                      <td style={{ ...css.td, padding: '8px 10px', color: '#64748b' }}>
+                                        {bh.payment_method === 'card' ? '카드' : '수동'}
+                                      </td>
+                                      <td style={{ ...css.td, padding: '8px 10px', color: '#64748b' }}>
+                                        {bh.paid_at ? new Date(bh.paid_at).toLocaleDateString('ko-KR') : '-'}
+                                      </td>
+                                      <td style={{ ...css.td, padding: '8px 10px' }}>
+                                        {bh.status !== 'paid' && btn('#16a34a', '납부 확인',
+                                          e => { e.stopPropagation(); markBillingPaid(sub.subscription_id, bh.amount, bh.period, bh.payment_method) }
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              {/* 이번달 기록이 없으면 신규 납부 확인 버튼 노출 */}
+                              {!history.some(bh => bh.period === currentPeriod) && (
+                                <div style={{ marginTop: 10 }}>
+                                  {btn('#2563eb', `+ ${currentPeriod} 납부 확인`,
+                                    e => { e.stopPropagation(); markBillingPaid(sub.subscription_id, sub.amount, currentPeriod, sub.payment_method) }
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  )
+                })}
               </tbody>
             </table>
             </div>
@@ -602,6 +795,138 @@ export default function AdminConsole() {
             </div>
           </div>
         )}
+
+        {/* ── 탭 4: 제작 문의 ── */}
+        {tab === 4 && (() => {
+          const INQUIRY_STATUS = {
+            received: { label: '접수',       color: '#f59e0b' },
+            reviewing:{ label: '검토/견적',  color: '#60a5fa' },
+            building: { label: '제작중',     color: '#a78bfa' },
+            review:   { label: '검수대기',   color: '#f97316' },
+            approved: { label: '잔금완료',   color: '#06b6d4' },
+            done:     { label: '배포완료',   color: '#22c55e' },
+          }
+          const BIZ_LABEL = {
+            cafe: '☕ 카페', restaurant: '🍽 식당', salon: '💇 미용실',
+            clinic: '🏥 병원', academy: '📚 학원', general: '🏪 일반', etc: '🏪 기타',
+          }
+          const pendingInquiries = inquiries.filter(i => i.status !== 'done').length
+
+          return (
+            <div style={css.card}>
+              <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
+                제작 문의 — {pendingInquiries}건 대기중
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {inquiries.length === 0 && (
+                  <div style={{ color: '#475569', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>접수된 문의가 없습니다</div>
+                )}
+                {inquiries.map(inq => {
+                  const st = INQUIRY_STATUS[inq.status] || INQUIRY_STATUS.received
+                  const localFee = inquiryDevFee[inq.inquiry_id] ?? (inq.dev_fee_total ? String(inq.dev_fee_total) : '')
+                  return (
+                    <div key={inq.inquiry_id} style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10, padding: '16px 20px' }}>
+                      {/* 헤더 행 */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+                        <div style={{ fontWeight: 700, color: '#f1f5f9', fontSize: 14 }}>
+                          {inq.customers?.name}
+                          <span style={{ fontSize: 11, color: '#64748b', marginLeft: 8 }}>{inq.customers?.email}</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: '#94a3b8' }}>{inq.phone || inq.customers?.phone || '-'}</div>
+                        <div style={{ fontSize: 12, color: '#94a3b8' }}>{BIZ_LABEL[inq.business_type] || '-'}</div>
+                        {badge(st.color, st.label)}
+                        <div style={{ marginLeft: 'auto', fontSize: 11, color: '#475569' }}>
+                          {new Date(inq.created_at).toLocaleDateString('ko-KR')} 접수
+                        </div>
+                      </div>
+
+                      {/* 요청 내용 */}
+                      {inq.description && (
+                        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12, lineHeight: 1.6, borderLeft: '2px solid #334155', paddingLeft: 10 }}>
+                          {inq.description}
+                        </div>
+                      )}
+
+                      {/* 개발비 / 납부 현황 */}
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+                        <span style={{ fontSize: 12, color: '#64748b' }}>총 개발비:</span>
+                        <input
+                          type="number"
+                          value={localFee}
+                          onChange={e => setInquiryDevFee(f => ({ ...f, [inq.inquiry_id]: e.target.value }))}
+                          placeholder="견적 금액 입력"
+                          style={{ width: 130, padding: '4px 8px', background: '#1e293b', border: '1px solid #334155', borderRadius: 6, color: '#e2e8f0', fontSize: 12 }}
+                        />
+                        <span style={{ fontSize: 12, color: '#64748b' }}>원</span>
+                        {btn('#334155', '저장', () => saveDevFee(inq.inquiry_id, localFee))}
+                        {inq.dev_fee_total && (
+                          <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                            선금 {(inq.dev_fee_total / 2).toLocaleString()}원 / 잔금 {(inq.dev_fee_total / 2).toLocaleString()}원
+                          </span>
+                        )}
+                      </div>
+
+                      {/* 납부 확인 현황 */}
+                      <div style={{ display: 'flex', gap: 6, fontSize: 11, color: '#64748b', marginBottom: 12 }}>
+                        <span style={{ color: inq.down_paid_at ? '#22c55e' : '#475569' }}>
+                          선금 {inq.down_paid_at ? `✓ ${new Date(inq.down_paid_at).toLocaleDateString('ko-KR')}` : '미확인'}
+                        </span>
+                        <span style={{ color: '#334155' }}>·</span>
+                        <span style={{ color: inq.final_paid_at ? '#22c55e' : '#475569' }}>
+                          잔금 {inq.final_paid_at ? `✓ ${new Date(inq.final_paid_at).toLocaleDateString('ko-KR')}` : '미확인'}
+                        </span>
+                      </div>
+
+                      {/* 액션 버튼 행 */}
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {/* 상태 드롭다운 */}
+                        <select
+                          value={inq.status}
+                          onChange={e => updateInquiryStatus(inq.inquiry_id, e.target.value)}
+                          style={{ padding: '5px 8px', background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                          <option value="received">접수</option>
+                          <option value="reviewing">검토/견적</option>
+                          <option value="building">제작중</option>
+                          <option value="review">검수대기</option>
+                          <option value="approved">잔금완료</option>
+                          <option value="done">배포완료</option>
+                        </select>
+
+                        {/* 선금 확인 — reviewing 이고 선금 미확인일 때 */}
+                        {inq.status === 'reviewing' && !inq.down_paid_at && (
+                          btn('#16a34a', '선금 확인', () => confirmDownPayment(inq.inquiry_id))
+                        )}
+
+                        {/* 잔금 확인 — building/review이고 잔금 미확인일 때 */}
+                        {['building', 'review'].includes(inq.status) && !inq.final_paid_at && (
+                          btn('#2563eb', '잔금 확인', () => confirmFinalPayment(inq.inquiry_id))
+                        )}
+
+                        {/* 사이트 생성 — 선금 확인(building) 이후 활성화 */}
+                        {['building', 'review', 'approved', 'done'].includes(inq.status)
+                          ? btn('#6366f1', '사이트 생성→', () => {
+                              setForm(f => ({
+                                ...f,
+                                customer_name:  inq.customers?.name  || '',
+                                customer_email: inq.customers?.email || '',
+                                customer_phone: inq.phone || inq.customers?.phone || '',
+                                description:    inq.description || '',
+                                build_type:     'managed',
+                                inquiry_id:     inq.inquiry_id,
+                              }))
+                              setTab(0)
+                              setMessage(`📋 ${inq.customers?.name} 고객 정보를 불러왔습니다. 사이트명과 서브도메인을 입력해주세요.`)
+                            })
+                          : <span style={{ fontSize: 11, color: '#475569' }}>선금 확인 후 사이트 생성 가능</span>
+                        }
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
 
         {/* ── 탭 3: 1회성 결제 ── */}
         {tab === 3 && (
