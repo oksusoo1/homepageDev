@@ -77,6 +77,62 @@
       font-size: 11px;
       color: #475569;
     }
+    .code-section {
+      padding: 24px 32px 32px;
+      border-top: 1px solid #1e293b;
+    }
+    .code-section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #64748b;
+      letter-spacing: 2px;
+      margin-bottom: 16px;
+    }
+    .code-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    .code-card {
+      background: #0d0d14;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .code-card .ctable {
+      font-size: 10px;
+      color: #475569;
+      margin-bottom: 2px;
+    }
+    .code-card .cfield {
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 10px;
+    }
+    .code-item {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      margin-bottom: 5px;
+      font-size: 11px;
+    }
+    .code-val {
+      color: #f59e0b;
+      font-family: monospace;
+      white-space: nowrap;
+    }
+    .code-desc {
+      color: #475569;
+    }
+    .code-note {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #1e293b;
+      font-size: 10px;
+      color: #334155;
+      line-height: 1.5;
+    }
   </style>
 </head>
 <body>
@@ -104,6 +160,7 @@ erDiagram
     string name
     string phone
     string status
+    timestamp withdraw_at
     timestamp created_at
   }
   templates {
@@ -124,6 +181,8 @@ erDiagram
     string build_type
     string status
     string deploy_status
+    timestamp trial_started_at
+    timestamp trial_ends_at
     timestamp created_at
   }
   one_time_payments {
@@ -153,6 +212,8 @@ erDiagram
     string payment_method
     string status
     date next_billing_date
+    timestamp cancelled_at
+    timestamp cancels_at
   }
   billing_history {
     uuid billing_id PK
@@ -243,6 +304,89 @@ erDiagram
     <div class="tname">posts</div>
     <div class="pk">PK: post_id</div>
     <div class="desc">사이트 게시판 글.</div>
+  </div>
+</div>
+
+<!-- 코드값 정의 -->
+<div class="code-section">
+  <div class="code-section-title">CODE VALUES</div>
+  <div class="code-grid">
+
+    <div class="code-card">
+      <div class="ctable">customers</div>
+      <div class="cfield">status</div>
+      <div class="code-item"><span class="code-val">active</span><span class="code-desc">정상 이용 중</span></div>
+      <div class="code-item"><span class="code-val">suspended</span><span class="code-desc">정지됨</span></div>
+      <div class="code-item"><span class="code-val">withdrawn</span><span class="code-desc">탈퇴 완료</span></div>
+      <div class="code-note">withdraw_at 미래 → 탈퇴 예약 대기<br>withdraw_at 과거 → 자동 withdrawn 처리</div>
+    </div>
+
+    <div class="code-card">
+      <div class="ctable">sites</div>
+      <div class="cfield">status</div>
+      <div class="code-item"><span class="code-val">draft</span><span class="code-desc">미배포 (초안)</span></div>
+      <div class="code-item"><span class="code-val">published</span><span class="code-desc">운영 중</span></div>
+      <div class="code-item"><span class="code-val">suspended</span><span class="code-desc">일시 정지 (구독 만료 대기)</span></div>
+      <div class="code-item"><span class="code-val">cancelled</span><span class="code-desc">해지 완료</span></div>
+    </div>
+
+    <div class="code-card">
+      <div class="ctable">sites</div>
+      <div class="cfield">deploy_status</div>
+      <div class="code-item"><span class="code-val">pending</span><span class="code-desc">배포 대기</span></div>
+      <div class="code-item"><span class="code-val">building</span><span class="code-desc">빌드 중</span></div>
+      <div class="code-item"><span class="code-val">live</span><span class="code-desc">배포 완료·운영 중</span></div>
+      <div class="code-item"><span class="code-val">failed</span><span class="code-desc">배포 실패</span></div>
+      <div class="code-note">build_type: self(고객직접) | managed(본사대리)</div>
+    </div>
+
+    <div class="code-card">
+      <div class="ctable">subscriptions</div>
+      <div class="cfield">status</div>
+      <div class="code-item"><span class="code-val">pending</span><span class="code-desc">결제 대기</span></div>
+      <div class="code-item"><span class="code-val">trial</span><span class="code-desc">무료 체험 중 (14일)</span></div>
+      <div class="code-item"><span class="code-val">active</span><span class="code-desc">구독 중 (정상 or 해지예약)</span></div>
+      <div class="code-item"><span class="code-val">paused</span><span class="code-desc">일시 정지</span></div>
+      <div class="code-item"><span class="code-val">cancelled</span><span class="code-desc">해지 완료</span></div>
+      <div class="code-note">해지예약 판단: status='active' AND cancelled_at IS NOT NULL AND cancels_at &gt; now()</div>
+    </div>
+
+    <div class="code-card">
+      <div class="ctable">subscriptions</div>
+      <div class="cfield">payment_method</div>
+      <div class="code-item"><span class="code-val">manual</span><span class="code-desc">계좌이체 (관리자 수동 확인)</span></div>
+      <div class="code-item"><span class="code-val">card</span><span class="code-desc">카드 자동 결제 (Toss 빌링)</span></div>
+      <div class="code-note">cancelled_at: 해지 요청일<br>cancels_at: 서비스 종료 예정일</div>
+    </div>
+
+    <div class="code-card">
+      <div class="ctable">billing_history</div>
+      <div class="cfield">status</div>
+      <div class="code-item"><span class="code-val">unpaid</span><span class="code-desc">미납</span></div>
+      <div class="code-item"><span class="code-val">paid</span><span class="code-desc">납부 완료</span></div>
+      <div class="code-item"><span class="code-val">overdue</span><span class="code-desc">연체</span></div>
+      <div class="code-note">period 형식: 'YYYY-MM' (예: '2026-04')<br>구독당 월 1건 UNIQUE 제약</div>
+    </div>
+
+    <div class="code-card">
+      <div class="ctable">one_time_payments</div>
+      <div class="cfield">type / status</div>
+      <div class="code-item"><span class="code-val">domain_setup</span><span class="code-desc">도메인 대행 (5만원)</span></div>
+      <div class="code-item"><span class="code-val">dev_fee</span><span class="code-desc">개발비 (1회성)</span></div>
+      <div class="code-item"><span class="code-val">extra</span><span class="code-desc">기타</span></div>
+      <div class="code-note">status: unpaid | paid</div>
+    </div>
+
+    <div class="code-card">
+      <div class="ctable">support_tickets</div>
+      <div class="cfield">category / status / priority</div>
+      <div class="code-item"><span class="code-val">text_change</span><span class="code-desc">텍스트 수정</span></div>
+      <div class="code-item"><span class="code-val">image</span><span class="code-desc">이미지 교체</span></div>
+      <div class="code-item"><span class="code-val">page_add</span><span class="code-desc">페이지 추가</span></div>
+      <div class="code-item"><span class="code-val">feature</span><span class="code-desc">기능 추가</span></div>
+      <div class="code-note">status: open | in_progress | resolved<br>priority: low | normal | high | urgent</div>
+    </div>
+
   </div>
 </div>
 

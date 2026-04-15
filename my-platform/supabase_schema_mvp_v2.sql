@@ -32,8 +32,10 @@ CREATE TABLE customers (
   email         VARCHAR(200) UNIQUE NOT NULL,
   name          VARCHAR(100) NOT NULL,
   phone         VARCHAR(50),
+  -- status: active(정상) | suspended(정지) | withdrawn(탈퇴)
   status        VARCHAR(20) NOT NULL DEFAULT 'active'
                 CHECK (status IN ('active', 'suspended', 'withdrawn')),
+  withdraw_at   TIMESTAMP,                         -- 탈퇴 예약일 (미래: 만료 대기, 과거: 자동 withdrawn 처리)
   created_at    TIMESTAMP DEFAULT NOW(),
   updated_at    TIMESTAMP DEFAULT NOW()
 );
@@ -84,11 +86,14 @@ CREATE TABLE sites (
   address         VARCHAR(300),
   phone           VARCHAR(50),
   email           VARCHAR(200),
+  -- build_type: self(고객직접제작) | managed(본사대리제작)
   build_type      VARCHAR(20) NOT NULL DEFAULT 'self'
                   CHECK (build_type IN ('self', 'managed')),
   content         JSONB,
+  -- status: draft(미배포) | published(운영중) | suspended(정지) | cancelled(해지됨)
   status          VARCHAR(20) NOT NULL DEFAULT 'draft'
                   CHECK (status IN ('draft', 'published', 'suspended', 'cancelled')),
+  -- deploy_status: pending(대기) | building(빌드중) | live(배포완료) | failed(실패)
   deploy_status   VARCHAR(20) NOT NULL DEFAULT 'pending'
                   CHECK (deploy_status IN ('pending', 'building', 'live', 'failed')),
   trial_started_at TIMESTAMP,
@@ -111,9 +116,11 @@ CREATE TABLE one_time_payments (
   payment_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id   UUID NOT NULL REFERENCES customers(customer_id) ON DELETE RESTRICT,
   site_id       UUID REFERENCES sites(site_id) ON DELETE RESTRICT,
+  -- type: domain_setup(도메인대행) | dev_fee(개발비) | extra(기타)
   type          VARCHAR(50) NOT NULL
                 CHECK (type IN ('domain_setup', 'dev_fee', 'extra')),
   amount        INTEGER NOT NULL,
+  -- status: unpaid(미납) | paid(납부완료)
   status        VARCHAR(20) NOT NULL DEFAULT 'unpaid'
                 CHECK (status IN ('unpaid', 'paid')),
   note          TEXT,
@@ -159,13 +166,17 @@ CREATE TABLE subscriptions (
   amount            INTEGER NOT NULL DEFAULT 30000,
   billing_day       INTEGER NOT NULL DEFAULT 1
                     CHECK (billing_day BETWEEN 1 AND 28),
+  -- payment_method: manual(계좌이체/수동확인) | card(자동카드결제)
   payment_method    VARCHAR(20) NOT NULL DEFAULT 'manual'
                     CHECK (payment_method IN ('manual', 'card')),
+  -- status: pending(결제대기) | trial(무료체험중) | active(구독중) | paused(일시정지) | cancelled(해지됨)
+  -- 해지예약 판단: status='active' AND cancelled_at IS NOT NULL AND cancels_at > now()
   status            VARCHAR(20) NOT NULL DEFAULT 'active'
                     CHECK (status IN ('pending', 'trial', 'active', 'paused', 'cancelled')),
   started_at        TIMESTAMP DEFAULT NOW(),
   next_billing_date DATE,
-  cancelled_at      TIMESTAMP,
+  cancelled_at      TIMESTAMP,                     -- 해지 요청일
+  cancels_at        TIMESTAMP,                     -- 서비스 종료 예정일 (이 날짜 이후 자동 cancelled 처리)
   created_at        TIMESTAMP DEFAULT NOW(),
   updated_at        TIMESTAMP DEFAULT NOW(),
 
@@ -186,8 +197,10 @@ CREATE TABLE billing_history (
   subscription_id     UUID NOT NULL REFERENCES subscriptions(subscription_id) ON DELETE RESTRICT,
   period              VARCHAR(7) NOT NULL,      -- '2026-03'
   amount              INTEGER NOT NULL,
+  -- status: unpaid(미납) | paid(납부완료) | overdue(연체)
   status              VARCHAR(20) NOT NULL DEFAULT 'unpaid'
                       CHECK (status IN ('unpaid', 'paid', 'overdue')),
+  -- payment_method: manual(계좌이체) | card(자동카드결제)
   payment_method      VARCHAR(20) NOT NULL DEFAULT 'manual'
                       CHECK (payment_method IN ('manual', 'card')),
   paid_at             TIMESTAMP,
@@ -213,10 +226,13 @@ CREATE TABLE support_tickets (
   customer_id     UUID NOT NULL REFERENCES customers(customer_id) ON DELETE RESTRICT,
   title           VARCHAR(300) NOT NULL,
   content         TEXT NOT NULL,
+  -- category: text_change(텍스트수정) | image(이미지교체) | page_add(페이지추가) | feature(기능추가) | etc(기타)
   category        VARCHAR(50)
                   CHECK (category IN ('text_change', 'image', 'page_add', 'feature', 'etc')),
+  -- status: open(접수) | in_progress(처리중) | resolved(완료)
   status          VARCHAR(20) NOT NULL DEFAULT 'open'
                   CHECK (status IN ('open', 'in_progress', 'resolved')),
+  -- priority: low(낮음) | normal(보통) | high(높음) | urgent(긴급)
   priority        VARCHAR(20) NOT NULL DEFAULT 'normal'
                   CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
   deadline_days   INTEGER NOT NULL DEFAULT 3,
@@ -291,18 +307,22 @@ BEFORE INSERT ON support_tickets
 FOR EACH ROW EXECUTE FUNCTION set_ticket_deadline();
 
 -- 구독 취소/정지 시 사이트 status 자동 동기화
+-- cancels_at 있는 해지예약은 즉시 사이트 변경 안 함 (잔여기간 보장)
+-- 실제 만료는 preview/[domain]/page.js 방문 시 또는 관리자 "만료 구독 처리" 버튼으로 처리
 CREATE OR REPLACE FUNCTION sync_site_status()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.status = 'cancelled' THEN
+  IF NEW.status = 'cancelled' AND NEW.cancels_at IS NULL THEN
+    -- 즉시 취소: 사이트도 바로 cancelled
     UPDATE sites SET status = 'cancelled', updated_at = NOW()
     WHERE site_id = NEW.site_id;
   ELSIF NEW.status = 'paused' THEN
     UPDATE sites SET status = 'suspended', updated_at = NOW()
     WHERE site_id = NEW.site_id;
   ELSIF NEW.status IN ('active', 'trial') THEN
+    -- 재구독/재활성화 시 suspended·cancelled 사이트를 published로 복원
     UPDATE sites SET status = 'published', updated_at = NOW()
-    WHERE site_id = NEW.site_id AND status = 'suspended';
+    WHERE site_id = NEW.site_id AND status IN ('suspended', 'cancelled');
   END IF;
   RETURN NEW;
 END;
