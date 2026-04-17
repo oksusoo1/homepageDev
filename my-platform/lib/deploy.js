@@ -25,9 +25,8 @@ export async function deploySite(siteId, customerId, existingSubscription, site)
   }
 
   // ── 최초 배포: trial 14일 설정 ──
+  // next_billing_date = trial 종료일 (day 14) — 14일 지나면 첫 결제, 그 다음은 +1달
   const trialEnds = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
-  const nextBilling = new Date(trialEnds)
-  nextBilling.setMonth(nextBilling.getMonth() + 1)
 
   const { error: siteError } = await supabase.from('sites')
     .update({
@@ -47,14 +46,14 @@ export async function deploySite(siteId, customerId, existingSubscription, site)
       site_id: siteId,
       amount: 30000,
       billing_day: 1,
-      payment_method: 'manual',
+      payment_method: 'card',
       status: 'trial',
-      next_billing_date: nextBilling.toISOString().split('T')[0],
+      next_billing_date: trialEnds.toISOString().split('T')[0],
     })
     if (subError) return { error: subError.message, trialEndsAt: null, requireCard: false }
   } else {
     const { error: subError } = await supabase.from('subscriptions')
-      .update({ status: 'trial', next_billing_date: nextBilling.toISOString().split('T')[0] })
+      .update({ status: 'trial', payment_method: 'card', next_billing_date: trialEnds.toISOString().split('T')[0] })
       .eq('site_id', siteId)
     if (subError) return { error: subError.message, trialEndsAt: null, requireCard: false }
   }

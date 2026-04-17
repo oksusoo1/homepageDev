@@ -5,12 +5,12 @@ import { notFound } from 'next/navigation'
 async function getSite(domain) {
   const subdomain = domain.split('.')[0]
 
-  // 커스텀 도메인 먼저 조회 (cancelled만 제외)
+  // 커스텀 도메인 먼저 조회 (published/suspended만 허용, draft는 404)
   let { data } = await supabase
     .from('sites')
     .select('*')
     .eq('domain', domain)
-    .neq('status', 'cancelled')
+    .in('status', ['published', 'suspended'])
     .single()
   if (!data) {
     // 서브도메인으로 조회
@@ -18,7 +18,7 @@ async function getSite(domain) {
       .from('sites')
       .select('*')
       .eq('subdomain', subdomain)
-      .neq('status', 'cancelled')
+      .in('status', ['published', 'suspended'])
       .single())
   }
   if (!data) return null

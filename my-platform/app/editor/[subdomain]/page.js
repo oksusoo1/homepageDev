@@ -178,6 +178,7 @@ export default function EditorPage({ params }) {
   const { subdomain } = use(params)
   const router = useRouter()
   const [site, setSite] = useState(null)
+  const [customer, setCustomer] = useState(null)
   const [content, setContent] = useState(null)
   const [loading, setLoading] = useState(true)
   const [contact, setContact] = useState({ address: '', phone: '', email: '' })
@@ -199,6 +200,7 @@ export default function EditorPage({ params }) {
     const { data: cust } = await supabase
       .from('customers').select('*').eq('auth_id', user.id).single()
     if (!cust) { router.push('/login'); return }
+    setCustomer(cust)
 
     const { data: siteData } = await supabase
       .from('sites').select('*')
@@ -265,12 +267,24 @@ export default function EditorPage({ params }) {
   }
 
   async function handleDeploy() {
+    // 카드 등록 여부 확인 — 없으면 카드 등록 페이지로 이동 (등록 후 자동 배포)
+    const { data: card } = await supabase
+      .from('customer_payment_methods')
+      .select('payment_method_id')
+      .eq('customer_id', customer.customer_id)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (!card) {
+      router.push(`/payment/card?site_id=${site.site_id}&redirect=deploy`)
+      return
+    }
+
     setDeploying(true)
-    // 기존 구독 조회
     const { data: existingSub } = await supabase
       .from('subscriptions').select('subscription_id').eq('site_id', site.site_id).maybeSingle()
 
-    const { error, trialEndsAt } = await deployAction(site.site_id, site.customer_id, existingSub)
+    const { error, trialEndsAt } = await deployAction(site.site_id, site.customer_id, existingSub, site)
 
     if (!error) {
       setSite(prev => ({ ...prev, status: 'published', deploy_status: 'live', trial_ends_at: trialEndsAt }))

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { isAdminEmail } from '@/lib/auth'
@@ -136,22 +136,27 @@ export default function AdminConsole() {
 
   async function updateSiteStatus(siteId, status) {
     const now = new Date()
-    await supabase.from('sites').update({ status, updated_at: now.toISOString() }).eq('site_id', siteId)
 
     if (status === 'published') {
-      // 사이트 build_type 조회
+      // build_type 먼저 조회 (managed vs self 분기)
       const { data: siteInfo } = await supabase
         .from('sites').select('build_type, inquiry_id').eq('site_id', siteId).maybeSingle()
 
       if (siteInfo?.build_type === 'managed') {
-        // 루트 B: 관리자 미리보기 배포 → inquiry → review (trial 시작 안 함)
-        if (siteInfo?.inquiry_id) {
+        // 루트 B: 관리자 미리보기 배포 — deploy_status도 live, trial 없음
+        await supabase.from('sites')
+          .update({ status: 'published', deploy_status: 'live', updated_at: now.toISOString() })
+          .eq('site_id', siteId)
+        if (siteInfo.inquiry_id) {
           await supabase.from('inquiries')
             .update({ status: 'review', updated_at: now.toISOString() })
             .eq('inquiry_id', siteInfo.inquiry_id)
         }
       } else {
-        // 루트 A: self 사이트 — pending 구독 있으면 trial 시작
+        // 루트 A: self 사이트 — pending 구독이 있으면 trial 시작
+        await supabase.from('sites')
+          .update({ status: 'published', updated_at: now.toISOString() })
+          .eq('site_id', siteId)
         const { data: sub } = await supabase
           .from('subscriptions').select('subscription_id, status').eq('site_id', siteId).maybeSingle()
         if (sub?.status === 'pending') {
@@ -169,15 +174,91 @@ export default function AdminConsole() {
           }).eq('site_id', siteId)
         }
       }
+    } else {
+      await supabase.from('sites').update({ status, updated_at: now.toISOString() }).eq('site_id', siteId)
+
+      if (status === 'suspended') {
+        // 관리자 정지: 연결된 구독도 paused로 변경
+        await supabase.from('subscriptions')
+          .update({ status: 'paused', updated_at: now.toISOString() })
+          .eq('site_id', siteId)
+          .in('status', ['active', 'trial'])
+      }
     }
 
     fetchAll()
+  }
+
+  async function deleteSite(site) {
+    if (site.status !== 'draft') {
+      alert('draft 상태인 사이트만 삭제할 수 있습니다.')
+      return
+    }
+    if (!window.confirm(`"${site.name}" 사이트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return
+
+    // 구독 존재 여부 확인
+    const { data: sub } = await supabase
+      .from('subscriptions').select('subscription_id').eq('site_id', site.site_id).maybeSingle()
+    if (sub) {
+      alert('구독이 연결된 사이트는 삭제할 수 없습니다.')
+      return
+    }
+
+    const { error } = await supabase.from('sites').delete().eq('site_id', site.site_id)
+    if (error) {
+      alert('삭제 실패: ' + error.message)
+    } else {
+      setMessage('🗑️ 사이트가 삭제되었습니다.')
+      fetchAll()
+    }
   }
 
   async function updateTicketStatus(ticketId, status) {
     const update = { status }
     if (status === 'resolved') update.resolved_at = new Date().toISOString()
     await supabase.from('support_tickets').update(update).eq('ticket_id', ticketId)
+    fetchAll()
+  }
+
+  // trial/active 구독 중 next_billing_date 도래한 것 결제 처리
+  async function handleProcessBilling() {
+    const today = new Date().toISOString().split('T')[0]
+
+    const { data: due } = await supabase
+      .from('subscriptions')
+      .select('subscription_id, site_id, customer_id, next_billing_date, status')
+      .in('status', ['trial', 'active'])
+      .lte('next_billing_date', today)
+      .eq('payment_method', 'card')
+
+    if (!due?.length) { setMessage('청구할 구독이 없습니다.'); return }
+
+    for (const sub of due) {
+      const period = sub.next_billing_date.slice(0, 7) // 'YYYY-MM'
+      const nextDate = new Date(sub.next_billing_date)
+      nextDate.setMonth(nextDate.getMonth() + 1)
+      const nextBillingDate = nextDate.toISOString().split('T')[0]
+
+      // billing_history 기록
+      await supabase.from('billing_history').upsert({
+        subscription_id: sub.subscription_id,
+        period,
+        amount: 30000,
+        status: 'paid',
+        payment_method: 'card',
+        paid_at: new Date().toISOString(),
+        note: '[MOCK] 자동 카드 결제',
+      }, { onConflict: 'subscription_id,period' })
+
+      // 구독 상태 → active, 다음 청구일 +1달
+      await supabase.from('subscriptions').update({
+        status: 'active',
+        next_billing_date: nextBillingDate,
+        updated_at: new Date().toISOString(),
+      }).eq('subscription_id', sub.subscription_id)
+    }
+
+    setMessage(`✅ ${due.length}건 결제 처리 완료`)
     fetchAll()
   }
 
@@ -613,6 +694,7 @@ export default function AdminConsole() {
                             {site.status === 'draft' && btn('#16a34a', '배포', () => updateSiteStatus(site.site_id, 'published'))}
                             {site.status === 'published' && btn('#dc2626', '정지', () => updateSiteStatus(site.site_id, 'suspended'))}
                             {site.status === 'suspended' && btn('#2563eb', '복구', () => updateSiteStatus(site.site_id, 'published'))}
+                            {site.status === 'draft' && btn('#9ca3af', '삭제', () => deleteSite(site))}
                           </div>
                         </td>
                       </tr>
@@ -632,11 +714,18 @@ export default function AdminConsole() {
               <h3 style={{ margin: 0, fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
                 구독 현황 — 이번달 예상 ₩{(activeSubCount * 30000).toLocaleString()}
               </h3>
-              {/* 해지 예정일 지난 구독 일괄 cancelled 처리 */}
-              <button onClick={handleProcessExpired}
-                style={{ fontSize: 12, padding: '6px 14px', background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
-                만료 구독 처리
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {/* next_billing_date 도래한 구독 자동 결제 */}
+                <button onClick={handleProcessBilling}
+                  style={{ fontSize: 12, padding: '6px 14px', background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
+                  청구 처리
+                </button>
+                {/* 해지 예정일 지난 구독 일괄 cancelled 처리 */}
+                <button onClick={handleProcessExpired}
+                  style={{ fontSize: 12, padding: '6px 14px', background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
+                  만료 구독 처리
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto -mx-6 px-6">
             <table style={css.table}>
@@ -652,9 +741,9 @@ export default function AdminConsole() {
                   const COLS = 8
 
                   return (
-                    <>
+                    <React.Fragment key={sub.subscription_id}>
                       {/* 메인 행 — 클릭하면 납부 내역 펼침 */}
-                      <tr key={sub.subscription_id}
+                      <tr
                         onClick={() => toggleExpand(sub.subscription_id)}
                         style={{ cursor: 'pointer', background: isExpanded ? '#0f172a' : 'transparent' }}>
                         <td style={css.td}>
@@ -737,7 +826,7 @@ export default function AdminConsole() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   )
                 })}
               </tbody>
@@ -902,9 +991,17 @@ export default function AdminConsole() {
                           btn('#2563eb', '잔금 확인', () => confirmFinalPayment(inq.inquiry_id))
                         )}
 
-                        {/* 사이트 생성 — 선금 확인(building) 이후 활성화 */}
-                        {['building', 'review', 'approved', 'done'].includes(inq.status)
-                          ? btn('#6366f1', '사이트 생성→', () => {
+                        {/* 사이트 생성 / 확인 — 이미 사이트가 있으면 "사이트 확인→" */}
+                        {(() => {
+                          const linkedSite = sites.find(s => s.inquiry_id === inq.inquiry_id)
+                          if (linkedSite) {
+                            return btn('#334155', `사이트 확인→ (${linkedSite.subdomain})`, () => {
+                              setTab(0)
+                              setMessage(`ℹ️ ${inq.customers?.name} 고객의 사이트(${linkedSite.subdomain})가 이미 생성되어 있습니다.`)
+                            })
+                          }
+                          if (['building', 'review', 'approved', 'done'].includes(inq.status)) {
+                            return btn('#6366f1', '사이트 생성→', () => {
                               setForm(f => ({
                                 ...f,
                                 customer_name:  inq.customers?.name  || '',
@@ -917,8 +1014,9 @@ export default function AdminConsole() {
                               setTab(0)
                               setMessage(`📋 ${inq.customers?.name} 고객 정보를 불러왔습니다. 사이트명과 서브도메인을 입력해주세요.`)
                             })
-                          : <span style={{ fontSize: 11, color: '#475569' }}>선금 확인 후 사이트 생성 가능</span>
-                        }
+                          }
+                          return <span style={{ fontSize: 11, color: '#475569' }}>선금 확인 후 사이트 생성 가능</span>
+                        })()}
                       </div>
                     </div>
                   )

@@ -121,6 +121,9 @@ export default function CustomerPortal({ params }) {
   }
 
   async function handleDeploy() {
+    // managed 사이트는 /my 페이지에서 카드+배포 처리 (관리자 의뢰 개발)
+    if (site.build_type === 'managed') return
+
     // 카드 등록 여부 확인 — 카드 없으면 등록 페이지로 이동 (배포 후 자동 복귀)
     const { data: card } = await supabase
       .from('customer_payment_methods')
