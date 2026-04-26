@@ -3,12 +3,14 @@ import { NextResponse } from 'next/server'
 // 플랫폼 자체 도메인 (관리자 화면)
 const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN || 'localhost:3000'
 
-export function middleware(request) {
+export function proxy(request) {
   const host = request.headers.get('host') || ''
   const url = request.nextUrl.clone()
 
-  // 플랫폼 관리자 도메인이면 그대로 통과
-  if (host === PLATFORM_DOMAIN || host.startsWith('localhost')) {
+  // 플랫폼 관리자 도메인이면 그대로 통과 (IP 주소 접근 포함)
+  const isIp = /^[\d.]+/.test(host)
+  const isDevHost = host.startsWith('localhost') || host.startsWith('spboxwin.iptime.org')
+  if (host === PLATFORM_DOMAIN || isIp || isDevHost) {
     return NextResponse.next()
   }
 
