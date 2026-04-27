@@ -32,9 +32,57 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ### Step 5: 동작 확인 순서
 ```
-cd C:\git_repo\semina\project\homepageDev\my-platform
+cd C:\git_repo\homepageDev\my-platform
 npm run dev
 ```
+
+---
+
+### PM2 설치 (최초 1회 — PC에 이미 설치됨)
+```
+npm install -g pm2
+```
+Windows 자동시작 설정:
+- `pm2 save` 로 프로세스 목록 저장 → `C:\Users\iiyma\.pm2\dump.pm2`
+- 시작 프로그램 폴더에 바로가기 등록 (`pm2-startup.bat` → `pm2 resurrect` 실행)
+  위치: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\PM2-MyPlatform.lnk`
+- 로그인 시 PM2 데몬이 dump.pm2 기반으로 프로세스 자동 복원
+
+> Task Scheduler는 관리자 권한 필요로 시작 프로그램 폴더 방식 사용
+
+---
+
+### PM2 백그라운드 실행 (자동시작 설정됨)
+```
+pm2 start ecosystem.config.js   # 시작
+pm2 list                         # 상태 확인
+pm2 logs my-platform             # 로그 확인
+pm2 stop my-platform             # 중지
+pm2 restart my-platform          # 재시작
+pm2 save                         # 현재 상태 저장 (자동시작 목록 갱신)
+```
+PC 로그인 시 자동 실행됨.
+시작 프로그램: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\PM2-MyPlatform.lnk`
+
+---
+
+### 외부 접속
+| 환경 | URL |
+|------|-----|
+| 내부망 IP | http://192.168.0.22:3000 |
+| 외부망 DDNS | http://spboxwin.iptime.org:3000 |
+
+next.config.mjs `allowedDevOrigins`에 등록됨. 공유기 포트포워딩 3000 필요.
+
+---
+
+### 설정 파일
+| 파일 | 설명 |
+|------|------|
+| `next.config.mjs` | allowedDevOrigins — IP/DDNS 외부 접속 허용 |
+| `proxy.js` | 도메인 기반 라우팅 (구 middleware.js, Next.js 16 변경) |
+| `ecosystem.config.js` | PM2 프로세스 설정 |
+| `.env.local` | 환경변수 (Git 제외) |
 
 ---
 
