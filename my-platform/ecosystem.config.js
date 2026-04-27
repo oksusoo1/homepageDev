@@ -1,8 +1,8 @@
 module.exports = {
   apps: [{
     name: 'my-platform',
-    script: 'C:\\Windows\\System32\\cmd.exe',
-    args: '/c npm run dev',
+    script: 'node_modules/next/dist/bin/next',
+    args: 'dev',
     cwd: 'c:\\git_repo\\homepageDev\\my-platform',
     watch: false,
     autorestart: false,

@@ -50,6 +50,12 @@ Windows 자동시작 설정:
 
 > Task Scheduler는 관리자 권한 필요로 시작 프로그램 폴더 방식 사용
 
+**ecosystem.config.js 핵심 설정:**
+- Windows에서 `npm` / `cmd.exe /c npm run dev` 방식은 모두 오류 발생
+- `node_modules/next/dist/bin/next` 를 직접 Node.js 스크립트로 실행해야 정상 동작
+- `npm run dev` → 내부적으로 shell script 경유 → Windows Node.js 에서 파싱 오류
+- Next.js 바이너리 직접 지정 시 cwd 도 정확히 적용되어 tailwindcss 모듈 해석 오류도 해결됨
+
 ---
 
 ### PM2 백그라운드 실행 (자동시작 설정됨)
