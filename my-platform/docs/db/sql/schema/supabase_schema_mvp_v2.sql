@@ -1,5 +1,5 @@
 -- ================================================
--- supabase_schema_mvp_v2.sql
+-- supabase_schema_mvp_v2.sql (이력 보존 — 최신은 schema_v2.1_2026-08-31.sql)
 -- PK 명명규칙: 테이블명_id
 -- sites.site_id (UUID PK) / sites.site_code (VARCHAR 식별자)
 -- ================================================

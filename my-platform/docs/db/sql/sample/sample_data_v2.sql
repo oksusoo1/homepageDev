@@ -1,6 +1,7 @@
 -- ================================================
 -- sample_data_v2.sql
--- supabase_schema_mvp_v2.sql 실행 후 실행
+-- schema_v2.1_2026-08-31.sql (또는 supabase_schema_mvp_v2.sql) 실행 후 실행
+-- 경로: docs/db/sql/sample/
 -- ================================================
 
 

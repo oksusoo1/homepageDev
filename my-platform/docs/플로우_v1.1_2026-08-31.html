@@ -1,0 +1,464 @@
+<title>my-platform 전체 플로우 v1.1 — 코드 기준 상세</title>
+<style>
+  :root {
+    --bg:#f8f7f4; --surface:#fff; --surface-2:#f3f2ef; --ink:#1c1917; --ink-dim:#78716c;
+    --border:#e7e5e4; --accent:#1e40af; --accent-ink:#1e3a8a;
+    --safe:#15803d; --safe-bg:#f0fdf4; --safe-border:#bbf7d0;
+    --danger:#b91c1c; --danger-bg:#fef2f2; --danger-border:#fecaca;
+    --warn:#b45309; --warn-bg:#fffbeb; --warn-border:#fde68a;
+    --info:#1d4ed8; --info-bg:#eff6ff; --info-border:#bfdbfe;
+    --code-bg:#f5f5f4;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;line-height:1.65;font-size:15px;}
+  .page{max-width:960px;margin:0 auto;padding:48px 24px 80px;}
+  .ver-banner{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--safe-bg);border:1px solid var(--safe-border);border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:14px;}
+  .ver-tag{font-weight:800;color:var(--safe);font-size:15px;}
+  .ver-status{background:var(--safe);color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;}
+  .eyebrow{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-ink);background:var(--info-bg);border:1px solid var(--info-border);padding:4px 12px;border-radius:999px;margin-bottom:14px;}
+  h1{font-size:30px;font-weight:800;margin:0 0 10px;letter-spacing:-.02em;}
+  .sub{color:var(--ink-dim);font-size:16px;margin-bottom:24px;max-width:70ch;}
+  nav.toc{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 22px;margin:24px 0;}
+  nav.toc .tl{font-size:11px;font-weight:700;color:var(--ink-dim);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em;}
+  nav.toc ol{margin:0;padding-left:20px;columns:2;column-gap:24px;}
+  nav.toc li{font-size:14px;margin-bottom:4px;break-inside:avoid;}
+  nav.toc a{color:var(--ink);text-decoration:none;} nav.toc a:hover{color:var(--accent);}
+  section{margin-top:48px;scroll-margin-top:16px;}
+  h2{font-size:22px;font-weight:800;margin:0 0 8px;border-bottom:2px solid var(--border);padding-bottom:8px;}
+  h2 .n{color:var(--accent);margin-right:8px;}
+  h3{font-size:16px;font-weight:700;margin:24px 0 10px;}
+  p{margin:0 0 12px;max-width:72ch;}
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:14px 0;}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top;}
+  th{font-size:11px;font-weight:700;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.05em;background:var(--surface-2);}
+  code{font-family:ui-monospace,Consolas,monospace;background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:.88em;}
+  pre{margin:14px 0;padding:14px 16px;background:var(--code-bg);border-radius:9px;overflow-x:auto;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;}
+  figure{margin:20px 0 6px;}
+  .frame{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 14px 6px;overflow-x:auto;}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto;}
+  figcaption{font-size:12.5px;color:var(--ink-dim);text-align:center;margin-top:10px;padding:0 10px;}
+  .note{display:flex;gap:14px;border-radius:0 9px 9px 0;padding:14px 18px;margin:16px 0;background:var(--surface-2);border:1px solid var(--border);border-left:3px solid var(--accent);}
+  .note.bad{background:var(--danger-bg);border-color:var(--danger-border);border-left-color:var(--danger);}
+  .note.good{background:var(--safe-bg);border-color:var(--safe-border);border-left-color:var(--safe);}
+  .note.warn{background:var(--warn-bg);border-color:var(--warn-border);border-left-color:var(--warn);}
+  .note.info{background:var(--info-bg);border-color:var(--info-border);border-left-color:var(--info);}
+  .note .mk{font-weight:800;font-size:13.5px;white-space:nowrap;flex-shrink:0;}
+  .note p{margin:0;font-size:14px;} .note p+p{margin-top:6px;}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;margin-right:4px;}
+  .badge.self{background:#dbeafe;color:#1e40af;} .badge.managed{background:#fce7f3;color:#9d174d;}
+  .tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:4px;}
+  .tag.trial{background:#fef9c3;color:#854d0e;border:1px solid #fde68a;}
+  .tag.active{background:#dcfce7;color:#166534;border:1px solid #bbf7d0;}
+  .tag.draft{background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb;}
+  footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--border);font-size:12px;color:var(--ink-dim);}
+</style>
+
+<div class="page">
+  <div class="ver-banner">
+    <span class="ver-tag">v1.1</span>
+    <span class="ver-status">현행</span>
+    <span>작성: 2026-08-31</span>
+    <span>코드 직접 확인 기준</span>
+    <span style="margin-left:auto;"><a href="플로우_버전목록.html">버전 목록</a> · <a href="플로우_v1.0_2026-08-31.html">v1.0</a></span>
+  </div>
+
+  <header>
+    <div class="eyebrow">my-platform · 플로우 명세 · 코드 동기화</div>
+    <h1>전체 플로우 v1.1</h1>
+    <p class="sub"><code>lib/deploy.js</code>, <code>app/my/[subdomain]/page.js</code>, <code>app/payment/card/page.js</code>, <code>app/platform/page.js</code>, <code>app/preview/[domain]/page.js</code> 를 직접 읽고 작성. v1.0 대비 실제 동작·예외·미구현 항목을 보강.</p>
+  </header>
+
+  <section id="s0">
+    <h2><span class="n">00</span>버전 정보</h2>
+    <table>
+      <tr><th>항목</th><th>내용</th></tr>
+      <tr><td>버전</td><td><strong>v1.1</strong> (v1.0 → 코드 검증·도식 추가)</td></tr>
+      <tr><td>이전 버전</td><td><a href="플로우_v1.0_2026-08-31.html">v1.0</a></td></tr>
+      <tr><td>v1.1 변경 요약</td><td>
+        ① "자동 청구" → 관리자 수동 청구로 정정<br>
+        ② "카드 결제" vs "카드 등록" 구분 명시<br>
+        ③ trial 중 해지/탈퇴/카드 유지 동작 상세<br>
+        ④ preview 접근 조건 도식화<br>
+        ⑤ 관리자 배포 vs 고객 배포 경로 분리
+      </td></tr>
+    </table>
+  </section>
+
+  <nav class="toc">
+    <div class="tl">목차</div>
+    <ol>
+      <li><a href="#s0">버전 정보</a></li>
+      <li><a href="#s1">핵심 정책 (코드 기준)</a></li>
+      <li><a href="#s2">상태값 매트릭스</a></li>
+      <li><a href="#s3">루트 A 도식</a></li>
+      <li><a href="#s4">루트 B 도식</a></li>
+      <li><a href="#s5">배포 분기 (카드·trial)</a></li>
+      <li><a href="#s6">trial 14일 타임라인</a></li>
+      <li><a href="#s7">청구 처리</a></li>
+      <li><a href="#s8">해지·탈퇴·카드</a></li>
+      <li><a href="#s9">preview 접근</a></li>
+      <li><a href="#s10">관리자 vs 고객 경로 차이</a></li>
+      <li><a href="#s11">관련 파일</a></li>
+    </ol>
+  </nav>
+
+  <!-- 1 -->
+  <section id="s1">
+    <h2><span class="n">01</span>핵심 정책 (코드 기준)</h2>
+    <table>
+      <tr><th>질문</th><th>코드 답</th><th>근거 파일</th></tr>
+      <tr>
+        <td>배포 전 카드 필요?</td>
+        <td><strong>카드 등록 필수</strong> (실결제 아님, MOCK 시 가짜 빌링키 저장)</td>
+        <td><code>my/[subdomain]/page.js</code> handleDeploy L128-137</td>
+      </tr>
+      <tr>
+        <td>카드 없이 preview?</td>
+        <td><strong>불가</strong> — draft는 preview 404. 에디터 내 미리보기만 가능</td>
+        <td><code>preview/[domain]/page.js</code> L8-14</td>
+      </tr>
+      <tr>
+        <td>trial 중 구독 상태?</td>
+        <td><code>subscriptions.status = 'trial'</code>, <code>sites.status = 'published'</code></td>
+        <td><code>lib/deploy.js</code> L31-51</td>
+      </tr>
+      <tr>
+        <td>day14 이후 결제?</td>
+        <td><strong>자동 아님</strong> — 관리자 "청구 처리" 수동 (MOCK 메모만)</td>
+        <td><code>platform/page.js</code> handleProcessBilling</td>
+      </tr>
+      <tr>
+        <td>해지 시 카드 삭제?</td>
+        <td><strong>삭제 안 함</strong> — <code>customer_payment_methods</code> 유지</td>
+        <td>해지/탈퇴 코드 전체 — delete 없음</td>
+      </tr>
+      <tr>
+        <td>trial 중 "구독 해지" 버튼?</td>
+        <td><strong>UI에 없음</strong> — <code>status==='active'</code> 일 때만 표시</td>
+        <td><code>my/[subdomain]/page.js</code> L552</td>
+      </tr>
+    </table>
+
+    <div class="note warn">
+      <div class="mk">UI 문구 오류</div>
+      <div><p>결제 탭 배너: <em>"체험 종료 후 카드 등록 시…"</em> → 실제는 <b>배포 전</b> 카드 등록. 코드와 불일치 (향후 UI 수정 필요).</p></div>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section id="s2">
+    <h2><span class="n">02</span>상태값 매트릭스</h2>
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 880 320" role="img" aria-label="사이트와 구독 상태 관계">
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1e40af"/></marker>
+          </defs>
+          <g font-family="-apple-system,'Malgun Gothic',sans-serif" font-size="12">
+            <!-- sites -->
+            <text x="20" y="24" font-weight="800" fill="#1e40af">sites</text>
+            <rect x="20" y="36" width="100" height="36" rx="6" fill="#f3f4f6" stroke="#9ca3af"/>
+            <text x="70" y="58" text-anchor="middle">draft</text>
+            <rect x="140" y="36" width="110" height="36" rx="6" fill="#dcfce7" stroke="#22c55e"/>
+            <text x="195" y="58" text-anchor="middle" font-weight="700">published</text>
+            <rect x="270" y="36" width="110" height="36" rx="6" fill="#fef2f2" stroke="#ef4444"/>
+            <text x="325" y="58" text-anchor="middle">suspended</text>
+            <rect x="400" y="36" width="100" height="36" rx="6" fill="#f3f4f6" stroke="#6b7280"/>
+            <text x="450" y="58" text-anchor="middle">cancelled</text>
+
+            <!-- subscriptions -->
+            <text x="20" y="110" font-weight="800" fill="#1e40af">subscriptions</text>
+            <rect x="20" y="122" width="70" height="32" rx="6" fill="#f3f4f6" stroke="#9ca3af"/>
+            <text x="55" y="142" text-anchor="middle" font-size="11">(없음)</text>
+            <rect x="110" y="122" width="70" height="32" rx="6" fill="#fef9c3" stroke="#eab308"/>
+            <text x="145" y="142" text-anchor="middle" font-weight="700">trial</text>
+            <rect x="200" y="122" width="70" height="32" rx="6" fill="#dcfce7" stroke="#22c55e"/>
+            <text x="235" y="142" text-anchor="middle" font-weight="700">active</text>
+            <rect x="290" y="122" width="70" height="32" rx="6" fill="#ffedd5" stroke="#f97316"/>
+            <text x="325" y="142" text-anchor="middle">paused</text>
+            <rect x="380" y="122" width="80" height="32" rx="6" fill="#f3f4f6" stroke="#6b7280"/>
+            <text x="420" y="142" text-anchor="middle">cancelled</text>
+
+            <!-- arrows -->
+            <path d="M70 72 L70 95 L145 95 L145 118" fill="none" stroke="#1e40af" marker-end="url(#arr)"/>
+            <text x="100" y="90" font-size="10" fill="#78716c">배포(deploySite)</text>
+            <path d="M195 72 L195 95 L235 95 L235 118" fill="none" stroke="#1e40af" marker-end="url(#arr)"/>
+            <text x="215" y="90" font-size="10" fill="#78716c">청구 처리</text>
+            <path d="M325 72 L325 95 L325 118" fill="none" stroke="#ef4444" marker-end="url(#arr)"/>
+            <text x="340" y="90" font-size="10" fill="#78716c">정지</text>
+            <path d="M325 154 L325 170 L325 36" fill="none" stroke="#f97316" marker-end="url(#arr)"/>
+            <text x="340" y="168" font-size="10" fill="#78716c">paused→suspended (트리거)</text>
+
+            <!-- preview box -->
+            <rect x="520" y="36" width="340" height="200" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+            <text x="540" y="62" font-weight="800" fill="#1e40af">/preview 접근</text>
+            <text x="540" y="88" fill="#1c1917">draft → 404</text>
+            <text x="540" y="112" fill="#1c1917">published → 정상 표시</text>
+            <text x="540" y="136" fill="#1c1917">suspended → 🔒 잠금 안내</text>
+            <text x="540" y="160" fill="#1c1917">cancelled → 404</text>
+            <text x="540" y="196" font-size="11" fill="#78716c">※ 구독 없어도 published면 접근 가능</text>
+            <text x="540" y="216" font-size="11" fill="#78716c">(managed 관리자 선배포 케이스)</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>sites.status 와 subscriptions.status 는 별도. trial 기간 = published + trial 동시.</figcaption>
+    </figure>
+  </section>
+
+  <!-- 3 Route A -->
+  <section id="s3">
+    <h2><span class="n">03</span>루트 A — 고객 직접 제작 <span class="badge self">self</span></h2>
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 900 200" role="img">
+          <g font-family="-apple-system,'Malgun Gothic',sans-serif" font-size="11">
+            <defs><marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker></defs>
+            <line x1="30" y1="100" x2="870" y2="100" stroke="#cbd5e1" stroke-width="2" marker-end="url(#a2)"/>
+            <g text-anchor="middle">
+              <rect x="20" y="78" width="72" height="44" rx="6" fill="#fff" stroke="#94a3b8"/><text x="56" y="98">/login</text><text x="56" y="112" font-size="9" fill="#64748b">가입</text>
+              <rect x="108" y="78" width="72" height="44" rx="6" fill="#fff" stroke="#94a3b8"/><text x="144" y="98">/templates</text>
+              <rect x="196" y="78" width="64" height="44" rx="6" fill="#fff" stroke="#94a3b8"/><text x="228" y="98">/setup</text><text x="228" y="112" font-size="9" fill="#64748b">draft</text>
+              <rect x="276" y="78" width="80" height="44" rx="6" fill="#fff" stroke="#94a3b8"/><text x="316" y="98">/editor</text><text x="316" y="112" font-size="9" fill="#64748b">편집</text>
+              <rect x="372" y="60" width="100" height="80" rx="6" fill="#fef9c3" stroke="#eab308"/>
+              <text x="422" y="88" font-weight="700">배포 클릭</text>
+              <text x="422" y="104" font-size="9">카드 없음?</text>
+              <text x="422" y="118" font-size="9">→ /payment/card</text>
+              <text x="422" y="132" font-size="9">?redirect=deploy</text>
+              <rect x="488" y="78" width="88" height="44" rx="6" fill="#dbeafe" stroke="#3b82f6"/>
+              <text x="532" y="98">카드 등록</text><text x="532" y="112" font-size="9" fill="#64748b">MOCK</text>
+              <rect x="592" y="78" width="96" height="44" rx="6" fill="#dcfce7" stroke="#22c55e"/>
+              <text x="640" y="98" font-weight="700">deploySite()</text><text x="640" y="112" font-size="9">trial 시작</text>
+              <rect x="704" y="78" width="88" height="44" rx="6" fill="#dcfce7" stroke="#22c55e"/>
+              <text x="748" y="98">/preview</text><text x="748" y="112" font-size="9">공개</text>
+            </g>
+            <text x="450" y="168" text-anchor="middle" font-size="10" fill="#64748b">setup 시 subscriptions 생성 안 함 — deploySite() 에서 최초 생성</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>루트 A: 카드 등록과 배포가 한 세트. 등록 시점에 실결제 없음(MOCK).</figcaption>
+    </figure>
+
+    <h3>단계별 DB</h3>
+    <table>
+      <tr><th>단계</th><th>sites</th><th>subscriptions</th><th>customer_payment_methods</th></tr>
+      <tr><td>setup 완료</td><td>draft / pending</td><td>없음</td><td>없을 수 있음</td></tr>
+      <tr><td>카드 등록만 (배포 X)</td><td>draft</td><td>없음</td><td>is_active=true</td></tr>
+      <tr><td>배포 완료 (최초)</td><td>published / live + trial_*</td><td>trial, next_billing=day14</td><td>유지</td></tr>
+    </table>
+  </section>
+
+  <!-- 4 Route B -->
+  <section id="s4">
+    <h2><span class="n">04</span>루트 B — 본사 대리 <span class="badge managed">managed</span></h2>
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 900 240" role="img">
+          <g font-family="-apple-system,'Malgun Gothic',sans-serif" font-size="11">
+            <text x="20" y="24" font-weight="800" fill="#9d174d">고객</text>
+            <rect x="20" y="36" width="100" height="32" rx="5" fill="#fce7f3" stroke="#db2777"/><text x="70" y="56" text-anchor="middle">문의 접수</text>
+            <rect x="140" y="36" width="100" height="32" rx="5" fill="#fce7f3" stroke="#db2777"/><text x="190" y="56" text-anchor="middle">미리보기 확인</text>
+            <rect x="260" y="36" width="120" height="32" rx="5" fill="#dcfce7" stroke="#22c55e"/><text x="320" y="56" text-anchor="middle">카드+배포 CTA</text>
+
+            <text x="20" y="100" font-weight="800" fill="#92400e">관리자 /platform</text>
+            <rect x="20" y="112" width="80" height="32" rx="5" fill="#fef3c7" stroke="#f59e0b"/><text x="60" y="132" text-anchor="middle">견적</text>
+            <rect x="115" y="112" width="80" height="32" rx="5" fill="#fef3c7" stroke="#f59e0b"/><text x="155" y="132" text-anchor="middle">선금</text>
+            <rect x="210" y="112" width="90" height="32" rx="5" fill="#fef3c7" stroke="#f59e0b"/><text x="255" y="132" text-anchor="middle">사이트 개설</text>
+            <rect x="315" y="112" width="90" height="32" rx="5" fill="#dbeafe" stroke="#3b82f6"/><text x="360" y="132" text-anchor="middle">배포(선행)</text>
+            <rect x="420" y="112" width="80" height="32" rx="5" fill="#fef3c7" stroke="#f59e0b"/><text x="460" y="132" text-anchor="middle">잔금</text>
+
+            <text x="20" y="180" font-size="10" fill="#64748b">관리자 배포 시: published/live, inquiry→review, trial 없음, 구독 없음</text>
+            <text x="20" y="198" font-size="10" fill="#64748b">고객 카드+배포 시: deploySite() → trial 시작, inquiry→done</text>
+            <text x="20" y="216" font-size="10" fill="#64748b">고객 포털 /my/{subdomain} 에서 배포 버튼 숨김 (build_type==='managed')</text>
+          </g>
+        </svg>
+      </div>
+    </figure>
+  </section>
+
+  <!-- 5 deploy -->
+  <section id="s5">
+    <h2><span class="n">05</span>배포 분기 — deploySite()</h2>
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 700 280" role="img">
+          <g font-family="-apple-system,'Malgun Gothic',sans-serif" font-size="12">
+            <rect x="250" y="10" width="200" height="36" rx="8" fill="#dbeafe" stroke="#3b82f6"/>
+            <text x="350" y="33" text-anchor="middle" font-weight="700">handleDeploy / deploySite</text>
+            <line x1="350" y1="46" x2="350" y2="70" stroke="#334155" marker-end="url(#arr)"/>
+            <polygon points="350,70 280,110 420,110" fill="#fef9c3" stroke="#eab308"/>
+            <text x="350" y="98" text-anchor="middle" font-size="11">활성 카드 있음?</text>
+            <line x1="280" y1="110" x2="120" y2="150" stroke="#ef4444"/><text x="170" y="135" font-size="10" fill="#ef4444">No</text>
+            <rect x="20" y="150" width="200" height="40" rx="6" fill="#fef2f2" stroke="#ef4444"/>
+            <text x="120" y="168" text-anchor="middle" font-size="11">/payment/card</text>
+            <text x="120" y="182" text-anchor="middle" font-size="10">?redirect=deploy</text>
+            <line x1="420" y1="110" x2="580" y2="150" stroke="#22c55e"/><text x="510" y="135" font-size="10" fill="#22c55e">Yes</text>
+            <polygon points="580,150 500,190 660,190" fill="#fef9c3" stroke="#eab308"/>
+            <text x="580" y="178" text-anchor="middle" font-size="11">trial_started_at</text>
+            <text x="580" y="192" text-anchor="middle" font-size="11">있음?</text>
+            <rect x="500" y="200" width="160" height="36" rx="6" fill="#dcfce7" stroke="#22c55e"/>
+            <text x="580" y="222" text-anchor="middle" font-size="10">No → trial 14일 + sub=trial</text>
+            <rect x="500" y="242" width="160" height="32" rx="6" fill="#ffedd5" stroke="#f97316"/>
+            <text x="580" y="262" text-anchor="middle" font-size="10">Yes → 배포만, requireCard</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>카드 = 결제 완료가 아니라 DB에 빌링키(MOCK) 등록 여부.</figcaption>
+    </figure>
+
+    <pre>// lib/deploy.js — 최초 배포 시
+sites:     status=published, deploy_status=live, trial_started_at, trial_ends_at(+14일)
+subscriptions: insert status='trial', payment_method='card', next_billing_date=day14</pre>
+  </section>
+
+  <!-- 6 trial timeline -->
+  <section id="s6">
+    <h2><span class="n">06</span>trial 14일 타임라인</h2>
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 880 160" role="img">
+          <g font-family="-apple-system,'Malgun Gothic',sans-serif">
+            <line x1="40" y1="80" x2="840" y2="80" stroke="#cbd5e1" stroke-width="2"/>
+            <g font-size="11" font-variant-numeric="tabular-nums">
+              <line x1="80" y1="72" x2="80" y2="88" stroke="#22c55e" stroke-width="2"/>
+              <text x="80" y="105" text-anchor="middle" font-weight="700" fill="#22c55e">Day 0</text>
+              <text x="80" y="120" text-anchor="middle" font-size="10">배포</text>
+              <rect x="80" y="40" width="200" height="24" rx="4" fill="#fef9c3" stroke="#eab308"/>
+              <text x="180" y="56" text-anchor="middle" font-size="10" font-weight="700">sub.status = trial</text>
+              <line x1="400" y1="72" x2="400" y2="88" stroke="#64748b"/>
+              <text x="400" y="105" text-anchor="middle">Day 1~13</text>
+              <text x="400" y="120" text-anchor="middle" font-size="10">preview 이용</text>
+              <line x1="720" y1="72" x2="720" y2="88" stroke="#1e40af" stroke-width="2"/>
+              <text x="720" y="105" text-anchor="middle" font-weight="700" fill="#1e40af">Day 14</text>
+              <text x="720" y="120" text-anchor="middle" font-size="10">next_billing_date</text>
+              <rect x="620" y="40" width="200" height="24" rx="4" fill="#dbeafe" stroke="#3b82f6"/>
+              <text x="720" y="56" text-anchor="middle" font-size="10">관리자 청구 처리 → active</text>
+            </g>
+            <text x="440" y="145" text-anchor="middle" font-size="10" fill="#64748b">※ 자동 결제/Cron 없음 — platform "청구 처리" 버튼 수동</text>
+          </g>
+        </svg>
+      </div>
+    </figure>
+
+    <table>
+      <tr><th>시점</th><th>sites.status</th><th>subscriptions.status</th><th>고객 UI</th></tr>
+      <tr><td>배포 직후</td><td>published</td><td><span class="tag trial">trial</span></td><td>🟡 무료 체험중, D-day</td></tr>
+      <tr><td>day14 청구 후</td><td>published</td><td><span class="tag active">active</span></td><td>🟢 이용중</td></tr>
+      <tr><td>관리자 정지</td><td>suspended</td><td>paused</td><td>🔒 preview 잠금</td></tr>
+    </table>
+  </section>
+
+  <!-- 7 billing -->
+  <section id="s7">
+    <h2><span class="n">07</span>청구 처리 (관리자 수동)</h2>
+    <pre>// platform/page.js — handleProcessBilling
+대상: status IN ('trial','active') AND next_billing_date &lt;= today AND payment_method='card'
+처리: billing_history INSERT (paid, 30000, note='[MOCK] 자동 카드 결제')
+      subscriptions.status = 'active'
+      subscriptions.next_billing_date += 1달</pre>
+    <div class="note bad">
+      <div class="mk">미구현</div>
+      <div><p>토스 실결제 API 호출 없음. Vercel Cron / pg_cron 자동 스케줄 없음. billing-auth/route.js 는 재구독 시 즉시결제용 — 신규 trial 배포와 정책 불일치.</p></div>
+    </div>
+  </section>
+
+  <!-- 8 cancel -->
+  <section id="s8">
+    <h2><span class="n">08</span>해지 · 탈퇴 · 카드</h2>
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 860 200" role="img">
+          <g font-family="-apple-system,'Malgun Gothic',sans-serif" font-size="11">
+            <rect x="20" y="20" width="260" height="160" rx="8" fill="#fef9c3" stroke="#eab308"/>
+            <text x="150" y="44" text-anchor="middle" font-weight="800">trial 중</text>
+            <text x="40" y="68">구독 해지 버튼: 없음</text>
+            <text x="40" y="88">계정 탈퇴: 즉시 cancelled</text>
+            <text x="40" y="108">sites → cancelled</text>
+            <text x="40" y="128">카드: 삭제 안 함</text>
+            <text x="40" y="156" font-size="10" fill="#64748b">my/[subdomain] handleWithdraw L223-237</text>
+
+            <rect x="300" y="20" width="260" height="160" rx="8" fill="#dcfce7" stroke="#22c55e"/>
+            <text x="430" y="44" text-anchor="middle" font-weight="800">active 중</text>
+            <text x="320" y="68">구독 해지: cancels_at 예약</text>
+            <text x="320" y="88">만료 전까지 preview 이용</text>
+            <text x="320" y="108">cancels_at 경과 → suspended</text>
+            <text x="320" y="128">카드: 삭제 안 함</text>
+            <text x="320" y="156" font-size="10" fill="#64748b">handleCancelSubscription L162-175</text>
+
+            <rect x="580" y="20" width="260" height="160" rx="8" fill="#f3f4f6" stroke="#9ca3af"/>
+            <text x="710" y="44" text-anchor="middle" font-weight="800">cancelled 후</text>
+            <text x="600" y="68">재구독 버튼 → /payment/card</text>
+            <text x="600" y="88">MOCK 즉시결제 30,000원</text>
+            <text x="600" y="108">status → active, published 복원</text>
+            <text x="600" y="128">새 카드 등록 시 기존 카드 비활성화</text>
+            <text x="600" y="156" font-size="10" fill="#64748b">payment/card/page.js L105-140</text>
+          </g>
+        </svg>
+      </div>
+    </figure>
+  </section>
+
+  <!-- 9 preview -->
+  <section id="s9">
+    <h2><span class="n">09</span>preview 접근 규칙</h2>
+    <table>
+      <tr><th>조건</th><th>결과</th><th>코드</th></tr>
+      <tr><td>status = draft</td><td>404 notFound</td><td>preview page .in('published','suspended')</td></tr>
+      <tr><td>status = published</td><td>사이트 표시</td><td>—</td></tr>
+      <tr><td>status = suspended</td><td>🔒 잠금 안내</td><td>preview page L62-75</td></tr>
+      <tr><td>cancels_at 만료 방문</td><td>자동 cancelled + suspended</td><td>preview page L33-40</td></tr>
+    </table>
+    <div class="note good">
+      <div class="mk">정리</div>
+      <div><p>카드 없이는 <b>배포(draft→published) 불가</b>이므로, 일반 고객 경로에서 "preview만 되고 배포는 안 됨" 상태는 <b>없음</b>. draft = 에디터 미리보기만.</p></div>
+    </div>
+  </section>
+
+  <!-- 10 admin vs customer -->
+  <section id="s10">
+    <h2><span class="n">10</span>관리자 배포 vs 고객 배포</h2>
+    <table>
+      <tr><th>경로</th><th>카드 체크</th><th>trial 시작</th><th>용도</th></tr>
+      <tr>
+        <td>고객 handleDeploy / deploySite</td>
+        <td>✅ 필수</td>
+        <td>✅ 최초 1회</td>
+        <td>루트 A 정상 플로우</td>
+      </tr>
+      <tr>
+        <td>관리자 updateSiteStatus('published') self</td>
+        <td>❌ 없음</td>
+        <td>pending 구독 있을 때만 (레거시)</td>
+        <td>관리자 콘솔 "배포" 버튼</td>
+      </tr>
+      <tr>
+        <td>관리자 updateSiteStatus managed</td>
+        <td>❌ 없음</td>
+        <td>❌ 없음</td>
+        <td>고객 미리보기용 선배포</td>
+      </tr>
+    </table>
+    <div class="note warn">
+      <div class="mk">주의</div>
+      <div><p>관리자가 self 사이트를 platform에서 직접 "배포"하면 카드 없이 published 될 수 있음. 고객 정상 경로와 다름.</p></div>
+    </div>
+  </section>
+
+  <!-- 11 files -->
+  <section id="s11">
+    <h2><span class="n">11</span>관련 파일</h2>
+    <table>
+      <tr><th>역할</th><th>파일</th></tr>
+      <tr><td>배포 핵심</td><td><code>lib/deploy.js</code></td></tr>
+      <tr><td>고객 배포·해지·탈퇴</td><td><code>app/my/[subdomain]/page.js</code></td></tr>
+      <tr><td>카드 등록·자동배포</td><td><code>app/payment/card/page.js</code></td></tr>
+      <tr><td>관리자 청구·정지</td><td><code>app/platform/page.js</code></td></tr>
+      <tr><td>방문자 사이트·만료처리</td><td><code>app/preview/[domain]/page.js</code></td></tr>
+      <tr><td>에디터 배포</td><td><code>app/editor/[subdomain]/page.js</code></td></tr>
+      <tr><td>사이트 생성</td><td><code>app/setup/page.js</code></td></tr>
+    </table>
+  </section>
+
+  <footer>
+    문서 ID: 플로우_v1.1_2026-08-31 · 코드 기준 상세 · 이 파일은 수정하지 않음 · 변경 시 v1.2 신규 생성
+  </footer>
+</div>

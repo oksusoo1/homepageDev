@@ -1,0 +1,157 @@
+<title>my-platform DB 스키마 v1.0 (2026-08-31)</title>
+<style>
+  :root { --bg:#f8f7f4; --surface:#fff; --ink:#1c1917; --dim:#78716c; --border:#e7e5e4; --accent:#1e40af; --safe:#15803d; --warn:#b45309; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; line-height:1.65; font-size:15px; }
+  .page { max-width:960px; margin:0 auto; padding:48px 24px 80px; }
+  h1 { font-size:28px; font-weight:800; margin:0 0 6px; }
+  .meta { color:var(--dim); font-size:14px; margin-bottom:28px; }
+  .meta a { color:var(--accent); }
+  h2 { font-size:20px; margin:36px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--border); }
+  h3 { font-size:16px; margin:24px 0 8px; color:#44403c; }
+  table { width:100%; border-collapse:collapse; font-size:13px; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; margin:12px 0 20px; }
+  th,td { padding:8px 12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { background:#f3f2ef; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); }
+  tr:last-child td { border-bottom:none; }
+  code { background:#f5f5f4; padding:2px 6px; border-radius:4px; font-size:.9em; }
+  .box { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px 18px; margin:16px 0; font-size:14px; }
+  .new { background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:700; }
+  .diagram { background:#fff; border:1px solid var(--border); border-radius:10px; padding:20px; font-family:ui-monospace,Consolas,monospace; font-size:13px; line-height:1.7; overflow-x:auto; white-space:pre; }
+  ul { padding-left:20px; }
+</style>
+
+<div class="page">
+  <h1>DB 스키마 명세 v1.0</h1>
+  <p class="meta">
+    작성일: 2026-08-31 &nbsp;|&nbsp;
+    SQL: <a href="sql/schema/schema_v2.1_2026-08-31.sql">schema_v2.1_2026-08-31.sql</a> &nbsp;|&nbsp;
+    <a href="스키마_버전목록.html">버전 목록</a>
+  </p>
+
+  <div class="box">
+    <strong>v1.0 변경 요약</strong>
+    <ul>
+      <li><code>staff</code> 테이블 신규 — 본사 직원·플랫폼 관리자 권한</li>
+      <li>SQL 스크립트를 <code>docs/db/sql/</code> 로 통합 관리</li>
+      <li>인증(<code>auth.users</code>)과 업무 테이블(<code>customers</code>, <code>staff</code>) 분리 원칙 명시</li>
+    </ul>
+  </div>
+
+  <h2>1. 인증과 업무 테이블</h2>
+  <p>Supabase Auth가 <code>auth.users</code>를 관리합니다. 비밀번호는 여기에만 저장하고, 앱 테이블은 <code>auth_id</code>로 연결합니다.</p>
+
+  <div class="diagram">auth.users (Supabase 내장)
+    │
+    ├── auth_id ──► public.customers   고객 (회원가입 시 자동 생성)
+    │
+    └── auth_id ──► public.staff       본사 직원 (수동 등록)</div>
+
+  <table>
+    <tr><th>구분</th><th>테이블</th><th>생성 방법</th><th>로그인 후 화면</th></tr>
+    <tr><td>고객</td><td><code>customers</code></td><td><code>/login</code> 회원가입</td><td><code>/my</code></td></tr>
+    <tr><td>본사 직원</td><td><code>staff</code> <span class="new">NEW</span></td><td>대시보드 Add user + SQL INSERT</td><td><code>/platform</code> (2단계 코드 연동 예정)</td></tr>
+  </table>
+
+  <h2>2. 테이블 목록</h2>
+  <table>
+    <tr><th>#</th><th>테이블</th><th>용도</th></tr>
+    <tr><td>1</td><td><code>customers</code></td><td>고객 프로필</td></tr>
+    <tr><td>2</td><td><code>staff</code></td><td>본사 직원·관리자</td></tr>
+    <tr><td>3</td><td><code>templates</code></td><td>사이트 템플릿</td></tr>
+    <tr><td>4</td><td><code>sites</code></td><td>고객 사이트</td></tr>
+    <tr><td>5</td><td><code>one_time_payments</code></td><td>1회성 결제 (개발비·도메인)</td></tr>
+    <tr><td>6</td><td><code>customer_payment_methods</code></td><td>카드(빌링키)</td></tr>
+    <tr><td>7</td><td><code>subscriptions</code></td><td>월 구독</td></tr>
+    <tr><td>8</td><td><code>billing_history</code></td><td>월별 청구 이력</td></tr>
+    <tr><td>9</td><td><code>support_tickets</code></td><td>수정 요청</td></tr>
+    <tr><td>10</td><td><code>inquiries</code></td><td>본사 대리 제작 문의 (루트 B)</td></tr>
+    <tr><td>11</td><td><code>posts</code></td><td>사이트 게시판</td></tr>
+  </table>
+
+  <h2>3. staff <span class="new">NEW</span></h2>
+  <p>본사 직원 프로필. 비밀번호 컬럼 없음 — <code>auth.users</code>에만 존재.</p>
+
+  <table>
+    <tr><th>컬럼</th><th>타입</th><th>설명</th></tr>
+    <tr><td><code>staff_id</code></td><td>UUID PK</td><td>직원 ID</td></tr>
+    <tr><td><code>auth_id</code></td><td>UUID UNIQUE NOT NULL</td><td>FK → <code>auth.users(id)</code></td></tr>
+    <tr><td><code>email</code></td><td>VARCHAR(200) UNIQUE</td><td>로그인 이메일</td></tr>
+    <tr><td><code>name</code></td><td>VARCHAR(100)</td><td>이름</td></tr>
+    <tr><td><code>role</code></td><td>VARCHAR(30)</td><td>권한 (아래 참고)</td></tr>
+    <tr><td><code>status</code></td><td>VARCHAR(20)</td><td>재직 상태</td></tr>
+    <tr><td><code>created_at</code></td><td>TIMESTAMP</td><td></td></tr>
+    <tr><td><code>updated_at</code></td><td>TIMESTAMP</td><td></td></tr>
+  </table>
+
+  <h3>role 값</h3>
+  <table>
+    <tr><th>값</th><th>설명</th><th>MVP</th></tr>
+    <tr><td><code>platform_admin</code></td><td>/platform 전체 관리</td><td>● 사용</td></tr>
+    <tr><td><code>support</code></td><td>수정요청·문의 처리</td><td>예약 (2차)</td></tr>
+    <tr><td><code>viewer</code></td><td>읽기 전용</td><td>예약 (2차)</td></tr>
+  </table>
+
+  <h3>status 값</h3>
+  <table>
+    <tr><th>값</th><th>설명</th></tr>
+    <tr><td><code>active</code></td><td>재직·로그인 가능</td></tr>
+    <tr><td><code>suspended</code></td><td>정지 (로그인 차단 예정)</td></tr>
+    <tr><td><code>left</code></td><td>퇴사</td></tr>
+  </table>
+
+  <h3>관리자 등록 절차</h3>
+  <div class="box">
+    <ol style="margin:0;padding-left:20px;">
+      <li>Supabase 대시보드 → Authentication → Users → <strong>Add user</strong></li>
+      <li>생성된 사용자의 <code>id</code>(UUID) 확인</li>
+      <li>SQL Editor에서 실행:
+        <pre style="margin:8px 0 0;background:#f5f5f4;padding:12px;border-radius:6px;font-size:13px;overflow-x:auto;">INSERT INTO staff (auth_id, email, name, role)
+VALUES (
+  '여기에-auth-users-id',
+  'admin@company.com',
+  '관리자',
+  'platform_admin'
+);</pre>
+      </li>
+    </ol>
+  </div>
+
+  <h2>4. customers (참고)</h2>
+  <table>
+    <tr><th>컬럼</th><th>타입</th><th>설명</th></tr>
+    <tr><td><code>customer_id</code></td><td>UUID PK</td><td></td></tr>
+    <tr><td><code>auth_id</code></td><td>UUID UNIQUE</td><td>FK → auth.users</td></tr>
+    <tr><td><code>email</code></td><td>VARCHAR(200) UNIQUE</td><td></td></tr>
+    <tr><td><code>name</code></td><td>VARCHAR(100)</td><td></td></tr>
+    <tr><td><code>phone</code></td><td>VARCHAR(50)</td><td></td></tr>
+    <tr><td><code>status</code></td><td>VARCHAR(20)</td><td>active / suspended / withdrawn</td></tr>
+    <tr><td><code>withdraw_at</code></td><td>TIMESTAMP</td><td>탈퇴 예약일</td></tr>
+  </table>
+
+  <h2>5. 핵심 관계 (ER 요약)</h2>
+  <div class="diagram">customers ──1:N──► sites ──1:1──► subscriptions ──1:N──► billing_history
+                │              │
+                │              ├──► support_tickets
+                │              ├──► posts
+                │              └──► one_time_payments
+                │
+                └──► inquiries (루트 B)
+                └──► customer_payment_methods
+
+staff ── (독립, auth.users 만 연결)</div>
+
+  <h2>6. PK 명명 규칙</h2>
+  <div class="box">
+    모든 PK는 <code>테이블명_id</code> 형식 (예: <code>customer_id</code>, <code>staff_id</code>, <code>site_id</code>).<br>
+    <code>sites.site_id</code> = UUID (FK용), <code>sites.site_code</code> = VARCHAR (URL 식별자). 혼용 금지.
+  </div>
+
+  <h2>7. RLS (현재)</h2>
+  <p>MVP 단계: 모든 테이블 <code>USING (true)</code> — 개발 편의용. 실서비스 전 강화 필요.</p>
+
+  <h2>8. 마이그레이션 이력</h2>
+  <table>
+    <tr><th>파일</th><th>내용</th></tr>
+    <tr><td><code>001_add_missing_columns.sql</code></td><td>trial 컬럼, subscriptions status 확장</td></tr>
+    <tr><td><code>002_add_staff_table.sql</code></td><td>staff 테이블 추가</td></tr>
+  </table>
+</div>

@@ -1,0 +1,89 @@
+<title>my-platform 플로우 v1.2 — 인증·staff (2026-08-31)</title>
+<style>
+  :root { --bg:#f8f7f4; --surface:#fff; --ink:#1c1917; --dim:#78716c; --border:#e7e5e4; --accent:#1e40af; --safe:#15803d; --code-bg:#f5f5f4; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; line-height:1.65; font-size:15px; }
+  .page { max-width:960px; margin:0 auto; padding:48px 24px 80px; }
+  .ver-banner { display:flex; flex-wrap:wrap; align-items:center; gap:10px; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:10px; padding:12px 16px; margin-bottom:20px; font-size:14px; }
+  .ver-tag { font-weight:800; color:var(--safe); }
+  .ver-status { background:var(--safe); color:#fff; font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; }
+  h1 { font-size:28px; font-weight:800; margin:0 0 8px; }
+  .sub { color:var(--dim); margin-bottom:24px; }
+  h2 { font-size:20px; margin:32px 0 12px; border-bottom:2px solid var(--border); padding-bottom:6px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; margin:12px 0; }
+  th,td { padding:9px 12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { background:#f3f2ef; font-size:11px; text-transform:uppercase; color:var(--dim); }
+  tr:last-child td { border-bottom:none; }
+  code { background:var(--code-bg); padding:2px 6px; border-radius:4px; font-size:.9em; }
+  pre { background:var(--code-bg); padding:14px; border-radius:8px; font-size:13px; overflow-x:auto; }
+  .diagram { background:#fff; border:1px solid var(--border); border-radius:10px; padding:20px; font-family:ui-monospace,Consolas,monospace; font-size:13px; line-height:1.8; white-space:pre; overflow-x:auto; }
+  .box { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin:16px 0; font-size:14px; }
+  a { color:var(--accent); }
+</style>
+
+<div class="page">
+  <div class="ver-banner">
+    <span class="ver-tag">v1.2</span>
+    <span class="ver-status">현행</span>
+    <span>2026-08-31</span>
+    <span style="margin-left:auto;"><a href="플로우_버전목록.html">버전 목록</a> · <a href="플로우_v1.1_2026-08-31.html">v1.1</a></span>
+  </div>
+
+  <h1>인증·로그인 플로우 v1.2</h1>
+  <p class="sub"><code>staff</code> 테이블 + <code>lib/auth.js</code> 코드 연동. 배포·구독·trial 등 나머지 플로우는 <a href="플로우_v1.1_2026-08-31.html">v1.1</a> 과 동일.</p>
+
+  <h2>v1.2 변경 요약</h2>
+  <table>
+    <tr><th>AS-IS (v1.1)</th><th>TO-BE (v1.2)</th></tr>
+    <tr><td><code>NEXT_PUBLIC_ADMIN_EMAILS</code> 화이트리스트</td><td><code>staff</code> 테이블 + <code>role=platform_admin</code></td></tr>
+    <tr><td>로그인 후 항상 <code>/my</code></td><td>역할별 분기 (<code>/platform</code> 또는 <code>/my</code>)</td></tr>
+    <tr><td>빈 env면 누구나 관리자</td><td><code>staff</code> 행 없으면 관리자 불가</td></tr>
+  </table>
+
+  <h2>로그인 분기</h2>
+  <div class="diagram">/login — signInWithPassword
+        │
+        ▼
+  getPostLoginPath()  (lib/auth.js)
+        │
+        ├─ staff (active, role=platform_admin) ──► /platform
+        │
+        ├─ customers (auth_id 매칭) ──────────────► /my
+        │
+        └─ 둘 다 없음 ──► signOut + 에러 메시지</div>
+
+  <h2>/platform 접근</h2>
+  <div class="diagram">/platform 진입
+        │
+        ▼
+  isPlatformAdmin()  →  staff.auth_id = user.id
+                        AND status = 'active'
+                        AND role = 'platform_admin'
+        │
+        ├─ true  → 관리자 콘솔
+        └─ false → /login 리다이렉트</div>
+
+  <h2>관리자 계정 만들기</h2>
+  <div class="box">
+    <ol>
+      <li>Supabase Authentication → <strong>Create user</strong> (auth.users)</li>
+      <li>SQL → <code>INSERT INTO staff (...)</code> (public.staff)</li>
+    </ol>
+    <p>UI만으로는 관리자 권한이 생기지 않음. 상세: <a href="db/스키마_v1.1_2026-08-31.html">DB 스키마 v1.1</a></p>
+  </div>
+
+  <h2>관련 파일</h2>
+  <table>
+    <tr><th>파일</th><th>역할</th></tr>
+    <tr><td><code>lib/auth.js</code></td><td>getAuthStaff, isPlatformAdmin, getPostLoginPath</td></tr>
+    <tr><td><code>app/login/page.js</code></td><td>로그인 후 분기</td></tr>
+    <tr><td><code>app/platform/page.js</code></td><td>관리자 인증 가드</td></tr>
+    <tr><td><code>docs/db/sql/migrations/002_add_staff_table.sql</code></td><td>staff DDL</td></tr>
+  </table>
+
+  <h2>테스트 계정</h2>
+  <table>
+    <tr><th>계정</th><th>staff/customers</th><th>로그인 후</th></tr>
+    <tr><td>admin@myplatform.com</td><td>staff (platform_admin)</td><td>/platform</td></tr>
+    <tr><td>wonse@hos.com</td><td>customers</td><td>/my</td></tr>
+  </table>
+</div>

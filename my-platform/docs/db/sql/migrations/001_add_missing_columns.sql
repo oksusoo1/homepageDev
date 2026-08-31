@@ -2,6 +2,7 @@
 -- 001_add_missing_columns.sql
 -- 기존 DB에 누락된 컬럼 및 CHECK 제약 조건 추가
 -- supabase_schema_mvp_v2.sql 이미 실행한 DB에 적용
+-- 경로: docs/db/sql/migrations/
 -- ================================================
 
 -- 1. customers.auth_id 컬럼 추가

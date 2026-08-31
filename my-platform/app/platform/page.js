@@ -2,9 +2,10 @@
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { isAdminEmail } from '@/lib/auth'
+import { isPlatformAdmin } from '@/lib/auth'
+import DocsBrowser from '@/components/DocsBrowser'
 
-const TABS = ['사이트 관리', '구독 현황', '수정 요청', '1회성 결제', '제작 문의']
+const TABS = ['사이트 관리', '구독 현황', '수정 요청', '1회성 결제', '제작 문의', '개발 문서']
 
 export default function AdminConsole() {
   const router = useRouter()
@@ -32,7 +33,7 @@ export default function AdminConsole() {
 
   async function checkAdminAuth() {
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user || !isAdminEmail(user.email)) {
+    if (!user || !(await isPlatformAdmin())) {
       router.push('/login')
       return
     }
@@ -1025,6 +1026,16 @@ export default function AdminConsole() {
             </div>
           )
         })()}
+
+        {/* ── 탭 5: 개발 문서 ── */}
+        {tab === 5 && (
+          <div style={css.card}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
+              개발 문서 — docs/ (플로우 · DB)
+            </h3>
+            <DocsBrowser />
+          </div>
+        )}
 
         {/* ── 탭 3: 1회성 결제 ── */}
         {tab === 3 && (

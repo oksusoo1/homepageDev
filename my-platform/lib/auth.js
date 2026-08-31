@@ -22,20 +22,56 @@ export async function getAuthCustomer() {
 }
 
 /**
- * 관리자 이메일 화이트리스트 체크
- * 환경변수 NEXT_PUBLIC_ADMIN_EMAILS (콤마 구분)
+ * 로그인 사용자 + staff 테이블 조회 (active만)
  *
- * @param {string} email
- * @returns {boolean}
+ * @returns {{ user: object, staff: object } | null}
  */
-export function isAdminEmail(email) {
-  const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '')
-    .split(',')
-    .map(e => e.trim().toLowerCase())
-    .filter(Boolean)
+export async function getAuthStaff() {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
 
-  // 화이트리스트가 비어있으면 모든 인증 사용자를 관리자로 취급 (개발용)
-  if (adminEmails.length === 0) return true
+  const { data: staff } = await supabase
+    .from('staff')
+    .select('*')
+    .eq('auth_id', user.id)
+    .eq('status', 'active')
+    .maybeSingle()
 
-  return adminEmails.includes(email.toLowerCase())
+  if (!staff) return null
+
+  return { user, staff }
+}
+
+/** /platform 접근 가능 여부 (role: platform_admin) */
+export async function isPlatformAdmin() {
+  const auth = await getAuthStaff()
+  return auth?.staff?.role === 'platform_admin'
+}
+
+/**
+ * 로그인 성공 후 이동 경로
+ * staff(platform_admin) → /platform, customer → /my, 없으면 null
+ */
+export async function getPostLoginPath() {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const { data: staff } = await supabase
+    .from('staff')
+    .select('role')
+    .eq('auth_id', user.id)
+    .eq('status', 'active')
+    .maybeSingle()
+
+  if (staff?.role === 'platform_admin') return '/platform'
+
+  const { data: customer } = await supabase
+    .from('customers')
+    .select('customer_id')
+    .eq('auth_id', user.id)
+    .maybeSingle()
+
+  if (customer) return '/my'
+
+  return null
 }

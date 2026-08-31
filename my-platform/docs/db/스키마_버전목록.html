@@ -1,0 +1,123 @@
+<title>my-platform DB 스키마 — 버전 목록</title>
+<style>
+  :root { --bg:#f8f7f4; --surface:#fff; --ink:#1c1917; --dim:#78716c; --border:#e7e5e4; --accent:#1e40af; --safe:#15803d; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; line-height:1.6; }
+  .page { max-width:960px; margin:0 auto; padding:48px 24px 80px; }
+  h1 { font-size:28px; font-weight:800; margin:0 0 8px; }
+  .sub { color:var(--dim); margin-bottom:28px; }
+  h2 { font-size:18px; margin:32px 0 12px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+  th,td { padding:10px 14px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { background:#f3f2ef; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); }
+  tr:last-child td { border-bottom:none; }
+  a { color:var(--accent); }
+  code { background:#f5f5f4; padding:2px 6px; border-radius:4px; font-size:.9em; }
+  .box { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px 18px; margin:16px 0; font-size:14px; }
+  .current { color:var(--safe); font-weight:700; }
+  .rule { font-family:ui-monospace,Consolas,monospace; font-size:13px; background:#f5f5f4; padding:12px 16px; border-radius:8px; line-height:1.8; }
+</style>
+
+<div class="page">
+  <h1>DB 스키마 버전 목록</h1>
+  <p class="sub">Supabase(PostgreSQL) 테이블 명세·SQL 스크립트 관리. 스키마가 바뀔 때마다 <strong>새 버전 파일</strong>을 추가하고, 이 목록을 갱신한다. 이전 버전은 삭제하지 않는다.</p>
+
+  <h2>현재 최신 버전</h2>
+  <table>
+    <tr><th>버전</th><th>작성일</th><th>상태</th><th>요약</th><th>문서</th><th>SQL</th></tr>
+    <tr>
+      <td><strong>v1.1</strong></td>
+      <td>2026-08-31</td>
+      <td class="current">● 현행</td>
+      <td>staff 코드 연동, 로그인 분기, RLS·관리자 2단계 등록, 마이그레이션 적용</td>
+      <td><a href="스키마_v1.1_2026-08-31.html">명세 열기</a></td>
+      <td><a href="sql/schema/schema_v2.1_2026-08-31.sql">schema v2.1</a></td>
+    </tr>
+    <tr>
+      <td>v1.0</td>
+      <td>2026-08-31</td>
+      <td style="color:#78716c;">이력</td>
+      <td>staff 테이블 설계·SQL docs 통합 (코드 연동 전)</td>
+      <td><a href="스키마_v1.0_2026-08-31.html">명세 열기</a></td>
+      <td><a href="sql/schema/schema_v2.1_2026-08-31.sql">schema v2.1</a></td>
+    </tr>
+  </table>
+
+  <h2>ERD</h2>
+  <table>
+    <tr><th>버전</th><th>작성일</th><th>기준 스키마</th><th>문서</th></tr>
+    <tr>
+      <td><strong>v1.0</strong></td>
+      <td>2026-08-31</td>
+      <td>schema v2.1</td>
+      <td><a href="ERD_v1.0_2026-08-31.html">ERD 열기</a></td>
+    </tr>
+  </table>
+
+  <h2>SQL 파일 위치</h2>
+  <table>
+    <tr><th>종류</th><th>경로</th><th>용도</th></tr>
+    <tr>
+      <td>전체 스키마 (최신)</td>
+      <td><code>docs/db/sql/schema/schema_v2.1_2026-08-31.sql</code></td>
+      <td>신규 DB 초기 구축</td>
+    </tr>
+    <tr>
+      <td>전체 스키마 (이력)</td>
+      <td><code>docs/db/sql/schema/supabase_schema_mvp_v2.sql</code></td>
+      <td>staff 추가 이전 버전</td>
+    </tr>
+    <tr>
+      <td>마이그레이션</td>
+      <td><code>docs/db/sql/migrations/00N_*.sql</code></td>
+      <td>기존 DB에 증분 적용</td>
+    </tr>
+    <tr>
+      <td>샘플 데이터</td>
+      <td><code>docs/db/sql/sample/sample_data_v2.sql</code></td>
+      <td>개발·테스트용 INSERT</td>
+    </tr>
+  </table>
+
+  <h2>실행 순서</h2>
+  <div class="box">
+    <p><strong>신규 DB</strong></p>
+    <ol style="margin:0;padding-left:20px;">
+      <li><code>schema_v2.1_2026-08-31.sql</code></li>
+      <li>(선택) <code>sample_data_v2.sql</code></li>
+    </ol>
+    <p style="margin:16px 0 0;"><strong>기존 DB (mvp_v2 적용됨)</strong></p>
+    <ol style="margin:0;padding-left:20px;">
+      <li><code>001_add_missing_columns.sql</code> — 미적용 시만</li>
+      <li><code>002_add_staff_table.sql</code></li>
+    </ol>
+  </div>
+
+  <h2>버전 추가 규칙</h2>
+  <div class="box">
+    <ol style="margin:0;padding-left:20px;">
+      <li>스키마가 바뀌면 <strong>기존 HTML/SQL 파일을 수정하지 않고</strong> 새 파일 생성</li>
+      <li>HTML 명세: <code>스키마_v{major}.{minor}_{YYYY-MM-DD}.html</code></li>
+      <li>전체 SQL: <code>schema_v{버전}_{YYYY-MM-DD}.sql</code></li>
+      <li>증분 변경: <code>migrations/00N_설명.sql</code></li>
+      <li>이 목록에 새 행 추가, 이전 버전 상태를 "이력"으로 변경</li>
+    </ol>
+  </div>
+
+  <h2>관련 문서</h2>
+  <div class="box">
+    <ul style="margin:0;padding-left:20px;">
+      <li><a href="ERD_v1.0_2026-08-31.html">ERD v1.0</a> — 테이블 관계도</li>
+      <li><a href="../플로우_v1.2_2026-08-31.html">플로우 v1.2</a> — 로그인·인증</li>
+      <li><a href="../플로우_버전목록.html">플로우 문서 버전 목록</a></li>
+      <li><a href="../../DATABASE.md">DATABASE.md</a> (루트 안내)</li>
+    </ul>
+  </div>
+
+  <h2>파일명 예시</h2>
+  <div class="rule">
+스키마_v1.0_2026-08-31.html       ← 현재<br>
+스키마_v1.1_2026-09-15.html       ← staff role 세분화 등<br>
+schema_v2.2_2026-09-15.sql        ← SQL 전체 스키마<br>
+migrations/003_add_agencies.sql   ← 증분 패치
+  </div>
+</div>

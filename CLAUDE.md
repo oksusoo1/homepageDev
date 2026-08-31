@@ -13,6 +13,12 @@
 - 루트 B: 본사 대리 → 가입 → 본사에 개발의뢰(개발비) → 본사가 제작/배포 → 카드등록
 - 공통: 배포 후 월 3만원 자동이체, 도메인 연결은 직원 대행(5만원 선택)
 
+## 인증 (v1.2)
+- 고객: `/login` 회원가입 → `auth.users` + `customers` → `/my`
+- 관리자: Supabase UI Create user + `staff` INSERT → `/platform` (`role=platform_admin`)
+- 코드: `lib/auth.js` — `isPlatformAdmin()`, `getPostLoginPath()`
+- 문서: `docs/db/스키마_v1.1_2026-08-31.html`, `docs/플로우_v1.2_2026-08-31.html`
+
 ## 기술 스택
 - Frontend/Backend: Next.js 15 (App Router)
 - Database: Supabase (PostgreSQL + JSONB)
@@ -32,12 +38,15 @@
 - /lib/supabase.js → Supabase 클라이언트
 - middleware.js → 도메인 기반 라우팅
 
-## DB 스키마 (v2 - PK 명명규칙: 테이블명_id)
-> 전체 스키마 SQL 참고: @my-platform/supabase_schema_mvp_v2.sql
-> 테스트 데이타 참고 : @my-platform/sample_data_v2.sql
+## DB 스키마 (v2.1 - PK 명명규칙: 테이블명_id)
+> 스키마 명세: @my-platform/docs/db/스키마_버전목록.html
+> 최신 SQL: @my-platform/docs/db/sql/schema/schema_v2.1_2026-08-31.sql
+> 테스트 데이터: @my-platform/docs/db/sql/sample/sample_data_v2.sql
+> 마이그레이션: @my-platform/docs/db/sql/migrations/
 
 
 - customers: customer_id(PK), auth_id(FK→auth.users), email, name, phone
+- staff: staff_id(PK), auth_id(FK→auth.users), email, name, role, status
 - templates: template_id(PK), name, category, default_content(JSONB)
 - sites: site_id(UUID PK), site_code(VARCHAR URL식별자), customer_id(FK), template_id(FK), subdomain, domain, build_type(self/managed), status, deploy_status
 - subscriptions: subscription_id(PK), customer_id(FK), site_id(FK), amount(30000), payment_method(manual/card), status

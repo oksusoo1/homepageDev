@@ -1,0 +1,154 @@
+<title>my-platform DB 스키마 v1.1 (2026-08-31)</title>
+<style>
+  :root { --bg:#f8f7f4; --surface:#fff; --ink:#1c1917; --dim:#78716c; --border:#e7e5e4; --accent:#1e40af; --safe:#15803d; --warn:#b45309; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; line-height:1.65; font-size:15px; }
+  .page { max-width:960px; margin:0 auto; padding:48px 24px 80px; }
+  h1 { font-size:28px; font-weight:800; margin:0 0 6px; }
+  .meta { color:var(--dim); font-size:14px; margin-bottom:28px; }
+  .meta a { color:var(--accent); }
+  .ver { display:inline-block; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-size:12px; font-weight:700; padding:4px 10px; border-radius:6px; margin-bottom:12px; }
+  h2 { font-size:20px; margin:36px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--border); }
+  h3 { font-size:16px; margin:24px 0 8px; color:#44403c; }
+  table { width:100%; border-collapse:collapse; font-size:13px; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; margin:12px 0 20px; }
+  th,td { padding:8px 12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { background:#f3f2ef; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); }
+  tr:last-child td { border-bottom:none; }
+  code { background:#f5f5f4; padding:2px 6px; border-radius:4px; font-size:.9em; }
+  pre { background:#f5f5f4; padding:14px 16px; border-radius:8px; font-size:13px; overflow-x:auto; line-height:1.6; }
+  .box { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px 18px; margin:16px 0; font-size:14px; }
+  .warn { background:#fffbeb; border-color:#fde68a; }
+  .diagram { background:#fff; border:1px solid var(--border); border-radius:10px; padding:20px; font-family:ui-monospace,Consolas,monospace; font-size:13px; line-height:1.7; overflow-x:auto; white-space:pre; }
+  ul { padding-left:20px; }
+</style>
+
+<div class="page">
+  <span class="ver">v1.1 현행</span>
+  <h1>DB 스키마 명세 v1.1</h1>
+  <p class="meta">
+    작성일: 2026-08-31 &nbsp;|&nbsp;
+    SQL: <a href="sql/schema/schema_v2.1_2026-08-31.sql">schema_v2.1</a> &nbsp;|&nbsp;
+    <a href="스키마_버전목록.html">버전 목록</a> &nbsp;|&nbsp;
+    이전: <a href="스키마_v1.0_2026-08-31.html">v1.0</a>
+  </p>
+
+  <div class="box">
+    <strong>v1.1 변경 요약</strong> (v1.0 대비)
+    <ul>
+      <li>마이그레이션 <code>001</code>, <code>002</code> Supabase 적용 완료</li>
+      <li><code>lib/auth.js</code> — <code>staff</code> 테이블 기반 권한 체크 (코드 연동 완료)</li>
+      <li>로그인 후 분기: 관리자 → <code>/platform</code>, 고객 → <code>/my</code></li>
+      <li><code>NEXT_PUBLIC_ADMIN_EMAILS</code> / <code>isAdminEmail()</code> <strong>폐기</strong></li>
+      <li>RLS 동작·관리자 2단계 등록 절차 보강</li>
+    </ul>
+  </div>
+
+  <h2>1. 인증 3계층</h2>
+  <div class="diagram">auth.users (Supabase 내장)     ← 비밀번호·세션
+    │
+    ├── auth_id ──► customers      ← /login 회원가입 시 자동 INSERT
+    │
+    └── auth_id ──► staff          ← 수동: UI Add user + SQL INSERT</div>
+
+  <table>
+    <tr><th>구분</th><th>테이블</th><th>계정 생성</th><th>프로필 생성</th><th>로그인 후</th></tr>
+    <tr>
+      <td>고객</td><td><code>customers</code></td>
+      <td><code>/login</code> 회원가입</td>
+      <td>자동</td>
+      <td><code>/my</code></td>
+    </tr>
+    <tr>
+      <td>본사 직원</td><td><code>staff</code></td>
+      <td>Supabase UI Create user</td>
+      <td>SQL INSERT (수동)</td>
+      <td><code>/platform</code> (role=platform_admin)</td>
+    </tr>
+  </table>
+
+  <div class="box warn">
+    <strong>주의:</strong> UI에서 Create user만 하면 <code>auth.users</code>만 생깁니다.
+    <code>staff</code> INSERT 없이는 <code>/platform</code> 접근 불가, 로그인 시 "프로필 없음" 처리됩니다.
+  </div>
+
+  <h2>2. 관리자 등록 절차 (2단계)</h2>
+  <ol>
+    <li>Supabase → Authentication → Users → <strong>Create user</strong> (이메일·비밀번호, Auto confirm 체크)</li>
+    <li>생성된 사용자 <strong>UUID</strong> 복사</li>
+    <li>SQL Editor:
+<pre>INSERT INTO staff (auth_id, email, name, role)
+VALUES (
+  'ef81303c-....',           -- auth.users.id
+  'admin@myplatform.com',
+  '관리자',
+  'platform_admin'           -- role 컬럼 값 (name 아님)
+);</pre>
+    </li>
+  </ol>
+  <p>이미 등록된 <code>auth_id</code>로 다시 INSERT 하면 <code>duplicate key</code> 에러 → 정상(이미 등록됨). <code>SELECT * FROM staff;</code> 로 확인.</p>
+
+  <h2>3. 코드 연동 (<code>lib/auth.js</code>)</h2>
+  <table>
+    <tr><th>함수</th><th>역할</th></tr>
+    <tr><td><code>getAuthCustomer()</code></td><td>로그인 + <code>customers</code> 조회</td></tr>
+    <tr><td><code>getAuthStaff()</code></td><td>로그인 + <code>staff</code> 조회 (status=active)</td></tr>
+    <tr><td><code>isPlatformAdmin()</code></td><td><code>staff.role === 'platform_admin'</code> → <code>/platform</code> 허용</td></tr>
+    <tr><td><code>getPostLoginPath()</code></td><td>로그인 후 이동: admin→<code>/platform</code>, customer→<code>/my</code>, 없으면 null</td></tr>
+  </table>
+
+  <h3>로그인 분기 (<code>app/login/page.js</code>)</h3>
+  <div class="diagram">signInWithPassword 성공
+  → getPostLoginPath()
+      ├─ staff.platform_admin  → /platform
+      ├─ customers 있음        → /my
+      └─ 둘 다 없음            → signOut + "프로필 없음" 에러</div>
+
+  <h3>관리자 콘솔 (<code>app/platform/page.js</code>)</h3>
+  <p><code>isPlatformAdmin()</code> 실패 시 <code>/login</code> 리다이렉트.</p>
+
+  <h2>4. staff 테이블</h2>
+  <table>
+    <tr><th>컬럼</th><th>타입</th><th>설명</th></tr>
+    <tr><td><code>staff_id</code></td><td>UUID PK</td><td></td></tr>
+    <tr><td><code>auth_id</code></td><td>UUID UNIQUE NOT NULL</td><td>→ auth.users</td></tr>
+    <tr><td><code>email</code></td><td>VARCHAR(200) UNIQUE</td><td></td></tr>
+    <tr><td><code>name</code></td><td>VARCHAR(100)</td><td></td></tr>
+    <tr><td><code>role</code></td><td>VARCHAR(30)</td><td>platform_admin / support / viewer</td></tr>
+    <tr><td><code>status</code></td><td>VARCHAR(20)</td><td>active / suspended / left</td></tr>
+  </table>
+  <p>MVP: <code>role=platform_admin</code>, <code>status=active</code> 만 <code>/platform</code> 접근.</p>
+
+  <h2>5. RLS (Row Level Security)</h2>
+  <div class="box">
+    <ul>
+      <li><strong>RLS 켜기</strong> = DB가 정책(Policy)을 검사함</li>
+      <li><strong>Run 버튼</strong> = SQL 실행일 뿐, 자동으로 "자기 것만" 보이지 않음</li>
+      <li>현재 정책: <code>USING (true)</code> → MVP 개발용, <strong>전 행 허용</strong></li>
+      <li>실서비스 전: <code>auth_id = auth.uid()</code> 등으로 강화 예정</li>
+    </ul>
+  </div>
+
+  <h2>6. SQL 실행 이력</h2>
+  <table>
+    <tr><th>파일</th><th>상태</th><th>내용</th></tr>
+    <tr><td><code>001_add_missing_columns.sql</code></td><td>✅ 적용</td><td>trial 컬럼, subscriptions status</td></tr>
+    <tr><td><code>002_add_staff_table.sql</code></td><td>✅ 적용</td><td>staff 테이블 + RLS</td></tr>
+  </table>
+
+  <h2>7. 테이블 목록</h2>
+  <p>v1.0과 동일. 전체 컬럼·ER은 <a href="스키마_v1.0_2026-08-31.html">v1.0</a> 참고.</p>
+  <table>
+    <tr><th>테이블</th><th>용도</th></tr>
+    <tr><td><code>customers</code></td><td>고객</td></tr>
+    <tr><td><code>staff</code></td><td>본사 직원</td></tr>
+    <tr><td><code>templates</code>, <code>sites</code>, <code>subscriptions</code>, <code>billing_history</code></td><td>사이트·구독</td></tr>
+    <tr><td><code>support_tickets</code>, <code>inquiries</code>, <code>posts</code></td><td>요청·문의·게시판</td></tr>
+    <tr><td><code>one_time_payments</code>, <code>customer_payment_methods</code></td><td>결제</td></tr>
+  </table>
+
+  <h2>8. 관련 문서</h2>
+  <ul>
+    <li><a href="ERD_v1.0_2026-08-31.html">ERD v1.0</a> — 테이블 관계도</li>
+    <li><a href="../플로우_v1.2_2026-08-31.html">플로우 v1.2</a> — 로그인·인증 분기</li>
+    <li><a href="../../DATABASE.md">DATABASE.md</a></li>
+  </ul>
+</div>

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { getPostLoginPath } from '@/lib/auth'
 import Link from 'next/link'
 import { Suspense } from 'react'
 
@@ -41,9 +42,17 @@ function LoginForm() {
     if (error) {
       setError('이메일 또는 비밀번호가 올바르지 않아요')
       setLoading(false)
-    } else {
-      router.push('/my')
+      return
     }
+
+    const path = await getPostLoginPath()
+    if (!path) {
+      await supabase.auth.signOut()
+      setError('등록된 고객·관리자 프로필이 없어요. 관리자에게 문의해 주세요.')
+      setLoading(false)
+      return
+    }
+    router.push(path)
   }
 
   // ── 회원가입 ──
