@@ -25,10 +25,34 @@
   <table>
     <tr><th>버전</th><th>작성일</th><th>상태</th><th>요약</th><th>문서</th><th>SQL</th></tr>
     <tr>
+      <td><strong>v1.2</strong></td>
+      <td>2026-09-07</td>
+      <td class="current">● 현행</td>
+      <td>공통코드 code_groups/common_codes — migration 011</td>
+      <td><a href="스키마_v1.2_2026-09-07.html">명세 열기</a></td>
+      <td><a href="sql/migrations/011_common_codes.sql">011_common_codes.sql</a> · schema v2.1</td>
+    </tr>
+    <tr>
+      <td>v1.2</td>
+      <td>2026-09-07</td>
+      <td style="color:#78716c;">이력</td>
+      <td>user_* · 문의게시판 · notification_logs — migration 007~010</td>
+      <td><a href="스키마_v1.2_2026-09-07.html">명세 열기</a></td>
+      <td><a href="sql/migrations/007_user_messages.sql">007</a>~<a href="sql/migrations/010_notification_logs.sql">010</a></td>
+    </tr>
+    <tr>
+      <td>v1.1+</td>
+      <td>2026-09-03</td>
+      <td style="color:#78716c;">이력</td>
+      <td><code>use_flag</code> soft delete — migration 006</td>
+      <td>—</td>
+      <td><a href="sql/migrations/006_add_use_flag.sql">006_add_use_flag.sql</a></td>
+    </tr>
+    <tr>
       <td><strong>v1.1</strong></td>
       <td>2026-08-31</td>
-      <td class="current">● 현행</td>
-      <td>staff 코드 연동, 로그인 분기, RLS·관리자 2단계 등록, 마이그레이션 적용</td>
+      <td style="color:#78716c;">이력</td>
+      <td>staff 코드 연동, 로그인 분기, RLS·관리자 2단계 등록</td>
       <td><a href="스키마_v1.1_2026-08-31.html">명세 열기</a></td>
       <td><a href="sql/schema/schema_v2.1_2026-08-31.sql">schema v2.1</a></td>
     </tr>
@@ -46,9 +70,15 @@
   <table>
     <tr><th>버전</th><th>작성일</th><th>기준 스키마</th><th>문서</th></tr>
     <tr>
-      <td><strong>v1.0</strong></td>
+      <td><strong>v1.1</strong></td>
+      <td>2026-09-07</td>
+      <td>스키마 v1.2 · user_posts / user_messages</td>
+      <td><a href="ERD_v1.1_2026-09-07.html">ERD 열기</a></td>
+    </tr>
+    <tr>
+      <td>v1.0</td>
       <td>2026-08-31</td>
-      <td>schema v2.1</td>
+      <td>schema v2.1 (posts 시절)</td>
       <td><a href="ERD_v1.0_2026-08-31.html">ERD 열기</a></td>
     </tr>
   </table>
@@ -87,8 +117,12 @@
     </ol>
     <p style="margin:16px 0 0;"><strong>기존 DB (mvp_v2 적용됨)</strong></p>
     <ol style="margin:0;padding-left:20px;">
-      <li><code>001_add_missing_columns.sql</code> — 미적용 시만</li>
-      <li><code>002_add_staff_table.sql</code></li>
+      <li><code>001</code> ~ <code>006</code> — 미적용분만</li>
+      <li><code>007_user_messages.sql</code></li>
+      <li><code>008_rename_posts_to_user_posts.sql</code></li>
+      <li><code>009_user_messages_board.sql</code> — 공개/비공개·답글</li>
+      <li><code>010_notification_logs.sql</code> — 알림/배치 목업 로그</li>
+      <li><code>011_common_codes.sql</code> — 공통코드 그룹/코드</li>
     </ol>
   </div>
 
@@ -106,8 +140,8 @@
   <h2>관련 문서</h2>
   <div class="box">
     <ul style="margin:0;padding-left:20px;">
-      <li><a href="ERD_v1.0_2026-08-31.html">ERD v1.0</a> — 테이블 관계도</li>
-      <li><a href="../플로우_v1.2_2026-08-31.html">플로우 v1.2</a> — 로그인·인증</li>
+      <li><a href="ERD_v1.1_2026-09-07.html">ERD v1.1</a> — 테이블 관계도 (현행)</li>
+      <li><a href="../플로우_v1.3.2_2026-09-07.html">플로우 v1.3.2</a> — 공개 문의 분리</li>
       <li><a href="../플로우_버전목록.html">플로우 문서 버전 목록</a></li>
       <li><a href="../../DATABASE.md">DATABASE.md</a> (루트 안내)</li>
     </ul>

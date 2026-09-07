@@ -1,0 +1,82 @@
+<title>my-platform 플로우 v1.3.3 — 구독 배치 목업 (2026-09-07)</title>
+<style>
+  :root { --bg:#f8f7f4; --surface:#fff; --ink:#1c1917; --dim:#78716c; --border:#e7e5e4; --accent:#1e40af; --safe:#15803d; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; line-height:1.65; font-size:15px; }
+  .page { max-width:900px; margin:0 auto; padding:48px 24px 80px; }
+  h1 { font-size:26px; font-weight:800; margin:0 0 6px; }
+  .meta { color:var(--dim); font-size:14px; margin-bottom:24px; }
+  .meta a { color:var(--accent); }
+  .ver { display:inline-block; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-size:12px; font-weight:700; padding:4px 10px; border-radius:6px; margin-bottom:12px; }
+  h2 { font-size:18px; margin:28px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--border); }
+  table { width:100%; border-collapse:collapse; font-size:13px; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; margin:12px 0; }
+  th,td { padding:8px 12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { background:#f3f2ef; font-size:11px; color:var(--dim); text-transform:uppercase; }
+  code { background:#f5f5f4; padding:2px 6px; border-radius:4px; font-size:.9em; }
+  .box { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px 18px; margin:16px 0; font-size:14px; }
+  .warn { background:#fffbeb; border-color:#fde68a; }
+  ul { padding-left:20px; }
+  .diagram { background:#fff; border:1px solid var(--border); border-radius:10px; padding:16px; font-family:ui-monospace,Consolas,monospace; font-size:12px; line-height:1.7; white-space:pre; overflow-x:auto; }
+</style>
+
+<div class="page">
+  <span class="ver">v1.3.3 현행 (증분)</span>
+  <h1>구독 청구 배치 (목업)</h1>
+  <p class="meta">
+    2026-09-07 &nbsp;|&nbsp;
+    이전: <a href="플로우_v1.3.2_2026-09-07.html">v1.3.2</a> &nbsp;|&nbsp;
+    <a href="플로우_버전목록.html">버전 목록</a>
+  </p>
+
+  <div class="box warn">
+    <strong>1차 범위</strong>
+    <ul>
+      <li><strong>수동 실행만</strong> — DevTools 버튼 또는 <code>POST /api/cron/billing</code></li>
+      <li>매일 자동 cron <strong>미연결</strong> (나중에 같은 API에 Vercel Cron 부착)</li>
+      <li>알림톡 = <code>notification_logs</code> INSERT (실발송 없음)</li>
+    </ul>
+  </div>
+
+  <h2>1. 배포 직후 (기존)</h2>
+  <div class="diagram">카드/계좌 등록 → deploySite()
+  → sites published + trial 14일
+  → subscriptions.status=trial
+  → next_billing_date = trial 종료일
+  → payment_method = card | manual</div>
+
+  <h2>2. 배치 태스크</h2>
+  <table>
+    <tr><th>태스크</th><th>조건</th><th>동작</th></tr>
+    <tr>
+      <td><code>card_charge</code></td>
+      <td><code>payment_method=card</code><br>가상오늘 ≥ <code>next_billing_date + 1일</code></td>
+      <td><code>billing_history</code> paid(MOCK)<br>구독 <code>active</code><br><code>next_billing_date</code> +1개월<br>로그 <code>card_charged</code></td>
+    </tr>
+    <tr>
+      <td><code>bank_remind</code></td>
+      <td><code>manual</code> · 미납<br>D-5 ~ D-day (매일)</td>
+      <td><code>notification_logs</code> · type=bank_remind<br>(목업 알림톡)</td>
+    </tr>
+    <tr>
+      <td><code>bank_suspend</code></td>
+      <td><code>manual</code> · 미납<br>가상오늘 &gt; due+2일</td>
+      <td>sites <code>suspended</code><br>subscriptions <code>paused</code><br>로그 <code>bank_suspend</code></td>
+    </tr>
+  </table>
+
+  <h2>3. 실행 방법</h2>
+  <ul>
+    <li><code>/platform</code> → 개발도구 → 「청구 배치 실행」 (가상 오늘 ±N일)</li>
+    <li><code>POST /api/cron/billing</code> body <code>{ "asOf": "2026-09-22" }</code></li>
+    <li><code>CRON_SECRET</code> 설정 시 헤더 <code>x-cron-secret</code> 필요</li>
+  </ul>
+
+  <h2>4. DB</h2>
+  <p>마이그레이션 <code>010_notification_logs.sql</code></p>
+
+  <h2>5. 이후</h2>
+  <ul>
+    <li>Vercel Cron → 매일 <code>POST /api/cron/billing</code></li>
+    <li><code>notification_logs</code> → 실 알림톡 어댑터</li>
+    <li>토스 실빌링 승인으로 MOCK 카드 대체</li>
+  </ul>
+</div>

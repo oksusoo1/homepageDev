@@ -4,24 +4,49 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { isPlatformAdmin } from '@/lib/auth'
 import DocsBrowser from '@/components/DocsBrowser'
+import PlatformDevTools from '@/components/PlatformDevTools'
+import PlatformSiteDetail from '@/components/PlatformSiteDetail'
+import PlatformCustomerDetail from '@/components/PlatformCustomerDetail'
+import PlatformCommonCodes from '@/components/PlatformCommonCodes'
+import { sitePublicPath } from '@/lib/site-paths'
+import { getSitePeriodInfo } from '@/lib/site-period'
+import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
+import { onlyActive, softDelete } from '@/lib/use-flag'
 
-const TABS = ['사이트 관리', '구독 현황', '수정 요청', '1회성 결제', '제작 문의', '개발 문서']
+const NAV = [
+  { key: 'dashboard', label: '대시보드', icon: '📊' },
+  { key: 'customers', label: '회원', icon: '👤' },
+  { key: 'sites', label: '사이트', icon: '🌐' },
+  { key: 'subs', label: '구독', icon: '💳' },
+  { key: 'tickets', label: '수정요청', icon: '📝' },
+  { key: 'payments', label: '1회성 결제', icon: '💰' },
+  { key: 'inquiries', label: '제작 문의', icon: '🏗' },
+  { key: 'codes', label: '공통코드', icon: '🏷' },
+  { key: 'docs', label: '개발 문서', icon: '📚' },
+  { key: 'dev', label: '테스트', icon: '🛠' },
+]
 
 export default function AdminConsole() {
   const router = useRouter()
-  const [tab, setTab] = useState(0)
+  const [nav, setNav] = useState('dashboard')
   const [sites, setSites] = useState([])
   const [subscriptions, setSubscriptions] = useState([])
   const [tickets, setTickets] = useState([])
   const [oneTimePays, setOneTimePays] = useState([])
   const [inquiries, setInquiries] = useState([])
   const [templates, setTemplates] = useState([])
+  const [customers, setCustomers] = useState([])
+  const [codesTick, setCodesTick] = useState(0)
+
   const [expandedSubId, setExpandedSubId] = useState(null)     // 펼쳐진 구독 행
   const [billingHistory, setBillingHistory] = useState({})      // { sub_id: [...records] }
   const [inquiryDevFee, setInquiryDevFee] = useState({})        // { inquiry_id: 금액 } — 견적 편집용
   const [loading, setLoading] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const [message, setMessage] = useState('')
+  const [selectedSiteId, setSelectedSiteId] = useState(null)   // 사이트 상세
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null) // 회원 상세
+  const [showCreateForm, setShowCreateForm] = useState(false)  // 새 사이트 폼
   const [form, setForm] = useState({
     customer_name: '', customer_email: '', customer_phone: '',
     site_name: '', subdomain: '', description: '',
@@ -42,24 +67,14 @@ export default function AdminConsole() {
   }
 
   async function fetchAll() {
-    const [s, sub, t, otp, tmpl, inq] = await Promise.all([
-      supabase.from('sites')
-        .select('*, customers(name, email, phone)')
-        .order('created_at', { ascending: false }),
-      supabase.from('subscriptions')
-        .select('*, sites(site_name:name, subdomain), customers(name)')
-        .order('created_at', { ascending: false }),
-      supabase.from('support_tickets')
-        .select('*, sites(name), customers(name)')
-        .order('created_at', { ascending: false }),
-      supabase.from('one_time_payments')
-        .select('*, customers(name), sites(name)')
-        .order('created_at', { ascending: false }),
-      supabase.from('templates')
-        .select('*').eq('is_active', true).order('sort_order'),
-      supabase.from('inquiries')
-        .select('*, customers(name, email, phone)')
-        .order('created_at', { ascending: false }),
+    const [s, sub, t, otp, tmpl, inq, cust] = await Promise.all([
+      onlyActive(supabase.from('sites').select('*, customers(name, email, phone)')).order('created_at', { ascending: false }),
+      onlyActive(supabase.from('subscriptions').select('*, sites(site_name:name, subdomain), customers(name)')).order('created_at', { ascending: false }),
+      onlyActive(supabase.from('support_tickets').select('*, sites(name), customers(name)')).order('created_at', { ascending: false }),
+      onlyActive(supabase.from('one_time_payments').select('*, customers(name), sites(name)')).order('created_at', { ascending: false }),
+      onlyActive(supabase.from('templates').select('*').eq('is_active', true)).order('sort_order'),
+      onlyActive(supabase.from('inquiries').select('*, customers(name, email, phone)')).order('created_at', { ascending: false }),
+      onlyActive(supabase.from('customers').select('*')).order('created_at', { ascending: false }),
     ])
     setSites(s.data || [])
     setSubscriptions(sub.data || [])
@@ -67,7 +82,20 @@ export default function AdminConsole() {
     setOneTimePays(otp.data || [])
     setTemplates(tmpl.data || [])
     setInquiries(inq.data || [])
+    setCustomers(cust.data || [])
+    try {
+      await loadCommonCodes({ force: true })
+      setCodesTick(t => t + 1)
+    } catch (e) {
+      console.warn('common codes load failed', e)
+    }
   }
+
+  useEffect(() => {
+    function onApplied() { setCodesTick(t => t + 1) }
+    window.addEventListener('common-codes-applied', onApplied)
+    return () => window.removeEventListener('common-codes-applied', onApplied)
+  }, [])
 
   async function createSite(e) {
     e.preventDefault()
@@ -76,11 +104,9 @@ export default function AdminConsole() {
     try {
       // 1. 기존 고객 조회 → 없으면 신규 생성
       let customer
-      const { data: existing } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('email', form.customer_email)
-        .maybeSingle()
+      const { data: existing } = await onlyActive(
+        supabase.from('customers').select('*').eq('email', form.customer_email)
+      ).maybeSingle()
 
       if (existing) {
         customer = existing
@@ -123,6 +149,7 @@ export default function AdminConsole() {
 
       // 구독은 고객이 카드 등록 + 배포 시점에 생성 (deploy.js에서 처리)
       setMessage('✅ 사이트가 생성되었습니다!')
+      setShowCreateForm(false)
       setForm({
         customer_name: '', customer_email: '', customer_phone: '',
         site_name: '', subdomain: '', description: '',
@@ -138,28 +165,32 @@ export default function AdminConsole() {
   async function updateSiteStatus(siteId, status) {
     const now = new Date()
 
-    if (status === 'published') {
-      // build_type 먼저 조회 (managed vs self 분기)
-      const { data: siteInfo } = await supabase
-        .from('sites').select('build_type, inquiry_id').eq('site_id', siteId).maybeSingle()
+    if (status === 'published' || status === 'review') {
+      const { data: siteInfo } = await onlyActive(
+        supabase.from('sites').select('build_type, inquiry_id').eq('site_id', siteId)
+      ).maybeSingle()
 
       if (siteInfo?.build_type === 'managed') {
-        // 루트 B: 관리자 미리보기 배포 — deploy_status도 live, trial 없음
+        const targetStatus = status === 'review' ? 'review' : 'published'
         await supabase.from('sites')
-          .update({ status: 'published', deploy_status: 'live', updated_at: now.toISOString() })
+          .update({ status: targetStatus, deploy_status: 'live', updated_at: now.toISOString() })
           .eq('site_id', siteId)
+          .eq('use_flag', 1)
         if (siteInfo.inquiry_id) {
           await supabase.from('inquiries')
             .update({ status: 'review', updated_at: now.toISOString() })
             .eq('inquiry_id', siteInfo.inquiry_id)
+            .eq('use_flag', 1)
         }
       } else {
         // 루트 A: self 사이트 — pending 구독이 있으면 trial 시작
         await supabase.from('sites')
           .update({ status: 'published', updated_at: now.toISOString() })
           .eq('site_id', siteId)
-        const { data: sub } = await supabase
-          .from('subscriptions').select('subscription_id, status').eq('site_id', siteId).maybeSingle()
+          .eq('use_flag', 1)
+        const { data: sub } = await onlyActive(
+          supabase.from('subscriptions').select('subscription_id, status').eq('site_id', siteId)
+        ).maybeSingle()
         if (sub?.status === 'pending') {
           const trialEnds = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
           const nextBilling = new Date(trialEnds)
@@ -191,27 +222,66 @@ export default function AdminConsole() {
   }
 
   async function deleteSite(site) {
-    if (site.status !== 'draft') {
-      alert('draft 상태인 사이트만 삭제할 수 있습니다.')
-      return
-    }
-    if (!window.confirm(`"${site.name}" 사이트를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return
+    if (!window.confirm(
+      `"${site.name}" 를 삭제(use_flag=0) 처리할까요?\n데이터는 남고 목록에서만 숨깁니다.\n복구는 DB에서 sites.use_flag=1 로 가능합니다.`
+    )) return
 
-    // 구독 존재 여부 확인
-    const { data: sub } = await supabase
-      .from('subscriptions').select('subscription_id').eq('site_id', site.site_id).maybeSingle()
-    if (sub) {
-      alert('구독이 연결된 사이트는 삭제할 수 없습니다.')
-      return
-    }
-
-    const { error } = await supabase.from('sites').delete().eq('site_id', site.site_id)
-    if (error) {
-      alert('삭제 실패: ' + error.message)
-    } else {
-      setMessage('🗑️ 사이트가 삭제되었습니다.')
+    try {
+      await softDelete(supabase, 'sites', 'site_id', site.site_id)
+      setMessage('🗑️ 사이트 use_flag=0 (목록에서 숨김)')
+      if (selectedSiteId === site.site_id) setSelectedSiteId(null)
       fetchAll()
+    } catch (err) {
+      alert('삭제 실패: ' + err.message)
+      throw err
     }
+  }
+
+  async function saveSiteFields(siteId, patch) {
+    const { error } = await supabase
+      .from('sites')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('site_id', siteId)
+    if (error) throw new Error(error.message)
+    setMessage('✅ 사이트 정보가 저장되었습니다.')
+    await fetchAll()
+  }
+
+  async function saveCustomerFields(customerId, patch) {
+    const { error } = await supabase
+      .from('customers')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('customer_id', customerId)
+    if (error) throw new Error(error.message)
+    setMessage('✅ 회원 정보가 저장되었습니다.')
+    await fetchAll()
+  }
+
+  async function deleteCustomer(customer) {
+    if (!window.confirm(
+      `"${customer.name}" (${customer.email}) 를 삭제(use_flag=0) 처리할까요?\n회원은 목록에서 숨겨집니다. 보유 사이트는 그대로입니다.`
+    )) return
+    try {
+      await softDelete(supabase, 'customers', 'customer_id', customer.customer_id)
+      setMessage('🗑️ 회원 use_flag=0 (목록에서 숨김)')
+      if (selectedCustomerId === customer.customer_id) setSelectedCustomerId(null)
+      fetchAll()
+    } catch (err) {
+      alert('삭제 실패: ' + err.message)
+      throw err
+    }
+  }
+
+  function openCustomerDetail(customerId) {
+    setSelectedCustomerId(customerId)
+    setSelectedSiteId(null)
+    setNav('customers')
+  }
+
+  function openSiteDetail(siteId) {
+    setSelectedSiteId(siteId)
+    setSelectedCustomerId(null)
+    setNav('sites')
   }
 
   async function updateTicketStatus(ticketId, status) {
@@ -263,6 +333,52 @@ export default function AdminConsole() {
     fetchAll()
   }
 
+  // 계좌이체 미납 +2일 → 연체·정지
+  async function handleProcessOverdue() {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const { data: subs } = await supabase
+      .from('subscriptions')
+      .select('subscription_id, site_id, next_billing_date')
+      .eq('payment_method', 'manual')
+      .in('status', ['trial', 'active'])
+
+    let count = 0
+    for (const sub of subs || []) {
+      if (!sub.next_billing_date) continue
+      const graceEnd = new Date(sub.next_billing_date)
+      graceEnd.setDate(graceEnd.getDate() + 2)
+      if (today <= graceEnd) continue
+
+      const period = sub.next_billing_date.slice(0, 7)
+      const { data: bh } = await supabase
+        .from('billing_history')
+        .select('status')
+        .eq('subscription_id', sub.subscription_id)
+        .eq('period', period)
+        .maybeSingle()
+      if (bh?.status === 'paid') continue
+
+      await supabase.from('billing_history').upsert({
+        subscription_id: sub.subscription_id,
+        period,
+        amount: 30000,
+        status: 'overdue',
+        payment_method: 'manual',
+        due_at: sub.next_billing_date,
+      }, { onConflict: 'subscription_id,period' })
+
+      await supabase.from('sites')
+        .update({ status: 'suspended', updated_at: new Date().toISOString() })
+        .eq('site_id', sub.site_id)
+      count++
+    }
+
+    setMessage(count ? `✅ ${count}건 연체 정지 처리` : '연체 정지 대상이 없습니다.')
+    fetchAll()
+  }
+
   // 만료된 구독 일괄 처리: cancels_at 지났는데 아직 active인 구독 → cancelled
   async function handleProcessExpired() {
     const now = new Date().toISOString()
@@ -308,9 +424,8 @@ export default function AdminConsole() {
   }
 
   // 납부 확인: billing_history upsert + next_billing_date +1달 (수동결제)
-  async function markBillingPaid(subId, amount, period, paymentMethod) {
+  async function markBillingPaid(subId, siteId, amount, period, paymentMethod) {
     try {
-      // 기존 레코드 확인 (maybeSingle: 없어도 에러 안 남)
       const { data: existing } = await supabase
         .from('billing_history')
         .select('billing_id, status')
@@ -335,13 +450,18 @@ export default function AdminConsole() {
         }])
       }
 
-      // 수동결제는 next_billing_date를 현재 +1달로 갱신
       if (!paymentMethod || paymentMethod === 'manual') {
         const next = new Date()
         next.setMonth(next.getMonth() + 1)
         await supabase.from('subscriptions')
-          .update({ next_billing_date: next.toISOString().split('T')[0] })
+          .update({ next_billing_date: next.toISOString().split('T')[0], status: 'active' })
           .eq('subscription_id', subId)
+      }
+
+      if (siteId) {
+        await supabase.from('sites')
+          .update({ status: 'published', updated_at: now })
+          .eq('site_id', siteId)
       }
 
       setMessage(`✅ ${period} 납부 확인 완료`)
@@ -388,23 +508,75 @@ export default function AdminConsole() {
   // 잔금 50% 확인 → approved로 전환
   async function confirmFinalPayment(inquiryId) {
     if (!window.confirm('잔금 50% 납부를 확인하셨나요?\n상태가 "고객승인완료"로 변경됩니다.')) return
+    const now = new Date().toISOString()
+    const { data: inq } = await supabase
+      .from('inquiries').select('customer_id').eq('inquiry_id', inquiryId).maybeSingle()
     await supabase.from('inquiries')
-      .update({ final_paid_at: new Date().toISOString(), status: 'approved', updated_at: new Date().toISOString() })
+      .update({ final_paid_at: now, status: 'approved', updated_at: now })
       .eq('inquiry_id', inquiryId)
+    if (inq?.customer_id) {
+      await supabase.from('one_time_payments')
+        .update({ status: 'paid', paid_at: now })
+        .eq('customer_id', inq.customer_id)
+        .eq('type', 'dev_fee')
+        .in('status', ['unpaid', 'pending_confirm'])
+    }
     fetchAll()
   }
 
+  /**
+   * 1회성결제 「납부확인」
+   * - domain_setup / extra: OTP만 paid
+   * - dev_fee(잔금): OTP + inquiries(final_paid_at, approved) 동시 반영 → /my 가 5단계로 넘어감
+   */
   async function markOneTimePaid(paymentId) {
-    await supabase.from('one_time_payments')
-      .update({ status: 'paid', paid_at: new Date().toISOString() })
+    const pay = oneTimePays.find(p => p.payment_id === paymentId)
+    const now = new Date().toISOString()
+
+    if (pay?.type === 'dev_fee') {
+      if (!window.confirm('개발비 잔금 납부를 확인할까요?\n문의가 「서비스 시작 준비」로 바뀌고 고객 /my 에도 반영됩니다.')) return
+    }
+
+    const { error } = await supabase.from('one_time_payments')
+      .update({ status: 'paid', paid_at: now })
       .eq('payment_id', paymentId)
+    if (error) { alert(error.message); return }
+
+    if (pay?.type === 'dev_fee' && pay.customer_id) {
+      let inquiryId = null
+      if (pay.site_id) {
+        const site = sites.find(s => s.site_id === pay.site_id)
+        inquiryId = site?.inquiry_id || null
+      }
+      if (!inquiryId) {
+        const candidate = inquiries.find(i =>
+          i.customer_id === pay.customer_id &&
+          !i.final_paid_at &&
+          ['building', 'review'].includes(i.status)
+        )
+        inquiryId = candidate?.inquiry_id || null
+      }
+      if (inquiryId) {
+        const { error: inqErr } = await supabase.from('inquiries')
+          .update({ final_paid_at: now, status: 'approved', updated_at: now })
+          .eq('inquiry_id', inquiryId)
+        if (inqErr) { alert(inqErr.message); return }
+      } else {
+        alert('결제 행은 납부완료 처리됐지만, 연결 문의를 찾지 못했습니다. 제작 문의에서 「잔금 확인」을 눌러 주세요.')
+      }
+    }
+
     fetchAll()
   }
 
   const currentPeriod = new Date().toISOString().slice(0, 7)
   const activeSubCount = subscriptions.filter(s => s.status === 'active').length
   const pendingTickets = tickets.filter(t => t.status !== 'resolved').length
-  const unpaidOtp = oneTimePays.filter(p => p.status === 'unpaid').length
+  const pendingConfirmOtp = oneTimePays.filter(p => p.status === 'pending_confirm')
+
+  function hasPendingDeposit(customerId) {
+    return pendingConfirmOtp.some(p => p.customer_id === customerId)
+  }
 
   // 스타일
   const css = {
@@ -503,11 +675,6 @@ export default function AdminConsole() {
     }}>{text}</button>
   )
 
-  const STATUS_COLOR = { draft: '#f59e0b', published: '#22c55e', suspended: '#ef4444', cancelled: '#6b7280' }
-  const TICKET_COLOR = { open: '#f59e0b', in_progress: '#60a5fa', resolved: '#22c55e' }
-  const TYPE_LABEL = { domain_setup: '도메인 대행', dev_fee: '개발비', extra: '기타' }
-  const TYPE_COLOR = { domain_setup: '#8b5cf6', dev_fee: '#f59e0b', extra: '#6b7280' }
-
   if (!authChecked) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0a0f', color: '#9ca3af', fontSize: 14 }}>
       인증 확인 중...
@@ -515,201 +682,438 @@ export default function AdminConsole() {
   )
 
   return (
-    <div style={css.page}>
+    <div style={{ ...css.page, display: 'flex', minHeight: '100vh' }}>
 
-      {/* 헤더 */}
-      <div style={css.header}>
-        <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e' }} />
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#94a3b8', letterSpacing: 2 }}>MY PLATFORM</span>
-        <span style={{ fontSize: 11, background: '#1e40af22', color: '#60a5fa', padding: '2px 9px', borderRadius: 4 }}>
-          관리자 콘솔
-        </span>
-        <div className="ml-auto hidden sm:flex gap-5 text-xs text-gray-500">
-          <span>사이트 {sites.length}개</span>
-          <span>구독 {activeSubCount}개</span>
-          <span style={{ color: pendingTickets > 0 ? '#f59e0b' : '#475569' }}>
-            미처리 티켓 {pendingTickets}건
+      {/* 왼쪽 사이드바 */}
+      <aside style={{
+        width: 220, flexShrink: 0, background: '#0d0d14', borderRight: '1px solid #1e293b',
+        display: 'flex', flexDirection: 'column', position: 'sticky', top: 0, height: '100vh',
+      }}>
+        <div style={{ padding: '20px 18px 16px', borderBottom: '1px solid #1e293b' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e' }} />
+            <span style={{ fontSize: 12, fontWeight: 800, color: '#94a3b8', letterSpacing: 1.5 }}>MY PLATFORM</span>
+          </div>
+          <div style={{ fontSize: 11, color: '#475569', paddingLeft: 15 }}>관리자 콘솔</div>
+        </div>
+
+        <nav style={{ flex: 1, padding: '12px 10px', overflowY: 'auto' }}>
+          {NAV.map(item => {
+            const active = nav === item.key
+            let badgeCount = 0
+            if (item.key === 'dashboard') badgeCount = pendingConfirmOtp.length + pendingTickets
+            if (item.key === 'payments') badgeCount = pendingConfirmOtp.length
+            if (item.key === 'tickets') badgeCount = pendingTickets
+            if (item.key === 'inquiries') badgeCount = pendingConfirmOtp.length
+            return (
+              <button
+                key={item.key}
+                onClick={() => setNav(item.key)}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 12px', marginBottom: 2, borderRadius: 8, border: 'none',
+                  cursor: 'pointer', textAlign: 'left', fontSize: 13, fontWeight: active ? 700 : 500,
+                  background: active ? '#1e293b' : 'transparent',
+                  color: item.key === 'dev'
+                    ? (active ? '#fbbf24' : '#a16207')
+                    : (active ? '#f1f5f9' : '#64748b'),
+                }}
+              >
+                <span style={{ fontSize: 15, width: 20, textAlign: 'center' }}>{item.icon}</span>
+                <span style={{ flex: 1 }}>{item.label}</span>
+                {badgeCount > 0 && (
+                  <span style={{
+                    minWidth: 18, height: 18, borderRadius: 9, padding: '0 5px',
+                    background: '#ef4444', color: 'white', fontSize: 10, fontWeight: 700,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  }}>{badgeCount}</span>
+                )}
+              </button>
+            )
+          })}
+        </nav>
+
+        <div style={{ padding: '12px 18px', borderTop: '1px solid #1e293b', fontSize: 11, color: '#475569' }}>
+          회원 {customers.length} · 사이트 {sites.length} · 구독 {activeSubCount}
+        </div>
+      </aside>
+
+      {/* 메인 */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ ...css.header, borderBottom: '1px solid #1e293b' }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9' }}>
+            {NAV.find(n => n.key === nav)?.label}
           </span>
-        </div>
-      </div>
-
-      <div style={css.content}>
-
-        {/* 통계 카드 */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-7">
-          {[
-            { label: '전체 사이트', value: sites.length, color: '#60a5fa' },
-            { label: '활성 구독', value: activeSubCount, color: '#22c55e' },
-            { label: '이번달 예상 수익', value: `₩${(activeSubCount * 30000).toLocaleString()}`, color: '#a78bfa' },
-            { label: '미처리 티켓', value: pendingTickets, color: pendingTickets > 0 ? '#f59e0b' : '#22c55e' },
-          ].map(({ label, value, color }) => (
-            <div key={label} style={css.statCard}>
-              <div style={{ fontSize: 11, color: '#475569', marginBottom: 8, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>{label}</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color }}>{value}</div>
-            </div>
-          ))}
+          {pendingConfirmOtp.length > 0 && (
+            <button
+              onClick={() => setNav('payments')}
+              style={{
+                marginLeft: 12, padding: '4px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                background: '#f59e0b22', color: '#f59e0b', fontSize: 12, fontWeight: 700,
+              }}
+            >
+              입금확인 대기 {pendingConfirmOtp.length}건
+            </button>
+          )}
+          <div className="ml-auto hidden sm:flex gap-4 text-xs text-gray-500">
+            <span>사이트 {sites.length}개</span>
+            <span>구독 {activeSubCount}개</span>
+          </div>
         </div>
 
-        {/* 탭 */}
-        <div className="flex border-b border-[#1e293b] mb-6 overflow-x-auto">
-          {TABS.map((t, i) => (
-            <button key={t} onClick={() => setTab(i)} style={{
-              padding: '10px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-              color: tab === i ? '#60a5fa' : '#475569',
-              background: 'none', border: 'none', whiteSpace: 'nowrap',
-              borderBottom: tab === i ? '2px solid #60a5fa' : '2px solid transparent',
-            }}>{t}</button>
-          ))}
-        </div>
+        <div style={{ ...css.content, maxWidth: 1100, width: '100%' }}>
 
-        {/* ── 탭 0: 사이트 관리 ── */}
-        {tab === 0 && (
+        {/* ── 대시보드 ── */}
+        {nav === 'dashboard' && (
           <>
-            <div style={css.card}>
-              <h3 style={{ margin: '0 0 20px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>+ 새 사이트 개설</h3>
-              <form onSubmit={createSite}>
-
-                {/* 고객 정보 */}
-                <p style={{ ...css.label, marginBottom: 10 }}>고객 정보</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                  {[
-                    { key: 'customer_name',  label: '이름 *',  ph: '홍길동' },
-                    { key: 'customer_email', label: '이메일 *', ph: 'hong@email.com' },
-                    { key: 'customer_phone', label: '연락처',   ph: '010-0000-0000' },
-                  ].map(({ key, label, ph }) => (
-                    <div key={key}>
-                      <label style={css.label}>{label}</label>
-                      <input value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })}
-                        placeholder={ph} required={label.includes('*')} style={css.input} />
-                    </div>
-                  ))}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              {[
+                { label: '전체 사이트', value: sites.length, color: '#60a5fa' },
+                { label: '활성 구독', value: activeSubCount, color: '#22c55e' },
+                { label: '이번달 예상', value: `₩${(activeSubCount * 30000).toLocaleString()}`, color: '#a78bfa' },
+                { label: '처리 필요', value: pendingConfirmOtp.length + pendingTickets, color: (pendingConfirmOtp.length + pendingTickets) > 0 ? '#f59e0b' : '#22c55e' },
+              ].map(({ label, value, color }) => (
+                <div key={label} style={css.statCard}>
+                  <div style={{ fontSize: 11, color: '#475569', marginBottom: 8, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>{label}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color }}>{value}</div>
                 </div>
-
-                {/* 사이트 정보 */}
-                <p style={{ ...css.label, margin: '18px 0 10px' }}>사이트 정보</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                  {[
-                    { key: 'site_name',  label: '사이트명 *', ph: '홍길동 카페' },
-                    { key: 'subdomain',  label: '서브도메인 *', ph: 'hong' },
-                    { key: 'phone',      label: '전화번호', ph: '02-0000-0000' },
-                    { key: 'email',      label: '사이트 이메일', ph: 'info@site.com' },
-                    { key: 'address',    label: '주소', ph: '서울시 강남구...' },
-                  ].map(({ key, label, ph }) => (
-                    <div key={key}>
-                      <label style={css.label}>{label}</label>
-                      <input value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })}
-                        placeholder={ph} required={label.includes('*')} style={css.input} />
-                    </div>
-                  ))}
-                  <div>
-                    <label style={css.label}>개발 유형 *</label>
-                    <select value={form.build_type} onChange={e => setForm({ ...form, build_type: e.target.value })}
-                      style={{ ...css.input, cursor: 'pointer' }}>
-                      <option value="self">고객 직접 (루트 A)</option>
-                      <option value="managed">본사 대리 (루트 B)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="mt-3.5 grid grid-cols-1 sm:grid-cols-[2fr_1fr] gap-3.5">
-                  <div>
-                    <label style={css.label}>소개글</label>
-                    <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-                      placeholder="업체 소개를 입력하세요..." rows={2}
-                      style={{ ...css.input, resize: 'vertical' }} />
-                  </div>
-                  <div>
-                    <label style={css.label}>템플릿</label>
-                    <select value={form.template_id} onChange={e => setForm({ ...form, template_id: e.target.value })}
-                      style={{ ...css.input, cursor: 'pointer', height: 72 }}>
-                      <option value="">선택 안 함</option>
-                      {templates.map(t => (
-                        <option key={t.template_id} value={t.template_id}>{t.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <button type="submit" disabled={loading} style={{
-                    padding: '9px 22px', background: '#2563eb', color: 'white',
-                    border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 13,
-                    fontWeight: 700, opacity: loading ? 0.6 : 1
-                  }}>
-                    {loading ? '생성 중...' : '사이트 개설'}
-                  </button>
-                  {message && (
-                    <span style={{ fontSize: 13, color: message.startsWith('✅') ? '#22c55e' : '#ef4444' }}>
-                      {message}
-                    </span>
-                  )}
-                </div>
-              </form>
+              ))}
             </div>
 
-            {/* 사이트 목록 */}
-            <div style={css.card}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
-                사이트 목록 ({sites.length}개)
+            <div style={{ ...css.card, border: pendingConfirmOtp.length ? '1px solid #f59e0b55' : undefined }}>
+              <h3 style={{ margin: '0 0 14px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
+                처리 필요
               </h3>
-              <div className="overflow-x-auto -mx-6 px-6">
-              <table style={css.table}>
-                <thead>
-                  <tr>{['사이트명', '고객', '서브도메인', '유형', '체험현황', '상태', '액션'].map(h =>
-                    <th key={h} style={{ ...css.th, whiteSpace: 'nowrap' }}>{h}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sites.map(site => {
-                    const now = new Date()
-                    const trialEnds = site.trial_ends_at ? new Date(site.trial_ends_at) : null
-                    const daysLeft = trialEnds ? Math.ceil((trialEnds - now) / (1000 * 60 * 60 * 24)) : null
-                    const trialBadge = !trialEnds ? badge('#475569', '체험 없음')
-                      : daysLeft > 0  ? badge('#f59e0b', `체험중 D-${daysLeft}`)
-                      : site.status === 'suspended' ? badge('#ef4444', '만료·정지')
-                      : badge('#ef4444', `만료 ${Math.abs(daysLeft)}일 초과`)
-                    return (
-                      <tr key={site.site_id}>
-                        <td style={css.td}><strong>{site.name}</strong><br />
-                          <span style={{ fontSize: 11, color: '#64748b' }}>{site.site_code}</span>
-                        </td>
-                        <td style={css.td}>
-                          {site.customers?.name}<br />
-                          <span style={{ fontSize: 11, color: '#64748b' }}>{site.customers?.email}</span>
-                        </td>
-                        <td style={css.td}>
-                          <a href={`/preview/${site.subdomain}`} target="_blank"
-                            style={{ color: '#60a5fa', textDecoration: 'none', fontSize: 12 }}>
-                            {site.subdomain} →
-                          </a>
-                          {site.domain && <div style={{ fontSize: 11, color: '#64748b' }}>{site.domain}</div>}
-                        </td>
-                        <td style={css.td}>
-                          {badge(site.build_type === 'self' ? '#60a5fa' : '#f59e0b',
-                            site.build_type === 'self' ? '직접' : '대리')}
-                        </td>
-                        <td style={css.td}>{trialBadge}</td>
-                        <td style={css.td}>{badge(STATUS_COLOR[site.status] || '#6b7280', site.status)}</td>
-                        <td style={css.td}>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            {site.status === 'draft' && btn('#16a34a', '배포', () => updateSiteStatus(site.site_id, 'published'))}
-                            {site.status === 'published' && btn('#dc2626', '정지', () => updateSiteStatus(site.site_id, 'suspended'))}
-                            {site.status === 'suspended' && btn('#2563eb', '복구', () => updateSiteStatus(site.site_id, 'published'))}
-                            {site.status === 'draft' && btn('#9ca3af', '삭제', () => deleteSite(site))}
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-              </div>
+              {pendingConfirmOtp.length === 0 && pendingTickets === 0 && (
+                <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>지금 처리할 항목이 없습니다.</p>
+              )}
+              {pendingConfirmOtp.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700, marginBottom: 10 }}>
+                    잔금·1회성 입금확인 대기 {pendingConfirmOtp.length}건
+                  </div>
+                  {pendingConfirmOtp.map(pay => (
+                    <div key={pay.payment_id} style={{
+                      display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                      padding: '12px 14px', marginBottom: 8, background: '#0f172a',
+                      border: '1px solid #f59e0b44', borderRadius: 8,
+                    }}>
+                      {badge(codeColor('OTP_STATUS', 'pending_confirm'), codeLabel('OTP_STATUS', 'pending_confirm'))}
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9' }}>{pay.customers?.name}</span>
+                      <span style={{ fontSize: 12, color: '#94a3b8' }}>{codeLabel('OTP_TYPE', pay.type)} ₩{pay.amount?.toLocaleString()}</span>
+                      <span style={{ fontSize: 11, color: '#64748b', flex: 1 }}>{pay.note || ''}</span>
+                      {btn('#16a34a', '납부확인', () => markOneTimePaid(pay.payment_id))}
+                      {btn('#2563eb', '제작 문의로', () => setNav('inquiries'))}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {pendingTickets > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, color: '#60a5fa', fontWeight: 700, marginBottom: 8 }}>
+                    미처리 수정요청 {pendingTickets}건
+                  </div>
+                  <button onClick={() => setNav('tickets')} style={{
+                    padding: '8px 14px', background: '#1e293b', color: '#94a3b8', border: '1px solid #334155',
+                    borderRadius: 7, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                  }}>수정요청 보기 →</button>
+                </div>
+              )}
             </div>
           </>
         )}
 
+        {/* ── 회원 (customers) ── */}
+        {nav === 'customers' && (() => {
+          const selectedCustomer = customers.find(c => c.customer_id === selectedCustomerId) || null
+          return (
+            <>
+              <div style={{ marginBottom: 12 }}>
+                <h3 style={{ margin: 0, fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
+                  회원 목록 ({customers.length}명)
+                  <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: '#64748b' }}>
+                    행 클릭 → 상세 · 보유 사이트
+                  </span>
+                </h3>
+              </div>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: selectedCustomer ? 'minmax(0, 1.1fr) minmax(320px, 0.9fr)' : '1fr',
+                gap: 16,
+                alignItems: 'start',
+              }}>
+                <div style={css.card}>
+                  <div className="overflow-x-auto -mx-6 px-6">
+                    <table style={css.table}>
+                      <thead>
+                        <tr>{['이름', '이메일', '연락처', '상태', '사이트', '가입일'].map(h =>
+                          <th key={h} style={{ ...css.th, whiteSpace: 'nowrap' }}>{h}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {customers.map(c => {
+                          const siteCount = sites.filter(s => s.customer_id === c.customer_id).length
+                          const active = selectedCustomerId === c.customer_id
+                          return (
+                            <tr
+                              key={c.customer_id}
+                              onClick={() => setSelectedCustomerId(c.customer_id)}
+                              style={{
+                                cursor: 'pointer',
+                                background: active ? '#1e293b' : 'transparent',
+                                outline: active ? '1px solid #334155' : undefined,
+                              }}
+                            >
+                              <td style={css.td}><strong>{c.name}</strong></td>
+                              <td style={css.td}>
+                                <span style={{ fontSize: 12, color: '#94a3b8' }}>{c.email}</span>
+                              </td>
+                              <td style={css.td}>{c.phone || '—'}</td>
+                              <td style={css.td}>
+                                {badge(codeColor('CUSTOMER_STATUS', c.status), codeLabel('CUSTOMER_STATUS', c.status))}
+                              </td>
+                              <td style={css.td}>{siteCount}개</td>
+                              <td style={css.td}>
+                                <span style={{ fontSize: 12, color: '#64748b' }}>
+                                  {c.created_at ? new Date(c.created_at).toLocaleDateString('ko-KR') : '—'}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                        {customers.length === 0 && (
+                          <tr>
+                            <td colSpan={6} style={{ ...css.td, textAlign: 'center', color: '#475569' }}>
+                              회원이 없습니다
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {selectedCustomer && (
+                  <PlatformCustomerDetail
+                    customer={selectedCustomer}
+                    sites={sites}
+                    inquiries={inquiries}
+                    subscriptions={subscriptions}
+                    oneTimePays={oneTimePays}
+                    onClose={() => setSelectedCustomerId(null)}
+                    onOpenSite={openSiteDetail}
+                    onSave={saveCustomerFields}
+                    onSoftDelete={deleteCustomer}
+                  />
+                )}
+              </div>
+            </>
+          )
+        })()}
+
+        {/* ── 사이트 ── */}
+        {nav === 'sites' && (() => {
+          const selectedSite = sites.find(s => s.site_id === selectedSiteId) || null
+          const selectedInquiry = selectedSite?.inquiry_id
+            ? inquiries.find(i => i.inquiry_id === selectedSite.inquiry_id)
+            : inquiries.find(i => i.customer_id === selectedSite?.customer_id) || null
+          const selectedSub = selectedSite
+            ? subscriptions.find(s => s.site_id === selectedSite.site_id) || null
+            : null
+          const selectedOtps = selectedSite
+            ? oneTimePays.filter(p =>
+              p.site_id === selectedSite.site_id ||
+              (p.customer_id === selectedSite.customer_id && p.type === 'dev_fee')
+            )
+            : []
+
+          return (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
+                <h3 style={{ margin: 0, fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
+                  사이트 목록 ({sites.length}개)
+                  <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: '#64748b' }}>
+                    행을 클릭하면 흐름·돈 상태를 봅니다
+                  </span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateForm(v => !v)}
+                  style={{
+                    padding: '8px 14px', background: showCreateForm ? '#1e293b' : '#2563eb',
+                    color: 'white', border: 'none', borderRadius: 7, cursor: 'pointer',
+                    fontSize: 13, fontWeight: 700,
+                  }}
+                >
+                  {showCreateForm ? '개설 폼 닫기' : '+ 새 사이트'}
+                </button>
+              </div>
+
+              {showCreateForm && (
+                <div style={css.card}>
+                  <h3 style={{ margin: '0 0 20px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>+ 새 사이트 개설</h3>
+                  <form onSubmit={createSite}>
+                    <p style={{ ...css.label, marginBottom: 10 }}>고객 정보</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                      {[
+                        { key: 'customer_name',  label: '이름 *',  ph: '홍길동' },
+                        { key: 'customer_email', label: '이메일 *', ph: 'hong@email.com' },
+                        { key: 'customer_phone', label: '연락처',   ph: '010-0000-0000' },
+                      ].map(({ key, label, ph }) => (
+                        <div key={key}>
+                          <label style={css.label}>{label}</label>
+                          <input value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })}
+                            placeholder={ph} required={label.includes('*')} style={css.input} />
+                        </div>
+                      ))}
+                    </div>
+                    <p style={{ ...css.label, margin: '18px 0 10px' }}>사이트 정보</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                      {[
+                        { key: 'site_name',  label: '사이트명 *', ph: '홍길동 카페' },
+                        { key: 'subdomain',  label: '서브도메인 *', ph: 'hong' },
+                        { key: 'phone',      label: '전화번호', ph: '02-0000-0000' },
+                        { key: 'email',      label: '사이트 이메일', ph: 'info@site.com' },
+                        { key: 'address',    label: '주소', ph: '서울시 강남구...' },
+                      ].map(({ key, label, ph }) => (
+                        <div key={key}>
+                          <label style={css.label}>{label}</label>
+                          <input value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })}
+                            placeholder={ph} required={label.includes('*')} style={css.input} />
+                        </div>
+                      ))}
+                      <div>
+                        <label style={css.label}>개발 유형 *</label>
+                        <select value={form.build_type} onChange={e => setForm({ ...form, build_type: e.target.value })}
+                          style={{ ...css.input, cursor: 'pointer' }}>
+                          <option value="self">{codeLabel('BUILD_TYPE', 'self')} (루트 A)</option>
+                          <option value="managed">{codeLabel('BUILD_TYPE', 'managed')} (루트 B)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="mt-3.5 grid grid-cols-1 sm:grid-cols-[2fr_1fr] gap-3.5">
+                      <div>
+                        <label style={css.label}>소개글</label>
+                        <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
+                          placeholder="업체 소개를 입력하세요..." rows={2}
+                          style={{ ...css.input, resize: 'vertical' }} />
+                      </div>
+                      <div>
+                        <label style={css.label}>템플릿</label>
+                        <select value={form.template_id} onChange={e => setForm({ ...form, template_id: e.target.value })}
+                          style={{ ...css.input, cursor: 'pointer', height: 72 }}>
+                          <option value="">선택 안 함</option>
+                          {templates.map(t => (
+                            <option key={t.template_id} value={t.template_id}>{t.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <button type="submit" disabled={loading} style={{
+                        padding: '9px 22px', background: '#2563eb', color: 'white',
+                        border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 13,
+                        fontWeight: 700, opacity: loading ? 0.6 : 1
+                      }}>
+                        {loading ? '생성 중...' : '사이트 개설'}
+                      </button>
+                      {message && (
+                        <span style={{ fontSize: 13, color: message.startsWith('✅') ? '#22c55e' : '#ef4444' }}>
+                          {message}
+                        </span>
+                      )}
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: selectedSite ? 'minmax(0, 1.1fr) minmax(320px, 0.9fr)' : '1fr',
+                gap: 16,
+                alignItems: 'start',
+              }}>
+                <div style={css.card} key={`sites-list-${codesTick}`}>
+                  <div className="overflow-x-auto -mx-6 px-6">
+                    <table style={css.table}>
+                      <thead>
+                        <tr>{['사이트명', '고객', '유형', '기간', '상태'].map(h =>
+                          <th key={h} style={{ ...css.th, whiteSpace: 'nowrap' }}>{h}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sites.map(site => {
+                          const sub = subscriptions.find(s => s.site_id === site.site_id) || null
+                          const period = getSitePeriodInfo(site, sub)
+                          const periodBadge = (
+                            <div>
+                              {badge(period.color, period.label)}
+                              {period.subLabel && (
+                                <div style={{ marginTop: 4, fontSize: 10, color: '#94a3b8' }}>{period.subLabel}</div>
+                              )}
+                            </div>
+                          )
+                          const active = selectedSiteId === site.site_id
+                          return (
+                            <tr
+                              key={site.site_id}
+                              onClick={() => setSelectedSiteId(site.site_id)}
+                              style={{
+                                cursor: 'pointer',
+                                background: active ? '#1e293b' : 'transparent',
+                                outline: active ? '1px solid #334155' : undefined,
+                              }}
+                            >
+                              <td style={css.td}>
+                                <strong>{site.name}</strong><br />
+                                <span style={{ fontSize: 11, color: '#64748b' }}>{site.subdomain}</span>
+                              </td>
+                              <td style={css.td}>
+                                {site.customers?.name}<br />
+                                <span style={{ fontSize: 11, color: '#64748b' }}>{site.customers?.email}</span>
+                              </td>
+                              <td style={css.td}>
+                                {badge(codeColor('BUILD_TYPE', site.build_type),
+                                  codeLabel('BUILD_TYPE', site.build_type))}
+                              </td>
+                              <td style={css.td}>{periodBadge}</td>
+                              <td style={css.td}>
+                                {badge(codeColor('SITE_STATUS', site.status), codeLabel('SITE_STATUS', site.status))}
+                                {hasPendingDeposit(site.customer_id) && (
+                                  <div style={{ marginTop: 4 }}>{badge('#f59e0b', '잔금신청')}</div>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {selectedSite && (
+                  <PlatformSiteDetail
+                    site={selectedSite}
+                    inquiry={selectedInquiry}
+                    subscription={selectedSub}
+                    oneTimePays={selectedOtps}
+                    onClose={() => setSelectedSiteId(null)}
+                    onStatusAction={updateSiteStatus}
+                    onConfirmFinal={confirmFinalPayment}
+                    onGoInquiries={() => setNav('inquiries')}
+                    onGoPayments={() => setNav('payments')}
+                    onGoCustomer={openCustomerDetail}
+                    onSave={saveSiteFields}
+                    onDelete={deleteSite}
+                  />
+                )}
+              </div>
+            </>
+          )
+        })()}
+
         {/* ── 탭 1: 구독 현황 ── */}
-        {tab === 1 && (
+        {nav === 'subs' && (
           <div style={css.card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
@@ -719,7 +1123,11 @@ export default function AdminConsole() {
                 {/* next_billing_date 도래한 구독 자동 결제 */}
                 <button onClick={handleProcessBilling}
                   style={{ fontSize: 12, padding: '6px 14px', background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
-                  청구 처리
+                  청구 처리 (카드)
+                </button>
+                <button onClick={handleProcessOverdue}
+                  style={{ fontSize: 12, padding: '6px 14px', background: '#b45309', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
+                  이체 연체 정지
                 </button>
                 {/* 해지 예정일 지난 구독 일괄 cancelled 처리 */}
                 <button onClick={handleProcessExpired}
@@ -756,12 +1164,12 @@ export default function AdminConsole() {
                         <td style={css.td}>{sub.sites?.site_name}</td>
                         <td style={css.td}>₩{sub.amount?.toLocaleString()}</td>
                         <td style={css.td}>
-                          {badge(sub.payment_method === 'card' ? '#22c55e' : '#f59e0b',
-                            sub.payment_method === 'card' ? '카드' : '수동')}
+                          {badge(codeColor('PAYMENT_METHOD', sub.payment_method),
+                            codeLabel('PAYMENT_METHOD', sub.payment_method))}
                         </td>
                         <td style={css.td}>{sub.next_billing_date || '-'}</td>
                         <td style={css.td}>
-                          {badge(sub.status === 'active' ? '#22c55e' : sub.status === 'trial' ? '#f59e0b' : '#6b7280', sub.status)}
+                          {badge(codeColor('SUB_STATUS', sub.status), codeLabel('SUB_STATUS', sub.status))}
                         </td>
                         {/* 해지 예약된 경우 cancels_at 표시, 아니면 - */}
                         <td style={{ ...css.td, color: sub.cancels_at ? '#ef4444' : '#475569' }}>
@@ -796,19 +1204,19 @@ export default function AdminConsole() {
                                       <td style={{ ...css.td, padding: '8px 10px' }}>₩{bh.amount?.toLocaleString()}</td>
                                       <td style={{ ...css.td, padding: '8px 10px' }}>
                                         {badge(
-                                          bh.status === 'paid' ? '#22c55e' : bh.status === 'overdue' ? '#ef4444' : '#f59e0b',
-                                          bh.status === 'paid' ? '납부완료' : bh.status === 'overdue' ? '연체' : '미납'
+                                          codeColor('BILLING_STATUS', bh.status),
+                                          codeLabel('BILLING_STATUS', bh.status)
                                         )}
                                       </td>
                                       <td style={{ ...css.td, padding: '8px 10px', color: '#64748b' }}>
-                                        {bh.payment_method === 'card' ? '카드' : '수동'}
+                                        {codeLabel('PAYMENT_METHOD', bh.payment_method)}
                                       </td>
                                       <td style={{ ...css.td, padding: '8px 10px', color: '#64748b' }}>
                                         {bh.paid_at ? new Date(bh.paid_at).toLocaleDateString('ko-KR') : '-'}
                                       </td>
                                       <td style={{ ...css.td, padding: '8px 10px' }}>
                                         {bh.status !== 'paid' && btn('#16a34a', '납부 확인',
-                                          e => { e.stopPropagation(); markBillingPaid(sub.subscription_id, bh.amount, bh.period, bh.payment_method) }
+                                          e => { e.stopPropagation(); markBillingPaid(sub.subscription_id, sub.site_id, bh.amount, bh.period, bh.payment_method) }
                                         )}
                                       </td>
                                     </tr>
@@ -819,7 +1227,7 @@ export default function AdminConsole() {
                               {!history.some(bh => bh.period === currentPeriod) && (
                                 <div style={{ marginTop: 10 }}>
                                   {btn('#2563eb', `+ ${currentPeriod} 납부 확인`,
-                                    e => { e.stopPropagation(); markBillingPaid(sub.subscription_id, sub.amount, currentPeriod, sub.payment_method) }
+                                    e => { e.stopPropagation(); markBillingPaid(sub.subscription_id, sub.site_id, sub.amount, currentPeriod, sub.payment_method) }
                                   )}
                                 </div>
                               )}
@@ -837,7 +1245,7 @@ export default function AdminConsole() {
         )}
 
         {/* ── 탭 2: 수정 요청 ── */}
-        {tab === 2 && (
+        {nav === 'tickets' && (
           <div style={css.card}>
             <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
               수정 요청 — {pendingTickets}건 미처리
@@ -857,14 +1265,16 @@ export default function AdminConsole() {
                       <td style={css.td}>{t.sites?.name}</td>
                       <td style={css.td}>{t.customers?.name}</td>
                       <td style={css.td}>{t.title}</td>
-                      <td style={css.td}>{t.category || '-'}</td>
+                      <td style={css.td}>{codeLabel('TICKET_CATEGORY', t.category, t.category || '-')}</td>
                       <td style={css.td}>
                         {badge(
-                          t.priority === 'urgent' ? '#ef4444' : t.priority === 'high' ? '#f59e0b' : '#60a5fa',
-                          t.priority
+                          codeColor('TICKET_PRIORITY', t.priority),
+                          codeLabel('TICKET_PRIORITY', t.priority)
                         )}
                       </td>
-                      <td style={css.td}>{badge(TICKET_COLOR[t.status] || '#6b7280', t.status)}</td>
+                      <td style={css.td}>
+                        {badge(codeColor('TICKET_STATUS', t.status), codeLabel('TICKET_STATUS', t.status))}
+                      </td>
                       <td style={{ ...css.td, color: overdue ? '#ef4444' : '#94a3b8', fontSize: 12 }}>
                         {overdue ? '⚠️ ' : ''}{new Date(t.deadline_at).toLocaleDateString('ko-KR')}
                       </td>
@@ -887,19 +1297,7 @@ export default function AdminConsole() {
         )}
 
         {/* ── 탭 4: 제작 문의 ── */}
-        {tab === 4 && (() => {
-          const INQUIRY_STATUS = {
-            received: { label: '접수',       color: '#f59e0b' },
-            reviewing:{ label: '검토/견적',  color: '#60a5fa' },
-            building: { label: '제작중',     color: '#a78bfa' },
-            review:   { label: '검수대기',   color: '#f97316' },
-            approved: { label: '잔금완료',   color: '#06b6d4' },
-            done:     { label: '배포완료',   color: '#22c55e' },
-          }
-          const BIZ_LABEL = {
-            cafe: '☕ 카페', restaurant: '🍽 식당', salon: '💇 미용실',
-            clinic: '🏥 병원', academy: '📚 학원', general: '🏪 일반', etc: '🏪 기타',
-          }
+        {nav === 'inquiries' && (() => {
           const pendingInquiries = inquiries.filter(i => i.status !== 'done').length
 
           return (
@@ -912,10 +1310,26 @@ export default function AdminConsole() {
                   <div style={{ color: '#475569', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>접수된 문의가 없습니다</div>
                 )}
                 {inquiries.map(inq => {
-                  const st = INQUIRY_STATUS[inq.status] || INQUIRY_STATUS.received
                   const localFee = inquiryDevFee[inq.inquiry_id] ?? (inq.dev_fee_total ? String(inq.dev_fee_total) : '')
                   return (
-                    <div key={inq.inquiry_id} style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10, padding: '16px 20px' }}>
+                    <div key={inq.inquiry_id} style={{
+                      background: '#0f172a',
+                      border: hasPendingDeposit(inq.customer_id) ? '1px solid #f59e0b66' : '1px solid #1e293b',
+                      borderRadius: 10, padding: '16px 20px',
+                    }}>
+                      {hasPendingDeposit(inq.customer_id) && (
+                        <div style={{
+                          marginBottom: 12, padding: '10px 12px', borderRadius: 8,
+                          background: '#f59e0b18', border: '1px solid #f59e0b44',
+                          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                        }}>
+                          {badge(codeColor('OTP_STATUS', 'pending_confirm'), codeLabel('OTP_STATUS', 'pending_confirm'))}
+                          <span style={{ fontSize: 12, color: '#fbbf24', flex: 1 }}>
+                            고객이 잔금 입금을 신청했습니다. 통장 확인 후 「잔금 확인」을 눌러 주세요.
+                          </span>
+                          {!inq.final_paid_at && btn('#2563eb', '잔금 확인', () => confirmFinalPayment(inq.inquiry_id))}
+                        </div>
+                      )}
                       {/* 헤더 행 */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
                         <div style={{ fontWeight: 700, color: '#f1f5f9', fontSize: 14 }}>
@@ -923,8 +1337,13 @@ export default function AdminConsole() {
                           <span style={{ fontSize: 11, color: '#64748b', marginLeft: 8 }}>{inq.customers?.email}</span>
                         </div>
                         <div style={{ fontSize: 12, color: '#94a3b8' }}>{inq.phone || inq.customers?.phone || '-'}</div>
-                        <div style={{ fontSize: 12, color: '#94a3b8' }}>{BIZ_LABEL[inq.business_type] || '-'}</div>
-                        {badge(st.color, st.label)}
+                        <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                          {codeLabel('BUSINESS_TYPE', inq.business_type, '-')}
+                        </div>
+                        {badge(
+                          codeColor('INQUIRY_STATUS', inq.status),
+                          codeLabel('INQUIRY_STATUS', inq.status)
+                        )}
                         <div style={{ marginLeft: 'auto', fontSize: 11, color: '#475569' }}>
                           {new Date(inq.created_at).toLocaleDateString('ko-KR')} 접수
                         </div>
@@ -997,8 +1416,10 @@ export default function AdminConsole() {
                           const linkedSite = sites.find(s => s.inquiry_id === inq.inquiry_id)
                           if (linkedSite) {
                             return btn('#334155', `사이트 확인→ (${linkedSite.subdomain})`, () => {
-                              setTab(0)
-                              setMessage(`ℹ️ ${inq.customers?.name} 고객의 사이트(${linkedSite.subdomain})가 이미 생성되어 있습니다.`)
+                              setNav('sites')
+                              setSelectedSiteId(linkedSite.site_id)
+                              setShowCreateForm(false)
+                              setMessage(`ℹ️ ${inq.customers?.name} 고객의 사이트(${linkedSite.subdomain}) 상세를 열었습니다.`)
                             })
                           }
                           if (['building', 'review', 'approved', 'done'].includes(inq.status)) {
@@ -1012,7 +1433,9 @@ export default function AdminConsole() {
                                 build_type:     'managed',
                                 inquiry_id:     inq.inquiry_id,
                               }))
-                              setTab(0)
+                              setNav('sites')
+                              setShowCreateForm(true)
+                              setSelectedSiteId(null)
                               setMessage(`📋 ${inq.customers?.name} 고객 정보를 불러왔습니다. 사이트명과 서브도메인을 입력해주세요.`)
                             })
                           }
@@ -1028,7 +1451,13 @@ export default function AdminConsole() {
         })()}
 
         {/* ── 탭 5: 개발 문서 ── */}
-        {tab === 5 && (
+        {nav === 'codes' && (
+          <div style={css.card}>
+            <PlatformCommonCodes />
+          </div>
+        )}
+
+        {nav === 'docs' && (
           <div style={css.card}>
             <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
               개발 문서 — docs/ (플로우 · DB)
@@ -1037,11 +1466,21 @@ export default function AdminConsole() {
           </div>
         )}
 
+        {nav === 'dev' && (
+          <PlatformDevTools
+            sites={sites}
+            inquiries={inquiries}
+            subscriptions={subscriptions}
+            oneTimePays={oneTimePays}
+            onRefresh={fetchAll}
+          />
+        )}
+
         {/* ── 탭 3: 1회성 결제 ── */}
-        {tab === 3 && (
+        {nav === 'payments' && (
           <div style={css.card}>
             <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
-              1회성 결제 — 미납 {unpaidOtp}건
+              1회성 결제 — 확인대기 {pendingConfirmOtp.length}건 · 미납 {oneTimePays.filter(p => p.status === 'unpaid').length}건
             </h3>
             <div className="overflow-x-auto -mx-6 px-6">
             <table style={css.table}>
@@ -1052,18 +1491,23 @@ export default function AdminConsole() {
               </thead>
               <tbody>
                 {oneTimePays.map(pay => (
-                  <tr key={pay.payment_id}>
+                  <tr key={pay.payment_id} style={pay.status === 'pending_confirm' ? { background: '#f59e0b0d' } : undefined}>
                     <td style={css.td}>{pay.customers?.name}</td>
                     <td style={css.td}>{pay.sites?.name || '-'}</td>
-                    <td style={css.td}>{badge(TYPE_COLOR[pay.type], TYPE_LABEL[pay.type])}</td>
+                    <td style={css.td}>
+                      {badge(codeColor('OTP_TYPE', pay.type), codeLabel('OTP_TYPE', pay.type))}
+                    </td>
                     <td style={css.td}>₩{pay.amount?.toLocaleString()}</td>
                     <td style={css.td}>
-                      {badge(pay.status === 'paid' ? '#22c55e' : '#f59e0b',
-                        pay.status === 'paid' ? '납부완료' : '미납')}
+                      {badge(
+                        codeColor('OTP_STATUS', pay.status),
+                        codeLabel('OTP_STATUS', pay.status)
+                      )}
                     </td>
                     <td style={{ ...css.td, fontSize: 12, color: '#64748b' }}>{pay.note || '-'}</td>
                     <td style={css.td}>
-                      {pay.status === 'unpaid' && btn('#16a34a', '납부확인', () => markOneTimePaid(pay.payment_id))}
+                      {(pay.status === 'unpaid' || pay.status === 'pending_confirm') &&
+                        btn('#16a34a', '납부확인', () => markOneTimePaid(pay.payment_id))}
                     </td>
                   </tr>
                 ))}
@@ -1076,6 +1520,7 @@ export default function AdminConsole() {
           </div>
         )}
 
+      </div>
       </div>
     </div>
   )

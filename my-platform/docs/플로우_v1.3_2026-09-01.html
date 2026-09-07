@@ -1,0 +1,179 @@
+<title>my-platform 플로우 v1.3 — 결제 2레인 (2026-09-01)</title>
+<style>
+  :root { --bg:#f8f7f4; --surface:#fff; --ink:#1c1917; --dim:#78716c; --border:#e7e5e4; --accent:#1e40af; --safe:#15803d; --warn:#b45309; --code-bg:#f5f5f4; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; line-height:1.65; font-size:15px; }
+  .page { max-width:960px; margin:0 auto; padding:48px 24px 80px; }
+  .ver-banner { display:flex; flex-wrap:wrap; align-items:center; gap:10px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:12px 16px; margin-bottom:20px; font-size:14px; }
+  .ver-tag { font-weight:800; color:var(--accent); }
+  .ver-status { background:var(--accent); color:#fff; font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; }
+  .draft { background:#fffbeb; border:1px solid #fde68a; color:#92400e; font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; }
+  h1 { font-size:28px; font-weight:800; margin:0 0 8px; }
+  .sub { color:var(--dim); margin-bottom:24px; }
+  h2 { font-size:20px; margin:32px 0 12px; border-bottom:2px solid var(--border); padding-bottom:6px; }
+  h3 { font-size:16px; margin:20px 0 8px; color:#44403c; }
+  table { width:100%; border-collapse:collapse; font-size:14px; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; margin:12px 0; }
+  th,td { padding:9px 12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { background:#f3f2ef; font-size:11px; text-transform:uppercase; color:var(--dim); }
+  tr:last-child td { border-bottom:none; }
+  code { background:var(--code-bg); padding:2px 6px; border-radius:4px; font-size:.9em; }
+  pre { background:var(--code-bg); padding:14px; border-radius:8px; font-size:13px; overflow-x:auto; line-height:1.6; }
+  .diagram { background:#fff; border:1px solid var(--border); border-radius:10px; padding:20px; font-family:ui-monospace,Consolas,monospace; font-size:12.5px; line-height:1.75; white-space:pre; overflow-x:auto; }
+  .box { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin:16px 0; font-size:14px; }
+  .box.warn { background:#fffbeb; border-color:#fde68a; }
+  .box.good { background:#ecfdf5; border-color:#a7f3d0; }
+  .tbd { color:var(--warn); font-weight:700; font-size:12px; }
+  a { color:var(--accent); }
+  ul { padding-left:20px; }
+</style>
+
+<div class="page">
+  <div class="ver-banner">
+    <span class="ver-tag">v1.3</span>
+    <span class="ver-status">현행</span>
+    <span class="draft">설계안 · 코드 미반영</span>
+    <span>2026-09-01</span>
+    <span style="margin-left:auto;"><a href="플로우_버전목록.html">버전 목록</a> · <a href="플로우_v1.2_2026-08-31.html">v1.2</a> · <a href="플로우_v1.1_2026-08-31.html">v1.1</a></span>
+  </div>
+
+  <h1>결제·구독 플로우 v1.3</h1>
+  <p class="sub">카드 자동결제 vs 계좌이체(수동확인) <strong>2레인</strong> 설계. 루트 A·B 공통으로 <strong>운영 개시 시 결제 수단 등록</strong>을 게이트로 둔다. 배포·trial·청구 상세는 <a href="플로우_v1.1_2026-08-31.html">v1.1</a>, 인증은 <a href="플로우_v1.2_2026-08-31.html">v1.2</a> 참고.</p>
+
+  <h2>v1.3 변경 요약</h2>
+  <table>
+    <tr><th>항목</th><th>v1.1 (AS-IS 문서)</th><th>v1.3 (TO-BE 설계)</th></tr>
+    <tr><td>배포 게이트</td><td>카드 등록만</td><td><strong>결제 수단 등록</strong> (카드 OR 계좌이체)</td></tr>
+    <tr><td>루트 B</td><td>개발비 후 본사 배포 (모호)</td><td>개발비(1회) ≠ 월구독(반복). <strong>고객이 운영 수단 선택</strong> 후 go-live</td></tr>
+    <tr><td>manual</td><td>관리자 우회·레거시</td><td>계좌이체 레인의 <strong>정식 payment_method</strong></td></tr>
+    <tr><td>테이블</td><td>customer_payment_methods (카드)</td><td>당분간 유지 + 이체 필드는 subscriptions 등에 추가 <span class="tbd">TBD</span></td></tr>
+  </table>
+
+  <h2>01 · 돈의 종류 (혼동 금지)</h2>
+  <table>
+    <tr><th>구분</th><th>금액</th><th>테이블</th><th>누가·언제</th></tr>
+    <tr><td><strong>개발비</strong> (1회)</td><td>견적별</td><td><code>one_time_payments</code> (type=dev_fee)</td><td>루트 B — 선금/잔금, 본사 확인</td></tr>
+    <tr><td><strong>도메인 대행</strong> (1회)</td><td>5만원</td><td><code>one_time_payments</code> (domain_setup)</td><td>선택</td></tr>
+    <tr><td><strong>월 구독</strong> (반복)</td><td>3만원/월</td><td><code>subscriptions</code> + <code>billing_history</code></td><td>운영 개시 후 — 카드 자동 or 계좌 수동확인</td></tr>
+  </table>
+  <div class="box good">
+    <strong>핵심:</strong> 루트 B에서 <strong>잔금 납부 ≠ 월 구독 결제 수단 등록</strong>. 잔금은 개발비 정산, 운영 시작 전에 고객이 <strong>월 3만원을 어떻게 낼지</strong> 카드/계좌 중 선택해야 한다.
+  </div>
+
+  <h2>02 · 결제 2레인</h2>
+  <table>
+    <tr><th>레인</th><th>subscriptions.payment_method</th><th>등록 시 고객 행위</th><th>매월 3만원</th></tr>
+    <tr>
+      <td><strong>A. 카드 자동</strong> (기본)</td>
+      <td><code>card</code></td>
+      <td>카드(빌링키) 등록 → <code>customer_payment_methods</code></td>
+      <td>자동 청구 (<code>handleProcessBilling</code>)</td>
+    </tr>
+    <tr>
+      <td><strong>B. 계좌이체</strong> (예외)</td>
+      <td><code>manual</code></td>
+      <td>「계좌이체」선택 + 입금자명·약관 동의 <span class="tbd">TBD: 관리자 승인 여부</span></td>
+      <td>입금 안내 → 관리자 <strong>납부 확인</strong> (<code>markBillingPaid</code>)</td>
+    </tr>
+  </table>
+
+  <h3>공통 게이트 (루트 A·B 동일)</h3>
+  <div class="diagram">운영 개시(go-live) 조건
+  │
+  ├─ 결제 수단 등록 완료?
+  │     ├─ card   → customer_payment_methods 에 active 카드 1건 이상
+  │     └─ manual → subscriptions.payment_method='manual'
+  │                 + depositor_name 등 이체 프로필 등록 완료  [신규 필드 TBD]
+  │
+  └─ 통과 시 → sites published + trial 14일 시작 (정책은 v1.1 동일)</div>
+
+  <h2>03 · 루트 A (고객 직접 제작)</h2>
+  <div class="diagram">가입 → 템플릿/에디터 → 사이트 draft
+        │
+        ▼
+  결제 탭 또는 배포 버튼
+        │
+        ├─ [카드] ──► /payment/card → 빌링키 저장
+        │
+        └─ [계좌이체] ──► 이체 등록 화면 (입금자명·동의)  [화면 TBD]
+        │
+        ▼
+  deploySite() → published + subscriptions(trial, payment_method=card|manual)
+        │
+        ▼
+  trial 14일
+        │
+        ├─ card   → day14+ 자동 청구 (MOCK/PG)
+        └─ manual → day14 입금 안내 → 관리자 납부확인 → active</div>
+
+  <h2>04 · 루트 B (본사 대리 제작)</h2>
+  <div class="diagram">가입 → 제작 문의 (inquiries)
+        │
+        ▼
+  본사 견적 · 선금 50% (one_time_payments)
+        │
+        ▼
+  본사 제작 · 고객 검수용 미리보기 배포  ※ 구독 수단 불필요 (review 단계)
+        │   (관리자 published, trial 없음 — 현재 코드와 유사)
+        ▼
+  잔금 50% (one_time_payments) — 개발비 정산
+        │
+        ▼
+  고객 포털: 「서비스 시작」또는 「배포」  ← v1.3에서 명시
+        │
+        ├─ 카드 OR 계좌이체 선택 (루트 A와 동일 게이트)
+        │
+        ▼
+  go-live → trial 14일 → 이후 월 구독 (레인 A or B)</div>
+  <div class="box warn">
+    <strong>현재 코드 갭:</strong> managed 사이트는 <code>handleDeploy</code>가 early return, 관리자 배포는 카드·이체 게이트 없음. v1.3 반영 시 <strong>고객 주도 go-live 단계</strong> 추가 필요.
+  </div>
+
+  <h2>05 · DB 설계 (MVP 방향)</h2>
+  <table>
+    <tr><th>항목</th><th>결정</th><th>비고</th></tr>
+    <tr><td><code>customer_payment_methods</code></td><td><strong>유지</strong> (카드 전용)</td><td>rename → billing_profiles 는 2차</td></tr>
+    <tr><td>계좌이체 프로필</td><td><span class="tbd">TBD</span></td><td>안 1: <code>subscriptions.depositor_name</code>, <code>bank_transfer_agreed_at</code><br>안 2: <code>customer_billing_profiles</code> 신규 (type=bank_transfer)</td></tr>
+    <tr><td><code>subscriptions.payment_method</code></td><td>유지 <code>card</code> | <code>manual</code></td><td>manual = 계좌이체 레인</td></tr>
+    <tr><td><code>billing_history.payment_method</code></td><td>유지</td><td>건당 실제 결제 수단 기록</td></tr>
+  </table>
+
+  <h2>06 · 청구·연체 (manual 레인)</h2>
+  <table>
+    <tr><th>단계</th><th>카드 (card)</th><th>계좌이체 (manual)</th></tr>
+    <tr><td>trial 종료</td><td>자동 첫 청구</td><td>포털/이메일 입금 안내</td></tr>
+    <tr><td>납부 확인</td><td>PG/MOCK 자동</td><td>관리자 <code>markBillingPaid</code></td></tr>
+    <tr><td>미납</td><td><span class="tbd">TBD</span> PG 실패 처리</td><td><span class="tbd">TBD</span> N일 후 overdue → 정지?</td></tr>
+    <tr><td>자동 청구 버튼</td><td><code>handleProcessBilling</code> (card만)</td><td>대상 아님</td></tr>
+  </table>
+
+  <h2>07 · 레거시·예외</h2>
+  <ul>
+    <li><strong>운서병원 등</strong> — 카드 없이 manual + 관리자 납부확인: v1.3 이전 우회 데이터. 신규는 §02 게이트 적용.</li>
+    <li><strong>관리자 platform 직접 배포</strong> — 개발/테스트용으로만 허용할지 <span class="tbd">TBD</span></li>
+    <li><strong>샘플 데이터</strong> (<code>sample_data_v2.sql</code>) — hong=manual 은 데모용</li>
+  </ul>
+
+  <h2>08 · 미결정 사항 (다음 회의)</h2>
+  <table>
+    <tr><th>#</th><th>질문</th><th>후보</th></tr>
+    <tr><td>1</td><td>고객이 계좌이체를 <strong>스스로 선택</strong> 가능?</td><td>A) 항상 가능 B) 신청+관리자 승인 C) 본사만 지정</td></tr>
+    <tr><td>2</td><td>manual 미입금 시 <strong>며칠 후 정지</strong>?</td><td>예: 7일 / 14일</td></tr>
+    <tr><td>3</td><td>이체 등록 필드</td><td>입금자명만 vs 사업자번호 추가</td></tr>
+    <tr><td>4</td><td>2차: 가상계좌 PG</td><td>토스 등 연동 시 manual 자동화</td></tr>
+  </table>
+
+  <h2>09 · 구현 우선순위 (제안)</h2>
+  <ol>
+    <li>고객 포털 — 결제 수단 선택 UI (카드 / 계좌이체)</li>
+    <li>루트 B — 잔금 후 「서비스 시작」단계 + 동일 게이트</li>
+    <li>이체 등록 DB 필드 migration</li>
+    <li>관리자 — manual 구독 납부·연체 목록</li>
+    <li>레거시 데이터 정리 가이드</li>
+  </ol>
+
+  <h2>관련 문서</h2>
+  <ul>
+    <li><a href="db/ERD_v1.0_2026-08-31.html">ERD v1.0</a></li>
+    <li><a href="db/스키마_v1.1_2026-08-31.html">DB 스키마 v1.1</a></li>
+    <li><a href="플로우_v1.1_2026-08-31.html">플로우 v1.1</a> — trial·청구·preview</li>
+  </ul>
+</div>

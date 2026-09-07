@@ -1,30 +1,49 @@
 import { NextResponse } from 'next/server'
 
-// 플랫폼 자체 도메인 (관리자 화면)
 const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN || 'localhost:3000'
+const SITE_HOST_ROOT = process.env.NEXT_PUBLIC_SITE_HOST_ROOT || 'myplatform.com'
 
+function isPlatformHost(host) {
+  if (!host) return true
+  const bare = host.split(':')[0]
+  if (host === PLATFORM_DOMAIN) return true
+  if (/^[\d.]+$/.test(bare)) return true
+  if (host.startsWith('localhost')) return true
+  if (host.startsWith('spboxwin.iptime.org')) return true
+  if (bare === SITE_HOST_ROOT || bare === `www.${SITE_HOST_ROOT}`) return true
+  return false
+}
+
+/**
+ * 고객 사이트 서브도메인 → /s/{code} 내부 rewrite
+ * hongcafe.myplatform.com/board → /s/hongcafe/board
+ * hongcafe.myplatform.com/admin → /s/hongcafe/admin
+ */
 export function proxy(request) {
   const host = request.headers.get('host') || ''
   const url = request.nextUrl.clone()
 
-  // 플랫폼 관리자 도메인이면 그대로 통과 (IP 주소 접근 포함)
-  const isIp = /^[\d.]+/.test(host)
-  const isDevHost = host.startsWith('localhost') || host.startsWith('spboxwin.iptime.org')
-  if (host === PLATFORM_DOMAIN || isIp || isDevHost) {
+  if (isPlatformHost(host)) {
     return NextResponse.next()
   }
 
-  // 서브도메인 처리: aaa.우리플랫폼.com
-  // → /[domain]/... 으로 rewrite
-  const subdomain = host.split('.')[0]
+  const bareHost = host.split(':')[0]
+  const rootSuffix = `.${SITE_HOST_ROOT}`
 
-  // 이미 /[domain]/ 경로면 통과
-  if (url.pathname.startsWith(`/${subdomain}`)) {
+  if (!bareHost.endsWith(rootSuffix)) {
     return NextResponse.next()
   }
 
-  // 고객 사이트로 rewrite
-  url.pathname = `/${host}${url.pathname}`
+  const sub = bareHost.slice(0, -rootSuffix.length)
+  if (!sub || sub === 'www' || sub.includes('.')) {
+    return NextResponse.next()
+  }
+
+  if (url.pathname.startsWith('/s/')) {
+    return NextResponse.next()
+  }
+
+  url.pathname = `/s/${sub}${url.pathname === '/' ? '' : url.pathname}`
   return NextResponse.rewrite(url)
 }
 

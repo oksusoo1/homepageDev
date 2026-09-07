@@ -42,7 +42,7 @@ export default function LandingPage() {
           <Link href="/login?tab=signup" className="text-[15px] font-bold bg-white text-[#0a0a0a] no-underline px-9 py-4 rounded-xl">
             지금 바로 시작하기 →
           </Link>
-          <Link href="/preview/hongcafe" className="text-[15px] font-semibold bg-transparent text-gray-400 no-underline px-9 py-4 rounded-xl border border-[#2a2a2a]">
+          <Link href="/s/hongcafe" className="text-[15px] font-semibold bg-transparent text-gray-400 no-underline px-9 py-4 rounded-xl border border-[#2a2a2a]">
             데모 사이트 보기
           </Link>
         </div>

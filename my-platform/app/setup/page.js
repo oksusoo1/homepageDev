@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { onlyActive } from '@/lib/use-flag'
 import Link from 'next/link'
 import { Suspense } from 'react'
 
@@ -41,8 +42,9 @@ function SetupForm() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
 
-    const { data: cust } = await supabase
-      .from('customers').select('*').eq('auth_id', user.id).single()
+    const { data: cust } = await onlyActive(
+      supabase.from('customers').select('*').eq('auth_id', user.id)
+    ).single()
     if (!cust) { router.push('/login'); return }
 
     setCustomer(cust)
@@ -56,8 +58,9 @@ function SetupForm() {
 
     setSubdomainStatus('checking')
     const timer = setTimeout(async () => {
-      const { data } = await supabase
-        .from('sites').select('site_id').eq('subdomain', form.subdomain).single()
+      const { data } = await onlyActive(
+        supabase.from('sites').select('site_id').eq('subdomain', form.subdomain)
+      ).single()
       setSubdomainStatus(data ? 'taken' : 'available')
     }, 500)
     return () => clearTimeout(timer)

@@ -1,0 +1,117 @@
+<title>my-platform DB 스키마 v1.2 (2026-09-07)</title>
+<style>
+  :root { --bg:#f8f7f4; --surface:#fff; --ink:#1c1917; --dim:#78716c; --border:#e7e5e4; --accent:#1e40af; --safe:#15803d; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; line-height:1.65; font-size:15px; }
+  .page { max-width:960px; margin:0 auto; padding:48px 24px 80px; }
+  h1 { font-size:28px; font-weight:800; margin:0 0 6px; }
+  .meta { color:var(--dim); font-size:14px; margin-bottom:28px; }
+  .meta a { color:var(--accent); }
+  .ver { display:inline-block; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-size:12px; font-weight:700; padding:4px 10px; border-radius:6px; margin-bottom:12px; }
+  h2 { font-size:20px; margin:36px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--border); }
+  table { width:100%; border-collapse:collapse; font-size:13px; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; margin:12px 0 20px; }
+  th,td { padding:8px 12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { background:#f3f2ef; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); }
+  tr:last-child td { border-bottom:none; }
+  code { background:#f5f5f4; padding:2px 6px; border-radius:4px; font-size:.9em; }
+  .box { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px 18px; margin:16px 0; font-size:14px; }
+  .diagram { background:#fff; border:1px solid var(--border); border-radius:10px; padding:20px; font-family:ui-monospace,Consolas,monospace; font-size:13px; line-height:1.7; overflow-x:auto; white-space:pre; }
+  ul { padding-left:20px; }
+</style>
+
+<div class="page">
+  <span class="ver">v1.2 현행</span>
+  <h1>DB 스키마 명세 v1.2</h1>
+  <p class="meta">
+    작성일: 2026-09-07 &nbsp;|&nbsp;
+    SQL: <a href="sql/schema/schema_v2.1_2026-08-31.sql">schema_v2.1</a> &nbsp;|&nbsp;
+    마이그레이션: <a href="sql/migrations/007_user_messages.sql">007</a> · <a href="sql/migrations/008_rename_posts_to_user_posts.sql">008</a> &nbsp;|&nbsp;
+    <a href="스키마_버전목록.html">버전 목록</a> &nbsp;|&nbsp;
+    이전: <a href="스키마_v1.1_2026-08-31.html">v1.1</a> &nbsp;|&nbsp;
+    ERD: <a href="ERD_v1.1_2026-09-07.html">v1.1</a>
+  </p>
+
+  <div class="box">
+    <strong>v1.2 변경 요약</strong> (v1.1 대비)
+    <ul>
+      <li>주체 용어 확정: <code>customers</code>=고객 · <code>staff</code>=직원 · <code>user</code>=사용자(방문자)</li>
+      <li>공개 사이트 전용 테이블만 <code>user_</code> 접두: <code>user_posts</code>, <code>user_messages</code></li>
+      <li><code>posts</code> → <code>user_posts</code> (PK <code>post_id</code> 유지, URL 호환)</li>
+      <li><code>user_messages</code> 신설 — 사용자→고객 문의 (<code>/s/.../contact</code>)</li>
+      <li><code>support_tickets</code> = 고객→직원 수정요청만 (<code>/my</code>)</li>
+      <li><code>inquiries</code> = 고객→직원 제작의뢰 (이름에 "문의" 있어도 제작 플로우)</li>
+    </ul>
+  </div>
+
+  <h2>1. 주체 용어</h2>
+  <table>
+    <tr><th>영문(코드/DB)</th><th>한국어</th><th>누구</th></tr>
+    <tr><td><code>customers</code></td><td>고객</td><td>사장님(소상공인) — 플랫폼의 고객</td></tr>
+    <tr><td><code>staff</code></td><td>직원</td><td>본사(플랫폼) 직원</td></tr>
+    <tr><td><code>user</code> (접두)</td><td>사용자</td><td>공개 사이트 방문자(손님)</td></tr>
+  </table>
+
+  <h2>2. 메시지·요청 테이블 구분</h2>
+  <table>
+    <tr><th>테이블</th><th>방향</th><th>역할</th><th>UI</th></tr>
+    <tr><td><code>user_messages</code></td><td>사용자 → 고객</td><td>방문자 문의</td><td><code>/s/{siteCode}/contact</code></td></tr>
+    <tr><td><code>user_posts</code></td><td>고객 작성 / 사용자 열람</td><td>사이트 게시판</td><td><code>/s/{siteCode}/board</code></td></tr>
+    <tr><td><code>support_tickets</code></td><td>고객 → 직원</td><td>사이트 수정 요청</td><td><code>/my/{subdomain}</code> 수정요청</td></tr>
+    <tr><td><code>inquiries</code></td><td>고객 → 직원</td><td>본사 제작 의뢰</td><td><code>/my</code> 제작문의</td></tr>
+  </table>
+
+  <h2>3. 전체 테이블</h2>
+  <table>
+    <tr><th>#</th><th>테이블</th><th>설명</th></tr>
+    <tr><td>1</td><td><code>customers</code></td><td>고객 계정</td></tr>
+    <tr><td>2</td><td><code>staff</code></td><td>직원 계정</td></tr>
+    <tr><td>3</td><td><code>templates</code></td><td>템플릿</td></tr>
+    <tr><td>4</td><td><code>sites</code></td><td>고객 사이트</td></tr>
+    <tr><td>5</td><td><code>one_time_payments</code></td><td>1회성 결제</td></tr>
+    <tr><td>6</td><td><code>customer_payment_methods</code></td><td>고객 결제수단</td></tr>
+    <tr><td>7</td><td><code>subscriptions</code></td><td>구독</td></tr>
+    <tr><td>8</td><td><code>billing_history</code></td><td>청구 이력</td></tr>
+    <tr><td>9</td><td><code>support_tickets</code></td><td>고객→직원 수정요청</td></tr>
+    <tr><td>10</td><td><code>inquiries</code></td><td>고객→직원 제작의뢰</td></tr>
+    <tr><td>11</td><td><code>user_posts</code></td><td>사용자 사이트 게시판 (구 posts)</td></tr>
+    <tr><td>12</td><td><code>user_messages</code></td><td>사용자→고객 문의</td></tr>
+  </table>
+
+  <h2>4. user_messages 컬럼</h2>
+  <table>
+    <tr><th>컬럼</th><th>타입</th><th>설명</th></tr>
+    <tr><td><code>user_message_id</code></td><td>UUID PK</td><td></td></tr>
+    <tr><td><code>site_id</code></td><td>UUID FK</td><td>sites</td></tr>
+    <tr><td><code>name</code></td><td>VARCHAR</td><td>사용자 이름</td></tr>
+    <tr><td><code>phone</code> / <code>email</code></td><td>VARCHAR</td><td>연락처 (공개 목록 미표시)</td></tr>
+    <tr><td><code>content</code></td><td>TEXT</td><td>문의 내용</td></tr>
+    <tr><td><code>is_private</code></td><td>BOOLEAN</td><td>true=비공개 (목록에 내용 숨김)</td></tr>
+    <tr><td><code>reply_content</code></td><td>TEXT</td><td>고객 답글</td></tr>
+    <tr><td><code>replied_at</code></td><td>TIMESTAMP</td><td>답변 시각</td></tr>
+    <tr><td><code>status</code></td><td>VARCHAR</td><td>new / replied / done</td></tr>
+    <tr><td><code>use_flag</code></td><td>SMALLINT</td><td>1=사용 · 0=삭제</td></tr>
+  </table>
+
+  <h2>4b. 문의 게시판 UI</h2>
+  <ul>
+    <li>사용자: <code>/s/{siteCode}/contact</code> — 목록 + 등록(공개/비공개)</li>
+    <li>고객: <code>/my/{subdomain}</code> 「방문자 문의」탭 — 전체 열람·답변</li>
+  </ul>
+
+  <h2>5. 관계 개요</h2>
+  <div class="diagram">sites
+  ├── user_posts      (1:N)  게시판
+  ├── user_messages   (1:N)  방문자 문의
+  ├── support_tickets (1:N)  수정요청 (customers도 FK)
+  └── inquiry_id ──► inquiries (제작의뢰, 선택)
+
+customers
+  ├── sites, subscriptions, payments...
+  ├── support_tickets
+  └── inquiries</div>
+
+  <h2>6. 마이그레이션</h2>
+  <ul>
+    <li><code>007_user_messages.sql</code> — 테이블 생성</li>
+    <li><code>008_rename_posts_to_user_posts.sql</code> — posts RENAME</li>
+  </ul>
+</div>

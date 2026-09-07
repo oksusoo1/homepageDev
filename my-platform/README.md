@@ -105,14 +105,14 @@ http://localhost:3000/my
 localhost:3000/platform
   → 관리자 콘솔 열리는지
 
-localhost:3000/preview/hongcafe
+localhost:3000/s/hongcafe
   → 홍길동 카페 사이트 보이는지
 
-localhost:3000/preview/hongcafe/board
-  → 게시판 목록 보이는지
+localhost:3000/s/hongcafe/board
+  → 게시판 목록 보이는지 (user_posts)
 
-localhost:3000/preview/hongcafe/contact
-  → 문의 폼 보이는지
+localhost:3000/s/hongcafe/contact
+  → 사용자 문의 폼 보이는지 (user_messages)
    
 
 https://supabase.com/dashboard/project/pavvmktfbkpdtaayvplf

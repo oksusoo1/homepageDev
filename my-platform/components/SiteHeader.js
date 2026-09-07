@@ -1,14 +1,15 @@
 import Link from 'next/link'
+import { sitePublicPath } from '@/lib/site-paths'
 
 /**
  * 방문자 사이트 공통 헤더
- * preview/[domain] 하위 페이지에서 공유
+ * /s/[siteCode] 하위 페이지에서 공유
  */
-export default function SiteHeader({ siteName, domain, bgColor = '#1c1917', activePage = '' }) {
+export default function SiteHeader({ siteName, siteCode, bgColor = '#1c1917', activePage = '' }) {
   const navItems = [
-    { label: '홈',    href: `/preview/${domain}`,         key: 'home' },
-    { label: '게시판', href: `/preview/${domain}/board`,   key: 'board' },
-    { label: '문의',   href: `/preview/${domain}/contact`, key: 'contact' },
+    { label: '홈', href: sitePublicPath(siteCode), key: 'home' },
+    { label: '게시판', href: sitePublicPath(siteCode, '/board'), key: 'board' },
+    { label: '문의', href: sitePublicPath(siteCode, '/contact'), key: 'contact' },
   ]
 
   return (
@@ -17,7 +18,7 @@ export default function SiteHeader({ siteName, domain, bgColor = '#1c1917', acti
       padding: '0 40px', height: 64,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     }}>
-      <Link href={`/preview/${domain}`} style={{
+      <Link href={sitePublicPath(siteCode)} style={{
         color: 'white', textDecoration: 'none',
         fontSize: 20, fontWeight: 600, letterSpacing: '-0.5px',
       }}>

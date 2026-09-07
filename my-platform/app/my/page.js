@@ -3,6 +3,18 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
+import { siteAdminPath, sitePublicPath, sitePublicHostname } from '@/lib/site-paths'
+import { paymentMethodPath, oneTimePaymentMethodPath } from '@/lib/payment/paths'
+import {
+  INQUIRY_CUSTOMER_STEPS,
+  getInquiryStepIndex,
+  canPayFinalBalance,
+  loadPendingFinalPayments,
+  isFinalPaymentPending,
+} from '@/lib/payment/one-time'
+import DevFeeSummary from '@/components/DevFeeSummary'
+import { onlyActive } from '@/lib/use-flag'
+import { loadCommonCodes, codeLabel } from '@/lib/common-codes'
 
 export default function MySitesPage() {
   const router = useRouter()
@@ -13,6 +25,7 @@ export default function MySitesPage() {
   const [reactivating, setReactivating] = useState(false)
   const [myInquiries, setMyInquiries] = useState([])   // 접수된 내 문의 목록
   const [linkedSiteMap, setLinkedSiteMap] = useState({}) // { inquiry_id: site } — inquiry에 연결된 사이트
+  const [pendingOtps, setPendingOtps] = useState([]) // 잔금 입금확인대기 (one_time_payments)
   const [showInquiry, setShowInquiry] = useState(false)
   const [inquiryForm, setInquiryForm] = useState({ business_type: '', description: '', phone: '' })
   const [inquirySubmitting, setInquirySubmitting] = useState(false)
@@ -24,8 +37,11 @@ export default function MySitesPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
 
-    const { data: cust } = await supabase
-      .from('customers').select('*').eq('auth_id', user.id).single()
+    try { await loadCommonCodes() } catch (_) { /* 라벨 fallback = code */ }
+
+    const { data: cust } = await onlyActive(
+      supabase.from('customers').select('*').eq('auth_id', user.id)
+    ).single()
     if (!cust) { router.push('/login'); return }
 
     if (cust.status === 'withdrawn') {
@@ -37,11 +53,12 @@ export default function MySitesPage() {
 
     // withdraw_at이 과거 → 실제 탈퇴 처리
     if (cust.withdraw_at && new Date(cust.withdraw_at) <= new Date()) {
-      const { data: custSites } = await supabase
-        .from('sites').select('site_id').eq('customer_id', cust.customer_id)
+      const { data: custSites } = await onlyActive(
+        supabase.from('sites').select('site_id').eq('customer_id', cust.customer_id)
+      )
       if (custSites?.length) {
         const siteIds = custSites.map(s => s.site_id)
-        await supabase.from('sites').update({ status: 'cancelled' }).in('site_id', siteIds)
+        await supabase.from('sites').update({ status: 'cancelled' }).in('site_id', siteIds).eq('use_flag', 1)
       }
       await supabase.from('customers')
         .update({ status: 'withdrawn', withdraw_at: null })
@@ -54,34 +71,39 @@ export default function MySitesPage() {
 
     setCustomer(cust)
 
-    const { data: siteList } = await supabase
-      .from('sites')
-      .select('*, subscriptions(status, amount, next_billing_date)')
-      .eq('customer_id', cust.customer_id)
-      .order('created_at', { ascending: false })
+    const { data: siteList } = await onlyActive(
+      supabase
+        .from('sites')
+        .select('*, subscriptions(status, amount, next_billing_date)')
+        .eq('customer_id', cust.customer_id)
+    ).order('created_at', { ascending: false })
     setSites(siteList || [])
 
     // 내 제작 문의 조회
-    const { data: inqList } = await supabase
-      .from('inquiries')
-      .select('*')
-      .eq('customer_id', cust.customer_id)
-      .order('created_at', { ascending: false })
+    const { data: inqList } = await onlyActive(
+      supabase.from('inquiries').select('*').eq('customer_id', cust.customer_id)
+    ).order('created_at', { ascending: false })
     setMyInquiries(inqList || [])
 
     // inquiry에 연결된 사이트 조회 (inquiry_id가 있는 사이트)
     if (inqList?.length) {
-      const { data: linkedSites } = await supabase
-        .from('sites')
-        .select('site_id, subdomain, status, deploy_status, inquiry_id')
-        .eq('customer_id', cust.customer_id)
-        .not('inquiry_id', 'is', null)
+      const { data: linkedSites } = await onlyActive(
+        supabase
+          .from('sites')
+          .select('site_id, subdomain, status, deploy_status, inquiry_id')
+          .eq('customer_id', cust.customer_id)
+          .not('inquiry_id', 'is', null)
+      )
       if (linkedSites?.length) {
         const map = {}
         linkedSites.forEach(s => { map[s.inquiry_id] = s })
         setLinkedSiteMap(map)
       }
     }
+
+    // 잔금 입금확인대기 (계좌이체 신청 후 /my 표시용)
+    const pending = await loadPendingFinalPayments(supabase, cust.customer_id)
+    setPendingOtps(pending)
 
     setLoading(false)
   }
@@ -107,8 +129,9 @@ export default function MySitesPage() {
     setInquirySubmitting(false)
     setInquiryDone(true)
     // 목록 갱신
-    const { data: inqList } = await supabase
-      .from('inquiries').select('*').eq('customer_id', customer.customer_id).order('created_at', { ascending: false })
+    const { data: inqList } = await onlyActive(
+      supabase.from('inquiries').select('*').eq('customer_id', customer.customer_id)
+    ).order('created_at', { ascending: false })
     setMyInquiries(inqList || [])
   }
 
@@ -130,21 +153,17 @@ export default function MySitesPage() {
 
   const STATUS_COLOR = {
     published: '#16a34a',
+    review:    '#7c3aed',
     draft:     '#d97706',
     suspended: '#dc2626',
     cancelled: '#6b7280',
   }
   const STATUS_BG = {
     published: '#f0fdf4',
+    review:    '#f5f3ff',
     draft:     '#fffbeb',
     suspended: '#fef2f2',
     cancelled: '#f9fafb',
-  }
-  const STATUS_LABEL = {
-    published: '운영중',
-    draft:     '준비중',
-    suspended: '정지',
-    cancelled: '해지',
   }
   const CATEGORY_ICON = {
     cafe:     '☕',
@@ -356,17 +375,13 @@ export default function MySitesPage() {
 
         {/* 진행 중인 제작 문의 상태 카드 */}
         {myInquiries.filter(i => i.status !== 'done').map(inq => {
-          const STEP = [
-            { key: 'received',  label: '접수완료',  desc: '문의가 접수되었습니다.' },
-            { key: 'reviewing', label: '검토/견적',  desc: '담당자가 견적을 검토 중입니다.' },
-            { key: 'building',  label: '제작중',     desc: '사이트를 제작하고 있습니다.' },
-            { key: 'review',    label: '검수대기',   desc: '제작이 완료되었습니다. 미리보기를 확인해주세요.' },
-            { key: 'approved',  label: '승인완료',   desc: '잔금 납부 완료 후 배포 준비 중입니다.' },
-          ]
-          const currentStep = STEP.findIndex(s => s.key === inq.status)
-          const safeStep = currentStep === -1 ? 0 : currentStep
-          const BIZ_LABEL = { cafe: '☕ 카페', restaurant: '🍽 식당', salon: '💇 미용실', clinic: '🏥 병원', academy: '📚 학원', general: '🏪 일반', etc: '🏪 기타' }
-          const currentDesc = STEP[safeStep]?.desc || ''
+          const currentStep = getInquiryStepIndex(inq.status)
+          const safeStep = currentStep
+          const linkedSite = linkedSiteMap[inq.inquiry_id]
+          const finalPending = isFinalPaymentPending(pendingOtps, linkedSite)
+          const currentDesc = finalPending
+            ? '잔금 입금 신청이 접수되었습니다. 본사에서 통장 확인 후 다음 단계로 안내드립니다.'
+            : (INQUIRY_CUSTOMER_STEPS[safeStep]?.desc || '')
           return (
             <div key={inq.inquiry_id} style={{
               background: 'white', borderRadius: 14, border: '1px solid #e5e7eb',
@@ -376,18 +391,27 @@ export default function MySitesPage() {
                 <div>
                   <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', letterSpacing: 1, textTransform: 'uppercase' }}>본사 제작 문의</span>
                   <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', marginTop: 4 }}>
-                    {BIZ_LABEL[inq.business_type] || '기타'} 사이트 제작
+                    {codeLabel('BUSINESS_TYPE', inq.business_type, '기타')} 사이트 제작
                   </div>
                   <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 3 }}>
                     접수일 {new Date(inq.created_at).toLocaleDateString('ko-KR')}
                   </div>
                 </div>
                 {inq.dev_fee_total && (
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 11, color: '#9ca3af' }}>개발비</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>{inq.dev_fee_total.toLocaleString()}원</div>
-                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
-                      선금 {inq.down_paid_at ? '✓ 납부' : '미납'} · 잔금 {inq.final_paid_at ? '✓ 납부' : '미납'}
+                  <div style={{ textAlign: 'right', minWidth: 120 }}>
+                    <div style={{ fontSize: 11, color: '#9ca3af' }}>남은 잔금</div>
+                    <div style={{
+                      fontSize: 18, fontWeight: 800,
+                      color: inq.final_paid_at ? '#16a34a' : finalPending ? '#2563eb' : '#b45309',
+                    }}>
+                      {inq.final_paid_at
+                        ? '완료'
+                        : finalPending
+                          ? '입금확인 중'
+                          : `${Math.floor(inq.dev_fee_total / 2).toLocaleString()}원`}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                      총 {inq.dev_fee_total.toLocaleString()}원
                     </div>
                   </div>
                 )}
@@ -395,8 +419,8 @@ export default function MySitesPage() {
 
               {/* 진행 단계 표시 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 12 }}>
-                {STEP.map((step, i) => (
-                  <div key={step.key} style={{ display: 'flex', alignItems: 'center', flex: i < STEP.length - 1 ? 1 : 'none' }}>
+                {INQUIRY_CUSTOMER_STEPS.map((step, i) => (
+                  <div key={step.key} style={{ display: 'flex', alignItems: 'center', flex: i < INQUIRY_CUSTOMER_STEPS.length - 1 ? 1 : 'none' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                       <div style={{
                         width: 28, height: 28, borderRadius: '50%', fontSize: 12, fontWeight: 700,
@@ -408,7 +432,7 @@ export default function MySitesPage() {
                         {step.label}
                       </span>
                     </div>
-                    {i < STEP.length - 1 && (
+                    {i < INQUIRY_CUSTOMER_STEPS.length - 1 && (
                       <div style={{ flex: 1, height: 2, background: i < safeStep ? '#111827' : '#e5e7eb', margin: '0 4px', marginBottom: 16 }} />
                     )}
                   </div>
@@ -416,40 +440,82 @@ export default function MySitesPage() {
               </div>
 
               {/* 현재 단계 안내 */}
-              <div style={{ fontSize: 12, color: '#6b7280', background: '#f9fafb', borderRadius: 8, padding: '10px 14px', marginBottom: 10 }}>
+              <div style={{
+                fontSize: 12,
+                color: finalPending ? '#1e40af' : '#6b7280',
+                background: finalPending ? '#eff6ff' : '#f9fafb',
+                borderRadius: 8, padding: '10px 14px', marginBottom: 10,
+              }}>
                 💬 {currentDesc}
               </div>
 
+              {inq.dev_fee_total && inq.status === 'review' && !inq.final_paid_at && (
+                <DevFeeSummary inquiry={inq} highlight="final" finalPending={finalPending} />
+              )}
+
               {/* 단계별 액션 버튼 */}
               {(() => {
-                const linkedSite = linkedSiteMap[inq.inquiry_id]
-                if (inq.status === 'review' && linkedSite) {
+                if (inq.status === 'review' && canPayFinalBalance(inq, { finalPending })) {
                   return (
-                    <a
-                      href={`/preview/${linkedSite.subdomain}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                        padding: '10px 18px', background: '#eff6ff', color: '#2563eb',
-                        borderRadius: 8, fontSize: 13, fontWeight: 600,
-                        textDecoration: 'none', border: '1px solid #bfdbfe',
-                      }}>
-                      사이트 미리보기 확인하기 →
-                    </a>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+                      {linkedSite && (
+                        <a
+                          href={sitePublicPath(linkedSite.subdomain)}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            padding: '10px 18px', background: '#eff6ff', color: '#2563eb',
+                            borderRadius: 8, fontSize: 13, fontWeight: 600,
+                            textDecoration: 'none', border: '1px solid #bfdbfe',
+                          }}>
+                          미리보기 확인 →
+                        </a>
+                      )}
+                      <button
+                        onClick={() => router.push(oneTimePaymentMethodPath(inq.inquiry_id))}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          padding: '11px 20px', background: '#111827', color: 'white',
+                          borderRadius: 8, fontSize: 14, fontWeight: 700,
+                          border: 'none', cursor: 'pointer',
+                        }}>
+                        잔금 {inq.dev_fee_total ? `${Math.floor(inq.dev_fee_total / 2).toLocaleString()}원 ` : ''}결제하기 →
+                      </button>
+                    </div>
+                  )
+                }
+                if (inq.status === 'review' && finalPending) {
+                  return (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+                      {linkedSite && (
+                        <a
+                          href={sitePublicPath(linkedSite.subdomain)}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            padding: '10px 18px', background: '#eff6ff', color: '#2563eb',
+                            borderRadius: 8, fontSize: 13, fontWeight: 600,
+                            textDecoration: 'none', border: '1px solid #bfdbfe',
+                          }}>
+                          미리보기 확인 →
+                        </a>
+                      )}
+                    </div>
                   )
                 }
                 if (inq.status === 'approved' && linkedSite) {
                   return (
                     <button
-                      onClick={() => router.push(`/payment/card?site_id=${linkedSite.site_id}&redirect=deploy`)}
+                      onClick={() => router.push(paymentMethodPath(linkedSite.subdomain, 'deploy'))}
                       style={{
                         display: 'inline-flex', alignItems: 'center', gap: 6,
                         padding: '11px 20px', background: '#111827', color: 'white',
                         borderRadius: 8, fontSize: 14, fontWeight: 700,
                         border: 'none', cursor: 'pointer',
                       }}>
-                      카드 등록하고 서비스 시작하기 →
+                      결제 수단 등록 · 서비스 시작 →
                     </button>
                   )
                 }
@@ -505,7 +571,7 @@ export default function MySitesPage() {
               const icon = CATEGORY_ICON[site.category] || CATEGORY_ICON.default
               const statusColor = STATUS_COLOR[site.status] || '#6b7280'
               const statusBg = STATUS_BG[site.status] || '#f9fafb'
-              const statusLabel = STATUS_LABEL[site.status] || site.status
+              const statusLabel = codeLabel('SITE_STATUS', site.status)
 
               return (
                 <div key={site.site_id} style={{
@@ -545,7 +611,7 @@ export default function MySitesPage() {
                         }}>{statusLabel}</span>
                       </div>
                       <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                        {site.subdomain}.myplatform.com
+                        {sitePublicHostname(site.subdomain)}
                         {site.domain && (
                           <span style={{ marginLeft: 8, color: '#6b7280' }}>· {site.domain}</span>
                         )}
@@ -563,7 +629,7 @@ export default function MySitesPage() {
                   {/* 오른쪽: 버튼들 */}
                   <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                     <a
-                      href={`/preview/${site.subdomain}`}
+                      href={sitePublicPath(site.subdomain)}
                       target="_blank"
                       style={{
                         padding: '8px 16px', borderRadius: 7, fontSize: 12, fontWeight: 600,
@@ -572,7 +638,7 @@ export default function MySitesPage() {
                       }}>
                       사이트 보기
                     </a>
-                    <Link href={`/my/${site.subdomain}`} style={{
+                    <Link href={siteAdminPath(site.subdomain)} style={{
                       padding: '8px 16px', borderRadius: 7, fontSize: 12, fontWeight: 700,
                       background: '#111827', color: 'white',
                       border: 'none', textDecoration: 'none', cursor: 'pointer',

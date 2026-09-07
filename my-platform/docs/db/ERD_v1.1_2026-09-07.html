@@ -1,0 +1,106 @@
+<title>my-platform ERD v1.1 (2026-09-07)</title>
+<style>
+  :root { --bg:#f8f7f4; --surface:#fff; --ink:#1c1917; --dim:#78716c; --border:#e7e5e4; --accent:#1e40af; --safe:#15803d; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; line-height:1.6; }
+  .page { max-width:980px; margin:0 auto; padding:48px 24px 80px; }
+  h1 { font-size:28px; font-weight:800; margin:0 0 8px; }
+  .meta { color:var(--dim); margin-bottom:24px; font-size:14px; }
+  .meta a { color:var(--accent); }
+  .ver { display:inline-block; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-size:12px; font-weight:700; padding:4px 10px; border-radius:6px; margin-bottom:12px; }
+  h2 { font-size:18px; margin:28px 0 12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  th,td { padding:8px 12px; border-bottom:1px solid var(--border); text-align:left; }
+  th { background:#f3f2ef; font-size:11px; color:var(--dim); text-transform:uppercase; }
+  code { background:#f5f5f4; padding:2px 6px; border-radius:4px; font-size:.9em; }
+  .box { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin:16px 0; font-size:14px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; margin-right:16px; font-size:13px; }
+  .sw { width:14px; height:14px; border-radius:3px; border:1px solid #ccc; display:inline-block; }
+</style>
+
+<div class="page">
+  <span class="ver">ERD v1.1 현행</span>
+  <h1>ERD — 테이블 관계</h1>
+  <p class="meta">
+    2026-09-07 &nbsp;|&nbsp;
+    스키마: <a href="스키마_v1.2_2026-09-07.html">v1.2</a> &nbsp;|&nbsp;
+    이전 ERD: <a href="ERD_v1.0_2026-08-31.html">v1.0</a> &nbsp;|&nbsp;
+    <a href="스키마_버전목록.html">버전 목록</a>
+  </p>
+
+  <div class="box legend">
+    <span><i class="sw" style="background:#dbeafe;border-color:#93c5fd"></i> 계정·사이트</span>
+    <span><i class="sw" style="background:#fce7f3;border-color:#f9a8d4"></i> 결제·구독</span>
+    <span><i class="sw" style="background:#f3e8ff;border-color:#d8b4fe"></i> 고객↔직원 요청</span>
+    <span><i class="sw" style="background:#dcfce7;border-color:#86efac"></i> 사용자(공개 사이트)</span>
+  </div>
+
+  <svg viewBox="0 0 920 620" width="100%" style="background:#fff;border:1px solid var(--border);border-radius:12px;">
+    <!-- customers -->
+    <rect x="40" y="40" width="160" height="70" rx="8" fill="#dbeafe" stroke="#93c5fd"/>
+    <text x="120" y="70" text-anchor="middle" font-weight="800" font-size="13">customers</text>
+    <text x="120" y="92" text-anchor="middle" font-size="10" fill="#1e3a8a">고객 · customer_id</text>
+
+    <!-- staff -->
+    <rect x="240" y="40" width="140" height="70" rx="8" fill="#dbeafe" stroke="#93c5fd"/>
+    <text x="310" y="70" text-anchor="middle" font-weight="800" font-size="13">staff</text>
+    <text x="310" y="92" text-anchor="middle" font-size="10" fill="#1e3a8a">직원 · staff_id</text>
+
+    <!-- sites -->
+    <rect x="40" y="180" width="160" height="70" rx="8" fill="#dbeafe" stroke="#93c5fd"/>
+    <text x="120" y="210" text-anchor="middle" font-weight="800" font-size="13">sites</text>
+    <text x="120" y="232" text-anchor="middle" font-size="10" fill="#1e3a8a">site_id · site_code</text>
+
+    <!-- templates -->
+    <rect x="240" y="180" width="140" height="70" rx="8" fill="#dbeafe" stroke="#93c5fd"/>
+    <text x="310" y="210" text-anchor="middle" font-weight="800" font-size="13">templates</text>
+    <text x="310" y="232" text-anchor="middle" font-size="10" fill="#1e3a8a">template_id</text>
+
+    <!-- payments cluster -->
+    <rect x="440" y="40" width="200" height="56" rx="8" fill="#fce7f3" stroke="#f9a8d4"/>
+    <text x="540" y="74" text-anchor="middle" font-weight="800" font-size="12">subscriptions / billing</text>
+    <rect x="440" y="110" width="200" height="56" rx="8" fill="#fce7f3" stroke="#f9a8d4"/>
+    <text x="540" y="144" text-anchor="middle" font-weight="800" font-size="12">one_time / pay_methods</text>
+
+    <!-- support + inquiries -->
+    <rect x="440" y="200" width="200" height="70" rx="8" fill="#f3e8ff" stroke="#d8b4fe"/>
+    <text x="540" y="228" text-anchor="middle" font-weight="800" font-size="13">support_tickets</text>
+    <text x="540" y="250" text-anchor="middle" font-size="10" fill="#581c87">고객 → 직원 수정요청</text>
+
+    <rect x="680" y="200" width="200" height="70" rx="8" fill="#f3e8ff" stroke="#d8b4fe"/>
+    <text x="780" y="228" text-anchor="middle" font-weight="800" font-size="13">inquiries</text>
+    <text x="780" y="250" text-anchor="middle" font-size="10" fill="#581c87">고객 → 직원 제작의뢰</text>
+
+    <!-- user tables -->
+    <rect x="40" y="340" width="200" height="80" rx="8" fill="#dcfce7" stroke="#86efac"/>
+    <text x="140" y="372" text-anchor="middle" font-weight="800" font-size="13">user_posts</text>
+    <text x="140" y="394" text-anchor="middle" font-size="10" fill="#14532d">게시판 · post_id PK</text>
+
+    <rect x="280" y="340" width="220" height="80" rx="8" fill="#dcfce7" stroke="#86efac"/>
+    <text x="390" y="372" text-anchor="middle" font-weight="800" font-size="13">user_messages</text>
+    <text x="390" y="394" text-anchor="middle" font-size="10" fill="#14532d">사용자 → 고객 문의</text>
+
+    <!-- lines -->
+    <line x1="120" y1="110" x2="120" y2="180" stroke="#78716c" stroke-width="1.5"/>
+    <line x1="200" y1="215" x2="240" y2="215" stroke="#78716c" stroke-width="1.5"/>
+    <line x1="200" y1="200" x2="440" y2="120" stroke="#a8a29e" stroke-width="1" stroke-dasharray="4 3"/>
+    <line x1="200" y1="215" x2="440" y2="235" stroke="#a855f7" stroke-width="1.5"/>
+    <line x1="120" y1="250" x2="120" y2="340" stroke="#16a34a" stroke-width="2"/>
+    <line x1="140" y1="250" x2="390" y2="340" stroke="#16a34a" stroke-width="2"/>
+    <line x1="200" y1="230" x2="680" y2="230" stroke="#a855f7" stroke-width="1" stroke-dasharray="4 3"/>
+
+    <text x="40" y="480" font-size="12" fill="#44403c">주체: customers(고객) · staff(직원) · user_*(사용자/방문자 공개 사이트)</text>
+    <text x="40" y="502" font-size="12" fill="#44403c">sites → user_posts, user_messages (1:N) · support_tickets · inquiries(선택 FK)</text>
+  </svg>
+
+  <h2>관계 표</h2>
+  <table>
+    <tr><th>부모</th><th>자식</th><th>관계</th><th>FK</th></tr>
+    <tr><td>customers</td><td>sites</td><td>1 : N</td><td>sites.customer_id</td></tr>
+    <tr><td>sites</td><td>user_posts</td><td>1 : N</td><td>user_posts.site_id</td></tr>
+    <tr><td>sites</td><td>user_messages</td><td>1 : N</td><td>user_messages.site_id</td></tr>
+    <tr><td>sites</td><td>support_tickets</td><td>1 : N</td><td>support_tickets.site_id</td></tr>
+    <tr><td>customers</td><td>support_tickets</td><td>1 : N</td><td>support_tickets.customer_id</td></tr>
+    <tr><td>customers</td><td>inquiries</td><td>1 : N</td><td>inquiries.customer_id</td></tr>
+    <tr><td>inquiries</td><td>sites</td><td>0..1 : 0..1</td><td>sites.inquiry_id</td></tr>
+  </table>
+</div>

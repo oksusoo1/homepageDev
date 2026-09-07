@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { onlyActive } from '@/lib/use-flag'
 
 /**
  * 로그인 사용자 + customers 테이블 조회
@@ -10,11 +11,9 @@ export async function getAuthCustomer() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const { data: customer } = await supabase
-    .from('customers')
-    .select('*')
-    .eq('auth_id', user.id)
-    .single()
+  const { data: customer } = await onlyActive(
+    supabase.from('customers').select('*').eq('auth_id', user.id)
+  ).single()
 
   if (!customer) return null
 
@@ -30,12 +29,9 @@ export async function getAuthStaff() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const { data: staff } = await supabase
-    .from('staff')
-    .select('*')
-    .eq('auth_id', user.id)
-    .eq('status', 'active')
-    .maybeSingle()
+  const { data: staff } = await onlyActive(
+    supabase.from('staff').select('*').eq('auth_id', user.id).eq('status', 'active')
+  ).maybeSingle()
 
   if (!staff) return null
 
@@ -56,20 +52,15 @@ export async function getPostLoginPath() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const { data: staff } = await supabase
-    .from('staff')
-    .select('role')
-    .eq('auth_id', user.id)
-    .eq('status', 'active')
-    .maybeSingle()
+  const { data: staff } = await onlyActive(
+    supabase.from('staff').select('role').eq('auth_id', user.id).eq('status', 'active')
+  ).maybeSingle()
 
   if (staff?.role === 'platform_admin') return '/platform'
 
-  const { data: customer } = await supabase
-    .from('customers')
-    .select('customer_id')
-    .eq('auth_id', user.id)
-    .maybeSingle()
+  const { data: customer } = await onlyActive(
+    supabase.from('customers').select('customer_id').eq('auth_id', user.id)
+  ).maybeSingle()
 
   if (customer) return '/my'
 

@@ -1,24 +1,28 @@
-import { supabase } from '@/lib/supabase'
+﻿import { supabase } from '@/lib/supabase'
+import { onlyActive } from '@/lib/use-flag'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import SiteHeader from '@/components/SiteHeader'
 
 async function getSite(domain) {
   const subdomain = domain.split('.')[0]
-  const { data } = await supabase
-    .from('sites')
-    .select('*')
-    .or(`domain.eq.${domain},subdomain.eq.${subdomain}`)
-    .single()
+  const { data } = await onlyActive(
+    supabase
+      .from('sites')
+      .select('*')
+      .or(`domain.eq.${domain},subdomain.eq.${subdomain}`)
+  ).single()
   return data
 }
 
 async function getPosts(siteId) {
-  const { data } = await supabase
-    .from('posts')
-    .select('*')
-    .eq('site_id', siteId)
-    .order('created_at', { ascending: false })
+  const { data } = await onlyActive(
+    supabase
+      .from('user_posts')
+      .select('*')
+      .eq('site_id', siteId)
+      .order('created_at', { ascending: false })
+  )
   return data || []
 }
 

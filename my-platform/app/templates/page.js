@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
+import { onlyActive } from '@/lib/use-flag'
 
 // 카테고리 메타 정보
 const CATEGORY_META = {
@@ -43,11 +44,9 @@ export default function TemplatesPage() {
     setAuthChecked(true)
 
     // 템플릿 목록 조회
-    const { data } = await supabase
-      .from('templates')
-      .select('*')
-      .eq('is_active', true)
-      .order('sort_order')
+    const { data } = await onlyActive(
+      supabase.from('templates').select('*').eq('is_active', true)
+    ).order('sort_order')
     setTemplates(data || [])
     setLoading(false)
   }

@@ -163,15 +163,24 @@ INSERT INTO support_tickets (
 
 
 -- ================================================
--- 8. posts
+-- 8. user_posts (구 posts)
 -- ================================================
 
-INSERT INTO posts (site_id, title, content, author) VALUES
+INSERT INTO user_posts (site_id, title, content, author) VALUES
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '카페 오픈 안내',    '홍길동 카페가 새롭게 오픈했습니다!',               '관리자'),
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '봄 신메뉴 출시',    '딸기 라떼, 벚꽃 에이드를 새롭게 출시합니다.',     '관리자'),
   ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '주차 안내',         '지하 1층 주차장 이용 가능. 1시간 무료.',           '관리자'),
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '3월 예약 오픈',     '3월 예약이 오픈되었습니다. 카카오톡으로 예약.',    '원장'),
   ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '봄 염색 이벤트',    '3월 한 달간 염색 시술 20% 할인 이벤트.',          '원장');
+
+
+-- ================================================
+-- 9. user_messages (사용자 → 고객 문의)
+-- ================================================
+
+INSERT INTO user_messages (site_id, name, phone, email, content, status, is_private) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '김방문', '010-1111-2222', NULL, '주말 영업시간 문의합니다.', 'new', false),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '이손님', NULL, 'guest@example.com', '예약 가능한 날짜 알려주세요.', 'new', true);
 
 
 -- ================================================

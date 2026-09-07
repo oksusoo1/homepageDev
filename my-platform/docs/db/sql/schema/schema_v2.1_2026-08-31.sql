@@ -1,15 +1,24 @@
 -- ================================================
 -- schema_v2.1_2026-08-31.sql
--- PK 명명규칙: 테이블명_id
+-- PK 명명규칙: 테이블명_id (예외: user_posts.PK = post_id, URL 호환)
 -- v2.1 변경: staff 테이블 추가 (본사 직원 / platform 관리자)
 -- sites.site_id (UUID PK) / sites.site_code (VARCHAR 식별자)
+-- use_flag: 1=사용(살아있음) · 0=삭제 — 조회 시 기본 use_flag = 1
+--   (업무 상태는 status / 데이터 삭제여부는 use_flag)
+--
+-- 주체 용어 (플랫폼 기준)
+--   customers = 고객(사장님) · staff = 직원(본사) · user = 사용자(방문자)
+--   공개 사이트 전용만 user_ 접두: user_posts, user_messages
 -- ================================================
 
 
 -- ================================================
 -- 기존 테이블 초기화 (처음부터 다시)
 -- ================================================
-DROP TABLE IF EXISTS posts CASCADE;
+DROP TABLE IF EXISTS notification_logs CASCADE;
+DROP TABLE IF EXISTS user_messages CASCADE;
+DROP TABLE IF EXISTS user_posts CASCADE;
+DROP TABLE IF EXISTS posts CASCADE;                 -- 구 테이블명 (호환)
 DROP TABLE IF EXISTS support_tickets CASCADE;
 DROP TABLE IF EXISTS billing_history CASCADE;
 DROP TABLE IF EXISTS subscriptions CASCADE;
@@ -39,11 +48,14 @@ CREATE TABLE customers (
   status        VARCHAR(20) NOT NULL DEFAULT 'active'
                 CHECK (status IN ('active', 'suspended', 'withdrawn')),
   withdraw_at   TIMESTAMP,                         -- 탈퇴 예약일 (미래: 만료 대기, 과거: 자동 withdrawn 처리)
+  use_flag      SMALLINT NOT NULL DEFAULT 1        -- 1=사용 · 0=삭제
+                CHECK (use_flag IN (0, 1)),
   created_at    TIMESTAMP DEFAULT NOW(),
   updated_at    TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_customers_email ON customers(email);
+CREATE INDEX idx_customers_use_flag ON customers(use_flag);
 
 
 -- ================================================
@@ -61,6 +73,8 @@ CREATE TABLE staff (
   -- status: active(재직) | suspended(정지) | left(퇴사)
   status      VARCHAR(20) NOT NULL DEFAULT 'active'
               CHECK (status IN ('active', 'suspended', 'left')),
+  use_flag    SMALLINT NOT NULL DEFAULT 1          -- 1=사용 · 0=삭제
+              CHECK (use_flag IN (0, 1)),
   created_at  TIMESTAMP DEFAULT NOW(),
   updated_at  TIMESTAMP DEFAULT NOW()
 );
@@ -68,6 +82,7 @@ CREATE TABLE staff (
 CREATE INDEX idx_staff_auth_id ON staff(auth_id);
 CREATE INDEX idx_staff_email    ON staff(email);
 CREATE INDEX idx_staff_status   ON staff(status);
+CREATE INDEX idx_staff_use_flag ON staff(use_flag);
 
 
 -- ================================================
@@ -80,13 +95,16 @@ CREATE TABLE templates (
   category         VARCHAR(50) NOT NULL,
   thumbnail_url    VARCHAR(500),
   default_content  JSONB,
-  is_active        BOOLEAN NOT NULL DEFAULT true,
+  is_active        BOOLEAN NOT NULL DEFAULT true,  -- 템플릿 노출 여부 (업무)
+  use_flag         SMALLINT NOT NULL DEFAULT 1     -- 1=사용 · 0=삭제
+                   CHECK (use_flag IN (0, 1)),
   sort_order       INTEGER DEFAULT 0,
   created_at       TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_templates_category ON templates(category);
 CREATE INDEX idx_templates_active   ON templates(is_active);
+CREATE INDEX idx_templates_use_flag ON templates(use_flag);
 
 INSERT INTO templates (name, category, sort_order) VALUES
   ('카페 기본형',     'cafe',       1),
@@ -126,6 +144,8 @@ CREATE TABLE sites (
   inquiry_id       UUID,                                    -- 루트 B: 연결된 제작 문의 (FK는 inquiries 생성 후 추가)
   trial_started_at TIMESTAMP,
   trial_ends_at    TIMESTAMP,
+  use_flag         SMALLINT NOT NULL DEFAULT 1     -- 1=사용 · 0=삭제
+                   CHECK (use_flag IN (0, 1)),
   created_at      TIMESTAMP DEFAULT NOW(),
   updated_at      TIMESTAMP DEFAULT NOW()
 );
@@ -134,6 +154,7 @@ CREATE INDEX idx_sites_customer_id ON sites(customer_id);
 CREATE INDEX idx_sites_site_code   ON sites(site_code);
 CREATE INDEX idx_sites_subdomain   ON sites(subdomain);
 CREATE INDEX idx_sites_status      ON sites(status);
+CREATE INDEX idx_sites_use_flag    ON sites(use_flag);
 
 
 -- ================================================
@@ -153,12 +174,15 @@ CREATE TABLE one_time_payments (
                 CHECK (status IN ('unpaid', 'paid')),
   note          TEXT,
   paid_at       TIMESTAMP,
+  use_flag      SMALLINT NOT NULL DEFAULT 1        -- 1=사용 · 0=삭제
+                CHECK (use_flag IN (0, 1)),
   created_at    TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_one_time_customer_id ON one_time_payments(customer_id);
 CREATE INDEX idx_one_time_site_id     ON one_time_payments(site_id);
 CREATE INDEX idx_one_time_status      ON one_time_payments(status);
+CREATE INDEX idx_one_time_use_flag    ON one_time_payments(use_flag);
 
 
 -- ================================================
@@ -174,13 +198,16 @@ CREATE TABLE customer_payment_methods (
   card_brand          VARCHAR(50),
   card_name           VARCHAR(100),
   is_default          BOOLEAN NOT NULL DEFAULT true,
-  is_active           BOOLEAN NOT NULL DEFAULT true,
+  is_active           BOOLEAN NOT NULL DEFAULT true, -- 기본카드 활성 (업무)
+  use_flag            SMALLINT NOT NULL DEFAULT 1    -- 1=사용 · 0=삭제
+                      CHECK (use_flag IN (0, 1)),
   registered_at       TIMESTAMP DEFAULT NOW(),
   created_at          TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_pay_methods_customer_id ON customer_payment_methods(customer_id);
 CREATE INDEX idx_pay_methods_active      ON customer_payment_methods(is_active);
+CREATE INDEX idx_pay_methods_use_flag    ON customer_payment_methods(use_flag);
 
 
 -- ================================================
@@ -205,6 +232,8 @@ CREATE TABLE subscriptions (
   next_billing_date DATE,
   cancelled_at      TIMESTAMP,                     -- 해지 요청일
   cancels_at        TIMESTAMP,                     -- 서비스 종료 예정일 (이 날짜 이후 자동 cancelled 처리)
+  use_flag          SMALLINT NOT NULL DEFAULT 1    -- 1=사용 · 0=삭제
+                    CHECK (use_flag IN (0, 1)),
   created_at        TIMESTAMP DEFAULT NOW(),
   updated_at        TIMESTAMP DEFAULT NOW(),
 
@@ -214,6 +243,7 @@ CREATE TABLE subscriptions (
 CREATE INDEX idx_subscriptions_customer_id  ON subscriptions(customer_id);
 CREATE INDEX idx_subscriptions_site_id      ON subscriptions(site_id);
 CREATE INDEX idx_subscriptions_status       ON subscriptions(status);
+CREATE INDEX idx_subscriptions_use_flag     ON subscriptions(use_flag);
 
 
 -- ================================================
@@ -234,6 +264,8 @@ CREATE TABLE billing_history (
   paid_at             TIMESTAMP,
   pg_transaction_id   VARCHAR(200),
   note                TEXT,
+  use_flag            SMALLINT NOT NULL DEFAULT 1  -- 1=사용 · 0=삭제
+                      CHECK (use_flag IN (0, 1)),
   created_at          TIMESTAMP DEFAULT NOW(),
 
   UNIQUE (subscription_id, period)
@@ -242,10 +274,12 @@ CREATE TABLE billing_history (
 CREATE INDEX idx_billing_subscription_id ON billing_history(subscription_id);
 CREATE INDEX idx_billing_period          ON billing_history(period);
 CREATE INDEX idx_billing_status          ON billing_history(status);
+CREATE INDEX idx_billing_use_flag        ON billing_history(use_flag);
 
 
 -- ================================================
--- 9. support_tickets
+-- 9. support_tickets (고객 → 직원 수정 요청)
+--    ※ user_messages(사용자 문의) · inquiries(제작의뢰) 와 구분
 -- ================================================
 
 CREATE TABLE support_tickets (
@@ -266,6 +300,8 @@ CREATE TABLE support_tickets (
   deadline_days   INTEGER NOT NULL DEFAULT 3,
   deadline_at     TIMESTAMP NOT NULL,
   resolved_at     TIMESTAMP,
+  use_flag        SMALLINT NOT NULL DEFAULT 1      -- 1=사용 · 0=삭제
+                  CHECK (use_flag IN (0, 1)),
   created_at      TIMESTAMP DEFAULT NOW(),
   updated_at      TIMESTAMP DEFAULT NOW()
 );
@@ -274,10 +310,12 @@ CREATE INDEX idx_tickets_site_id     ON support_tickets(site_id);
 CREATE INDEX idx_tickets_customer_id ON support_tickets(customer_id);
 CREATE INDEX idx_tickets_status      ON support_tickets(status);
 CREATE INDEX idx_tickets_deadline    ON support_tickets(deadline_at);
+CREATE INDEX idx_tickets_use_flag    ON support_tickets(use_flag);
 
 
 -- ================================================
--- 10. inquiries (본사 제작 문의 — 루트 B)
+-- 10. inquiries (고객 → 직원 제작 의뢰 — 루트 B)
+--    ※ 이름에 "문의"가 있어 user_messages 와 혼동 주의
 -- ================================================
 
 CREATE TABLE inquiries (
@@ -294,12 +332,15 @@ CREATE TABLE inquiries (
   down_paid_at    TIMESTAMP,                   -- 선금 50% 납부 확인일
   final_paid_at   TIMESTAMP,                   -- 잔금 50% 납부 확인일
   admin_note      TEXT,                        -- 관리자 메모
+  use_flag        SMALLINT NOT NULL DEFAULT 1  -- 1=사용 · 0=삭제
+                  CHECK (use_flag IN (0, 1)),
   created_at      TIMESTAMP DEFAULT NOW(),
   updated_at      TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_inquiries_customer_id ON inquiries(customer_id);
 CREATE INDEX idx_inquiries_status      ON inquiries(status);
+CREATE INDEX idx_inquiries_use_flag    ON inquiries(use_flag);
 
 CREATE POLICY "inquiries_all" ON inquiries FOR ALL USING (true);
 ALTER TABLE inquiries ENABLE ROW LEVEL SECURITY;
@@ -312,19 +353,89 @@ CREATE INDEX idx_sites_inquiry_id ON sites(inquiry_id);
 
 
 -- ================================================
--- 11. posts
+-- 11. user_posts (사용자 사이트 게시판)
+--    주체: customers=고객 · staff=직원 · user=사용자(방문자)
+--    PK 컬럼명은 post_id 유지 (URL /board/[post_id] 호환)
 -- ================================================
 
-CREATE TABLE posts (
+CREATE TABLE user_posts (
   post_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   site_id     UUID NOT NULL REFERENCES sites(site_id) ON DELETE RESTRICT,
   title       VARCHAR(500) NOT NULL,
   content     TEXT NOT NULL,
   author      VARCHAR(100) NOT NULL DEFAULT '관리자',
+  use_flag    SMALLINT NOT NULL DEFAULT 1          -- 1=사용 · 0=삭제
+              CHECK (use_flag IN (0, 1)),
   created_at  TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_posts_site_id ON posts(site_id);
+CREATE INDEX idx_user_posts_site_id ON user_posts(site_id);
+CREATE INDEX idx_user_posts_use_flag ON user_posts(use_flag);
+
+COMMENT ON TABLE user_posts IS
+  '사용자(방문자) 사이트 게시판. PK는 post_id 유지(URL 호환)';
+
+
+-- ================================================
+-- 11b. user_messages (사용자 → 고객 문의)
+-- ================================================
+
+CREATE TABLE user_messages (
+  user_message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  site_id         UUID NOT NULL REFERENCES sites(site_id) ON DELETE RESTRICT,
+  name            VARCHAR(100) NOT NULL,
+  phone           VARCHAR(50),
+  email           VARCHAR(200),
+  content         TEXT NOT NULL,
+  is_private      BOOLEAN NOT NULL DEFAULT false,   -- true=비공개 (공개 목록에서 내용 숨김)
+  reply_content   TEXT,                            -- 고객(운영자) 답글
+  replied_at      TIMESTAMP,
+  -- status: new(미답변) | replied(답변완료) | done(종료)
+  status          VARCHAR(20) NOT NULL DEFAULT 'new'
+                  CHECK (status IN ('new', 'replied', 'done')),
+  use_flag        SMALLINT NOT NULL DEFAULT 1
+                  CHECK (use_flag IN (0, 1)),
+  created_at      TIMESTAMP DEFAULT NOW(),
+  updated_at      TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_user_messages_site_id    ON user_messages(site_id);
+CREATE INDEX idx_user_messages_status     ON user_messages(status);
+CREATE INDEX idx_user_messages_use_flag   ON user_messages(use_flag);
+CREATE INDEX idx_user_messages_created    ON user_messages(created_at DESC);
+CREATE INDEX idx_user_messages_is_private ON user_messages(is_private);
+
+COMMENT ON TABLE user_messages IS
+  '사용자(방문자)→고객(사장님) 문의 게시판. 공개/비공개·답글. support_tickets·inquiries 와 구분';
+
+
+-- ================================================
+-- 11c. notification_logs (배치/알림톡 목업)
+-- ================================================
+
+CREATE TABLE notification_logs (
+  notification_log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  type              VARCHAR(50) NOT NULL,          -- bank_remind | bank_suspend | card_charged
+  channel           VARCHAR(50) NOT NULL DEFAULT 'mock_alimtalk',
+  site_id           UUID REFERENCES sites(site_id) ON DELETE SET NULL,
+  customer_id       UUID REFERENCES customers(customer_id) ON DELETE SET NULL,
+  subscription_id   UUID REFERENCES subscriptions(subscription_id) ON DELETE SET NULL,
+  payload           JSONB,
+  as_of_date        DATE NOT NULL,
+  use_flag          SMALLINT NOT NULL DEFAULT 1
+                    CHECK (use_flag IN (0, 1)),
+  created_at        TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_notif_logs_type ON notification_logs(type);
+CREATE INDEX idx_notif_logs_as_of ON notification_logs(as_of_date);
+CREATE INDEX idx_notif_logs_sub ON notification_logs(subscription_id);
+CREATE INDEX idx_notif_logs_use_flag ON notification_logs(use_flag);
+CREATE UNIQUE INDEX uq_notif_sub_type_asof
+  ON notification_logs(subscription_id, type, as_of_date)
+  WHERE use_flag = 1 AND subscription_id IS NOT NULL;
+
+COMMENT ON TABLE notification_logs IS '배치/알림 목업 로그. 실 알림톡 전 기록';
 
 
 -- ================================================
@@ -340,18 +451,22 @@ ALTER TABLE customer_payment_methods ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE billing_history          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE support_tickets          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE posts                    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_posts               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_messages            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_logs        ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "customers_all"      ON customers                FOR ALL USING (true);
-CREATE POLICY "staff_all"          ON staff                    FOR ALL USING (true);
-CREATE POLICY "templates_select"   ON templates                FOR SELECT USING (true);
-CREATE POLICY "sites_all"          ON sites                    FOR ALL USING (true);
-CREATE POLICY "one_time_all"       ON one_time_payments        FOR ALL USING (true);
-CREATE POLICY "pay_methods_all"    ON customer_payment_methods FOR ALL USING (true);
-CREATE POLICY "subscriptions_all"  ON subscriptions            FOR ALL USING (true);
-CREATE POLICY "billing_hist_all"   ON billing_history          FOR ALL USING (true);
-CREATE POLICY "tickets_all"        ON support_tickets          FOR ALL USING (true);
-CREATE POLICY "posts_all"          ON posts                    FOR ALL USING (true);
+CREATE POLICY "customers_all"         ON customers                FOR ALL USING (true);
+CREATE POLICY "staff_all"             ON staff                    FOR ALL USING (true);
+CREATE POLICY "templates_select"      ON templates                FOR SELECT USING (true);
+CREATE POLICY "sites_all"             ON sites                    FOR ALL USING (true);
+CREATE POLICY "one_time_all"          ON one_time_payments        FOR ALL USING (true);
+CREATE POLICY "pay_methods_all"       ON customer_payment_methods FOR ALL USING (true);
+CREATE POLICY "subscriptions_all"     ON subscriptions            FOR ALL USING (true);
+CREATE POLICY "billing_hist_all"      ON billing_history          FOR ALL USING (true);
+CREATE POLICY "tickets_all"           ON support_tickets          FOR ALL USING (true);
+CREATE POLICY "user_posts_all"        ON user_posts               FOR ALL USING (true);
+CREATE POLICY "user_messages_all"     ON user_messages            FOR ALL USING (true);
+CREATE POLICY "notification_logs_all" ON notification_logs        FOR ALL USING (true);
 
 
 -- ================================================

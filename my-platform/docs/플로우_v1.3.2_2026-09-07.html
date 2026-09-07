@@ -1,0 +1,70 @@
+<title>my-platform 플로우 v1.3.2 (2026-09-07)</title>
+<style>
+  :root { --bg:#f8f7f4; --surface:#fff; --ink:#1c1917; --dim:#78716c; --border:#e7e5e4; --accent:#1e40af; --safe:#15803d; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; line-height:1.65; font-size:15px; }
+  .page { max-width:900px; margin:0 auto; padding:48px 24px 80px; }
+  h1 { font-size:28px; font-weight:800; margin:0 0 6px; }
+  .meta { color:var(--dim); font-size:14px; margin-bottom:24px; }
+  .meta a { color:var(--accent); }
+  .ver { display:inline-block; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-size:12px; font-weight:700; padding:4px 10px; border-radius:6px; margin-bottom:12px; }
+  h2 { font-size:20px; margin:32px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--border); }
+  table { width:100%; border-collapse:collapse; font-size:13px; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; margin:12px 0; }
+  th,td { padding:8px 12px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  th { background:#f3f2ef; font-size:11px; color:var(--dim); text-transform:uppercase; }
+  code { background:#f5f5f4; padding:2px 6px; border-radius:4px; font-size:.9em; }
+  .box { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px 18px; margin:16px 0; font-size:14px; }
+  .diagram { background:#fff; border:1px solid var(--border); border-radius:10px; padding:18px; font-family:ui-monospace,Consolas,monospace; font-size:13px; line-height:1.75; white-space:pre; overflow-x:auto; }
+  ul { padding-left:20px; }
+</style>
+
+<div class="page">
+  <span class="ver">v1.3.2 현행 (증분)</span>
+  <h1>플로우 — 공개 사이트 메뉴 · 문의 분리</h1>
+  <p class="meta">
+    2026-09-07 &nbsp;|&nbsp;
+    이전: <a href="플로우_v1.3.1_2026-09-01.html">v1.3.1</a> &nbsp;|&nbsp;
+    <a href="플로우_버전목록.html">버전 목록</a> &nbsp;|&nbsp;
+    스키마: <a href="db/스키마_v1.2_2026-09-07.html">DB v1.2</a>
+  </p>
+
+  <div class="box">
+    <strong>변경 요약</strong>
+    <ul>
+      <li>공개 사이트(<code>/s/{siteCode}</code>) 문의 = <strong>사용자→고객</strong> (<code>user_messages</code>)</li>
+      <li>수정요청(<code>/my</code>) = <strong>고객→직원</strong> (<code>support_tickets</code>) — 공개 메뉴에서 분리</li>
+      <li>주체 용어: 고객 / 직원 / 사용자</li>
+    </ul>
+  </div>
+
+  <h2>1. 주체</h2>
+  <table>
+    <tr><th>용어</th><th>DB</th><th>설명</th></tr>
+    <tr><td>고객</td><td><code>customers</code></td><td>사장님 · 사이트 운영자</td></tr>
+    <tr><td>직원</td><td><code>staff</code></td><td>본사 · <code>/platform</code></td></tr>
+    <tr><td>사용자</td><td>(계정 없음)</td><td>공개 사이트 방문자 · <code>user_*</code> 테이블</td></tr>
+  </table>
+
+  <h2>2. 공개 사이트 메뉴</h2>
+  <div class="diagram">/s/{siteCode}
+  ├── 홈        → 사이트 본문
+  ├── 게시판    → user_posts
+  └── 문의      → user_messages   ← 사용자 → 고객
+
+/s/{siteCode}/admin   ← 고객 콘솔 (공개 메뉴에 없음)
+/my/{subdomain}       ← 고객 포털 (수정요청 = support_tickets)</div>
+
+  <h2>3. 문의·요청 3종</h2>
+  <table>
+    <tr><th>이름</th><th>방향</th><th>테이블</th><th>경로</th></tr>
+    <tr><td>방문자 문의</td><td>사용자 → 고객</td><td><code>user_messages</code></td><td><code>/s/.../contact</code></td></tr>
+    <tr><td>수정 요청</td><td>고객 → 직원</td><td><code>support_tickets</code></td><td><code>/my/...</code> 수정요청 탭</td></tr>
+    <tr><td>제작 의뢰</td><td>고객 → 직원</td><td><code>inquiries</code></td><td><code>/my</code> 본사 제작 문의</td></tr>
+  </table>
+
+  <h2>4. 사용자 문의 필드</h2>
+  <p>이름* · 전화 · 이메일 · 내용* · 공개/비공개 · 고객 답글(<code>reply_content</code>)</p>
+  <p>상태: <code>new</code> → <code>replied</code> · UI: <code>/s/.../contact</code> + <code>/my</code> 방문자 문의 탭</p>
+
+  <h2>5. 상태 리본</h2>
+  <p>공개 사이트(<code>/s/...</code>, admin 제외)에서 <code>sites.status</code>가 review/draft/suspended/cancelled 이면 우측 상단 고정 리본 표시.</p>
+</div>

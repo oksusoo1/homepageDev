@@ -31,20 +31,23 @@
 - /app/my → 고객 로그인 후 내 사이트 목록
 - /app/my/[subdomain] → 고객 전용 포털 (기본정보수정/수정요청/요청현황/에디터)
 - /app/login → 고객 로그인 페이지
-- /app/preview/[domain] → 고객 사이트 (방문자용, 멀티테넌트)
-- /app/preview/[domain]/board → 게시판
-- /app/preview/[domain]/board/[post_id] → 게시글 상세
-- /app/preview/[domain]/board/write → 글쓰기
+- /app/s/[siteCode] → 사용자(방문자) 사이트 (멀티테넌트)
+- /app/s/[siteCode]/board → 게시판 (`user_posts`)
+- /app/s/[siteCode]/contact → 문의 (`user_messages`, 사용자→고객)
+- /app/preview/[domain] → 레거시 방문자 경로
 - /lib/supabase.js → Supabase 클라이언트
 - middleware.js → 도메인 기반 라우팅
 
-## DB 스키마 (v2.1 - PK 명명규칙: 테이블명_id)
-> 스키마 명세: @my-platform/docs/db/스키마_버전목록.html
+## DB 스키마 (v2.1 SQL + 명세 v1.2)
+> 스키마 명세: @my-platform/docs/db/스키마_버전목록.html · @my-platform/docs/db/스키마_v1.2_2026-09-07.html
 > 최신 SQL: @my-platform/docs/db/sql/schema/schema_v2.1_2026-08-31.sql
 > 테스트 데이터: @my-platform/docs/db/sql/sample/sample_data_v2.sql
 > 마이그레이션: @my-platform/docs/db/sql/migrations/
 
+### 주체 용어
+- customers = 고객(사장님) · staff = 직원(본사) · user = 사용자(방문자, 공개 사이트 `user_*` 접두)
 
+### 테이블
 - customers: customer_id(PK), auth_id(FK→auth.users), email, name, phone
 - staff: staff_id(PK), auth_id(FK→auth.users), email, name, role, status
 - templates: template_id(PK), name, category, default_content(JSONB)
@@ -53,8 +56,10 @@
 - billing_history: billing_id(PK), subscription_id(FK), period, amount, status(unpaid/paid/overdue), pg_transaction_id
 - one_time_payments: payment_id(PK), customer_id(FK), site_id(FK), type(domain_setup/dev_fee/extra), amount, status
 - customer_payment_methods: payment_method_id(PK), customer_id(FK), pg_customer_id(빌링키), card_last4
-- support_tickets: ticket_id(PK), site_id(FK), customer_id(FK), title, category, status(open/in_progress/resolved), deadline_at
-- posts: post_id(UUID PK), site_id(UUID FK→sites.site_id), title, content, author
+- support_tickets: ticket_id(PK), site_id(FK), customer_id(FK), title, category, status — **고객→직원 수정요청** (`/my`)
+- inquiries: inquiry_id(PK), customer_id(FK), … — **고객→직원 제작의뢰**
+- user_posts: post_id(PK, URL호환), site_id(FK), title, content, author — **사용자 사이트 게시판** (구 posts)
+- user_messages: user_message_id(PK), site_id(FK), name, phone, email, content, status(new/read/done) — **사용자→고객 문의** (`/s/.../contact`)
 
 ## DB 핵심 규칙
 - PK는 반드시 테이블명_id 형식 (예: customer_id, site_id, post_id)
@@ -85,8 +90,10 @@
 - `app/editor/[subdomain]/page.js` — 심플 패널 에디터 (히어로/연락처/섹션 on-off, 실시간 미리보기)
 - `app/my/page.js` — 내 사이트 목록
 - `app/my/[subdomain]/page.js` — 고객 포털 (내 사이트/수정요청/요청현황/결제 탭)
-- `app/preview/[domain]/page.js` — 방문자용 사이트 (suspended 시 안내 페이지 표시)
-- `app/preview/[domain]/board` — 게시판 (목록/상세/쓰기)
+- `app/s/[siteCode]/page.js` — 사용자(방문자)용 사이트
+- `app/s/[siteCode]/board` — 게시판 (`user_posts`)
+- `app/s/[siteCode]/contact` — 사용자→고객 문의 (`user_messages`)
+- `app/preview/[domain]/...` — 레거시 미리보기 경로
 - `app/payment/card/page.js` — 카드 등록 (현재 MOCK_MODE=true)
 - `app/payment/card/success/page.js` — 등록 완료
 - `app/payment/card/fail/page.js` — 등록 실패

@@ -236,13 +236,22 @@ erDiagram
     string priority
     timestamp deadline_at
   }
-  posts {
+  user_posts {
     uuid post_id PK
     uuid site_id FK
     string title
     string content
     string author
     timestamp created_at
+  }
+  user_messages {
+    uuid user_message_id PK
+    uuid site_id FK
+    string name
+    string phone
+    string email
+    string content
+    string status
   }
   inquiries {
     uuid inquiry_id PK
@@ -268,7 +277,8 @@ erDiagram
   sites ||--|| subscriptions : "site_id"
   sites ||--o{ one_time_payments : "site_id"
   sites ||--o{ support_tickets : "site_id"
-  sites ||--o{ posts : "site_id"
+  sites ||--o{ user_posts : "site_id"
+  sites ||--o{ user_messages : "site_id"
   subscriptions ||--o{ billing_history : "subscription_id"
   customers ||--o{ inquiries : "customer_id"
   sites }o--o| inquiries : "inquiry_id"
@@ -315,17 +325,22 @@ erDiagram
   <div class="table-card">
     <div class="tname">support_tickets</div>
     <div class="pk">PK: ticket_id</div>
-    <div class="desc">수정 요청. 3일 내 처리 기한.</div>
+    <div class="desc">고객→직원 수정 요청. 3일 내 처리 기한.</div>
   </div>
   <div class="table-card">
-    <div class="tname">posts</div>
+    <div class="tname">user_posts</div>
     <div class="pk">PK: post_id</div>
-    <div class="desc">사이트 게시판 글.</div>
+    <div class="desc">사용자 사이트 게시판 (구 posts).</div>
+  </div>
+  <div class="table-card">
+    <div class="tname">user_messages</div>
+    <div class="pk">PK: user_message_id</div>
+    <div class="desc">사용자→고객 문의 (/s/.../contact).</div>
   </div>
   <div class="table-card">
     <div class="tname">inquiries</div>
     <div class="pk">PK: inquiry_id</div>
-    <div class="desc">본사 제작 문의 (루트 B). 사이트 없는 고객의 제작 의뢰.</div>
+    <div class="desc">고객→직원 제작 의뢰 (루트 B).</div>
   </div>
 </div>
 

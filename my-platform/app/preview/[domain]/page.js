@@ -1,34 +1,39 @@
-import { supabase } from '@/lib/supabase'
+﻿import { supabase } from '@/lib/supabase'
+import { onlyActive } from '@/lib/use-flag'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import SiteStatusRibbon from '@/components/SiteStatusRibbon'
 
 async function getSite(domain) {
   const subdomain = domain.split('.')[0]
 
   // 커스텀 도메인 먼저 조회 (published/suspended만 허용, draft는 404)
-  let { data } = await supabase
-    .from('sites')
-    .select('*')
-    .eq('domain', domain)
-    .in('status', ['published', 'suspended'])
-    .single()
-  if (!data) {
-    // 서브도메인으로 조회
-    ;({ data } = await supabase
+  let { data } = await onlyActive(
+    supabase
       .from('sites')
       .select('*')
-      .eq('subdomain', subdomain)
+      .eq('domain', domain)
       .in('status', ['published', 'suspended'])
-      .single())
+  ).single()
+  if (!data) {
+    // 서브도메인으로 조회
+    ;({ data } = await onlyActive(
+      supabase
+        .from('sites')
+        .select('*')
+        .eq('subdomain', subdomain)
+        .in('status', ['published', 'suspended'])
+    ).single())
   }
   if (!data) return null
 
   // cancels_at 만료 체크 — 방문 시 자동 처리
-  const { data: sub } = await supabase
-    .from('subscriptions')
-    .select('subscription_id, cancels_at, status')
-    .eq('site_id', data.site_id)
-    .maybeSingle()
+  const { data: sub } = await onlyActive(
+    supabase
+      .from('subscriptions')
+      .select('subscription_id, cancels_at, status')
+      .eq('site_id', data.site_id)
+  ).maybeSingle()
 
   if (sub?.cancels_at && new Date(sub.cancels_at) <= new Date() && sub.status !== 'cancelled') {
     await supabase.from('subscriptions')
@@ -44,12 +49,14 @@ async function getSite(domain) {
 }
 
 async function getRecentPosts(siteId) {
-  const { data } = await supabase
-    .from('posts')
-    .select('*')
-    .eq('site_id', siteId)
-    .order('created_at', { ascending: false })
-    .limit(3)
+  const { data } = await onlyActive(
+    supabase
+      .from('user_posts')
+      .select('*')
+      .eq('site_id', siteId)
+      .order('created_at', { ascending: false })
+      .limit(3)
+  )
   return data || []
 }
 
@@ -61,7 +68,8 @@ export default async function CustomerSitePage({ params }) {
   // 정지된 사이트 안내 페이지
   if (site.status === 'suspended') {
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center font-sans">
+      <div className="min-h-screen bg-surface flex items-center justify-center font-sans relative">
+        <SiteStatusRibbon status="suspended" position="top-right" />
         <div className="text-center px-5 py-10">
           <div className="text-6xl mb-5">🔒</div>
           <h1 className="text-2xl font-extrabold text-gray-900 mb-3">사이트 준비 중입니다</h1>

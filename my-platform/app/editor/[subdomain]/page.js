@@ -3,7 +3,9 @@ import { useState, useEffect } from 'react'
 import { use } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { onlyActive } from '@/lib/use-flag'
 import { deploySite as deployAction } from '@/lib/deploy'
+import { getBillingReadiness, paymentMethodUrl } from '@/lib/billing'
 import Link from 'next/link'
 
 const PRESET_COLORS = ['#1c1917', '#1e3a5f', '#14532d', '#4c1d95', '#7f1d1d', '#0f172a']
@@ -197,16 +199,17 @@ export default function EditorPage({ params }) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
 
-    const { data: cust } = await supabase
-      .from('customers').select('*').eq('auth_id', user.id).single()
+    const { data: cust } = await onlyActive(
+      supabase.from('customers').select('*').eq('auth_id', user.id)
+    ).single()
     if (!cust) { router.push('/login'); return }
     setCustomer(cust)
 
-    const { data: siteData } = await supabase
-      .from('sites').select('*')
-      .eq('subdomain', subdomain)
-      .eq('customer_id', cust.customer_id)
-      .single()
+    const { data: siteData } = await onlyActive(
+      supabase.from('sites').select('*')
+        .eq('subdomain', subdomain)
+        .eq('customer_id', cust.customer_id)
+    ).single()
     if (!siteData) { router.push('/my'); return }
 
     setSite(siteData)
@@ -267,24 +270,28 @@ export default function EditorPage({ params }) {
   }
 
   async function handleDeploy() {
-    // 카드 등록 여부 확인 — 없으면 카드 등록 페이지로 이동 (등록 후 자동 배포)
-    const { data: card } = await supabase
-      .from('customer_payment_methods')
-      .select('payment_method_id')
-      .eq('customer_id', customer.customer_id)
-      .eq('is_active', true)
-      .maybeSingle()
+    const { data: card } = await onlyActive(
+      supabase
+        .from('customer_payment_methods')
+        .select('payment_method_id')
+        .eq('customer_id', customer.customer_id)
+        .eq('is_active', true)
+    ).maybeSingle()
 
-    if (!card) {
-      router.push(`/payment/card?site_id=${site.site_id}&redirect=deploy`)
+    const { data: existingSub } = await onlyActive(
+      supabase.from('subscriptions').select('*').eq('site_id', site.site_id)
+    ).maybeSingle()
+
+    const billing = getBillingReadiness(card, existingSub)
+    if (!billing.ready) {
+      router.push(paymentMethodUrl(site.site_id, 'deploy'))
       return
     }
 
     setDeploying(true)
-    const { data: existingSub } = await supabase
-      .from('subscriptions').select('subscription_id').eq('site_id', site.site_id).maybeSingle()
-
-    const { error, trialEndsAt } = await deployAction(site.site_id, site.customer_id, existingSub, site)
+    const { error, trialEndsAt } = await deployAction(
+      site.site_id, site.customer_id, existingSub, site, billing.method
+    )
 
     if (!error) {
       setSite(prev => ({ ...prev, status: 'published', deploy_status: 'live', trial_ends_at: trialEndsAt }))
