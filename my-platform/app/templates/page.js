@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import { onlyActive } from '@/lib/use-flag'
+import { requireAuthUser } from '@/lib/auth'
 
 // 카테고리 메타 정보
 const CATEGORY_META = {
@@ -38,8 +39,7 @@ export default function TemplatesPage() {
   }, [])
 
   async function checkAuthAndFetch() {
-    // 로그인 체크
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await requireAuthUser()
     if (!user) { router.push('/login'); return }
     setAuthChecked(true)
 

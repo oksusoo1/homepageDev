@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { requireAuthUser } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
 import { sitePublicPath } from '@/lib/site-paths'
 
@@ -17,7 +18,7 @@ export default function ReviewSiteGate({ site, siteCode, children }) {
   useEffect(() => { checkAccess() }, [site?.site_id, siteCode])
 
   async function checkAccess() {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await requireAuthUser()
     if (!user) {
       setState('denied')
       return

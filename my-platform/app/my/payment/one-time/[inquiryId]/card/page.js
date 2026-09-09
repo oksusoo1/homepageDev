@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { requireAuthUser } from '@/lib/auth'
 import {
   completeFinalPaymentCardMock,
   getFinalPaymentAmount,
@@ -25,7 +26,7 @@ function CardPageInner() {
   useEffect(() => { init() }, [inquiryId])
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await requireAuthUser()
     if (!user) { router.push('/login'); return }
 
     const { data: cust } = await supabase.from('customers').select('customer_id').eq('auth_id', user.id).single()

@@ -2,13 +2,26 @@ import { supabase } from '@/lib/supabase'
 import { onlyActive } from '@/lib/use-flag'
 
 /**
+ * 클라이언트 세션 확인 (페이지 진입용)
+ * getSession(로컬) → 없으면 getUser(서버검증)
+ * @returns {Promise<object|null>} auth user
+ */
+export async function requireAuthUser() {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (session?.user) return session.user
+
+  const { data: { user } } = await supabase.auth.getUser()
+  return user || null
+}
+
+/**
  * 로그인 사용자 + customers 테이블 조회
  * 미인증 시 null 반환
  *
  * @returns {{ user: object, customer: object } | null}
  */
 export async function getAuthCustomer() {
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await requireAuthUser()
   if (!user) return null
 
   const { data: customer } = await onlyActive(
@@ -26,7 +39,7 @@ export async function getAuthCustomer() {
  * @returns {{ user: object, staff: object } | null}
  */
 export async function getAuthStaff() {
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await requireAuthUser()
   if (!user) return null
 
   const { data: staff } = await onlyActive(
@@ -49,7 +62,7 @@ export async function isPlatformAdmin() {
  * staff(platform_admin) → /platform, customer → /my, 없으면 null
  */
 export async function getPostLoginPath() {
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await requireAuthUser()
   if (!user) return null
 
   const { data: staff } = await onlyActive(

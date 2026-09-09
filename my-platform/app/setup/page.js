@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { requireAuthUser } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
 import Link from 'next/link'
 import { Suspense } from 'react'
@@ -39,7 +40,7 @@ function SetupForm() {
   useEffect(() => { checkAuth() }, [])
 
   async function checkAuth() {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await requireAuthUser()
     if (!user) { router.push('/login'); return }
 
     const { data: cust } = await onlyActive(

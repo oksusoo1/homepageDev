@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { requireAuthUser } from '@/lib/auth'
 import Link from 'next/link'
 import { siteAdminPath, sitePublicPath, sitePublicHostname } from '@/lib/site-paths'
 import { paymentMethodPath, oneTimePaymentMethodPath } from '@/lib/payment/paths'
@@ -34,7 +35,7 @@ export default function MySitesPage() {
   useEffect(() => { checkAuth() }, [])
 
   async function checkAuth() {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await requireAuthUser()
     if (!user) { router.push('/login'); return }
 
     try { await loadCommonCodes() } catch (_) { /* 라벨 fallback = code */ }

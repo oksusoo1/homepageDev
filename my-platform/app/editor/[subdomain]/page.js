@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { use } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { requireAuthUser } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
 import { deploySite as deployAction } from '@/lib/deploy'
 import { getBillingReadiness, paymentMethodUrl } from '@/lib/billing'
@@ -196,7 +197,7 @@ export default function EditorPage({ params }) {
   useEffect(() => { init() }, [subdomain])
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await requireAuthUser()
     if (!user) { router.push('/login'); return }
 
     const { data: cust } = await onlyActive(

@@ -3,6 +3,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { requireAuthUser } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
 import { deploySite } from '@/lib/deploy'
 import { assertPaymentSetupAllowed } from '@/lib/billing'
@@ -30,7 +31,7 @@ function BankTransferForm() {
   useEffect(() => { init() }, [siteCode])
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await requireAuthUser()
     if (!user) { router.push('/login'); return }
 
     const { data: cust } = await onlyActive(

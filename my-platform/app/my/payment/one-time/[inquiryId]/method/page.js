@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { requireAuthUser } from '@/lib/auth'
 import PaymentMethodChooser from '@/components/PaymentMethodChooser'
 import DevFeeSummary from '@/components/DevFeeSummary'
 import {
@@ -24,7 +25,7 @@ function MethodPageInner() {
   useEffect(() => { init() }, [inquiryId])
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await requireAuthUser()
     if (!user) { router.push('/login'); return }
 
     const { data: cust } = await supabase.from('customers').select('customer_id').eq('auth_id', user.id).single()

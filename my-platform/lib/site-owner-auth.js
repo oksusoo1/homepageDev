@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { requireAuthUser } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
 
 /**
@@ -9,7 +10,7 @@ import { onlyActive } from '@/lib/use-flag'
  * @returns {{ ok: true, customer: { customer_id, name } } | { ok: false, reason: 'login'|'staff'|'other_customer' }}
  */
 export async function checkSiteOwnerWriteAccess(siteCustomerId) {
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await requireAuthUser()
   if (!user) return { ok: false, reason: 'login' }
 
   // staff 면 글쓰기 차단 (공개 사이트는 읽기만)

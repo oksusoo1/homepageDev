@@ -57,8 +57,8 @@ export default function AdminConsole() {
   useEffect(() => { checkAdminAuth() }, [])
 
   async function checkAdminAuth() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user || !(await isPlatformAdmin())) {
+    // isPlatformAdmin → requireAuthUser (세션 우선)
+    if (!(await isPlatformAdmin())) {
       router.push('/login')
       return
     }

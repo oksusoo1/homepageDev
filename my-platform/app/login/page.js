@@ -25,6 +25,18 @@ function LoginForm() {
     }
   }, [searchParams])
 
+  // 이미 로그인된 상태로 /login 진입 시 복귀
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (cancelled || !session) return
+      const path = await getPostLoginPath()
+      if (!cancelled && path) router.replace(path)
+    })()
+    return () => { cancelled = true }
+  }, [router])
+
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   const [signupForm, setSignupForm] = useState({ email: '', password: '', passwordConfirm: '', name: '', phone: '' })
 
