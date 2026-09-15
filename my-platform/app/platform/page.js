@@ -8,9 +8,11 @@ import PlatformDevTools from '@/components/PlatformDevTools'
 import PlatformSiteDetail from '@/components/PlatformSiteDetail'
 import PlatformCustomerDetail from '@/components/PlatformCustomerDetail'
 import PlatformCommonCodes from '@/components/PlatformCommonCodes'
+import PlatformListSearch from '@/components/PlatformListSearch'
 import { sitePublicPath } from '@/lib/site-paths'
 import { getSitePeriodInfo } from '@/lib/site-period'
 import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
+import { matchesSearchQuery } from '@/lib/platform-list-search'
 import { onlyActive, softDelete } from '@/lib/use-flag'
 
 const NAV = [
@@ -47,6 +49,8 @@ export default function AdminConsole() {
   const [selectedSiteId, setSelectedSiteId] = useState(null)   // 사이트 상세
   const [selectedCustomerId, setSelectedCustomerId] = useState(null) // 회원 상세
   const [showCreateForm, setShowCreateForm] = useState(false)  // 새 사이트 폼
+  const [siteSearchInput, setSiteSearchInput] = useState('')
+  const [siteSearchQuery, setSiteSearchQuery] = useState('')
   const [form, setForm] = useState({
     customer_name: '', customer_email: '', customer_phone: '',
     site_name: '', subdomain: '', description: '',
@@ -64,6 +68,11 @@ export default function AdminConsole() {
     }
     setAuthChecked(true)
     fetchAll()
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut()
+    router.push('/login')
   }
 
   async function fetchAll() {
@@ -733,8 +742,21 @@ export default function AdminConsole() {
           })}
         </nav>
 
-        <div style={{ padding: '12px 18px', borderTop: '1px solid #1e293b', fontSize: 11, color: '#475569' }}>
-          회원 {customers.length} · 사이트 {sites.length} · 구독 {activeSubCount}
+        <div style={{ padding: '12px 14px', borderTop: '1px solid #1e293b' }}>
+          <div style={{ fontSize: 11, color: '#475569', marginBottom: 10, padding: '0 4px' }}>
+            회원 {customers.length} · 사이트 {sites.length} · 구독 {activeSubCount}
+          </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            style={{
+              width: '100%', padding: '9px 12px', borderRadius: 8,
+              border: '1px solid #334155', background: 'transparent',
+              color: '#94a3b8', fontSize: 12, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
+            }}
+          >
+            로그아웃
+          </button>
         </div>
       </aside>
 
@@ -913,25 +935,34 @@ export default function AdminConsole() {
 
         {/* ── 사이트 ── */}
         {nav === 'sites' && (() => {
-          const selectedSite = sites.find(s => s.site_id === selectedSiteId) || null
+          const filteredSites = sites.filter(site =>
+            matchesSearchQuery(
+              siteSearchQuery,
+              site.name,
+              site.subdomain,
+              site.site_code,
+              site.customers?.name,
+              site.customers?.email,
+            )
+          )
+          const selectedSite = filteredSites.find(s => s.site_id === selectedSiteId)
+            || sites.find(s => s.site_id === selectedSiteId)
+            || null
           const selectedInquiry = selectedSite?.inquiry_id
-            ? inquiries.find(i => i.inquiry_id === selectedSite.inquiry_id)
-            : inquiries.find(i => i.customer_id === selectedSite?.customer_id) || null
+            ? inquiries.find(i => i.inquiry_id === selectedSite.inquiry_id) || null
+            : null
           const selectedSub = selectedSite
             ? subscriptions.find(s => s.site_id === selectedSite.site_id) || null
             : null
           const selectedOtps = selectedSite
-            ? oneTimePays.filter(p =>
-              p.site_id === selectedSite.site_id ||
-              (p.customer_id === selectedSite.customer_id && p.type === 'dev_fee')
-            )
+            ? oneTimePays.filter(p => p.site_id === selectedSite.site_id)
             : []
 
           return (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
                 <h3 style={{ margin: 0, fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
-                  사이트 목록 ({sites.length}개)
+                  사이트 목록 ({filteredSites.length}{siteSearchQuery ? ` / ${sites.length}` : ''}개)
                   <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: '#64748b' }}>
                     행을 클릭하면 흐름·돈 상태를 봅니다
                   </span>
@@ -948,6 +979,16 @@ export default function AdminConsole() {
                   {showCreateForm ? '개설 폼 닫기' : '+ 새 사이트'}
                 </button>
               </div>
+
+              <PlatformListSearch
+                value={siteSearchInput}
+                onChange={setSiteSearchInput}
+                onSearch={() => setSiteSearchQuery(siteSearchInput.trim())}
+                onReset={() => { setSiteSearchInput(''); setSiteSearchQuery('') }}
+                placeholder="사이트명, 주소명, 고객명, 이메일"
+                applied={!!siteSearchQuery}
+                resultLabel={`검색 결과 ${filteredSites.length}건`}
+              />
 
               {showCreateForm && (
                 <div style={css.card}>
@@ -1042,7 +1083,13 @@ export default function AdminConsole() {
                         </tr>
                       </thead>
                       <tbody>
-                        {sites.map(site => {
+                        {filteredSites.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} style={{ ...css.td, color: '#64748b', textAlign: 'center', padding: '28px 12px' }}>
+                              {siteSearchQuery ? '검색 결과가 없습니다' : '사이트가 없습니다'}
+                            </td>
+                          </tr>
+                        ) : filteredSites.map(site => {
                           const sub = subscriptions.find(s => s.site_id === site.site_id) || null
                           const period = getSitePeriodInfo(site, sub)
                           const periodBadge = (

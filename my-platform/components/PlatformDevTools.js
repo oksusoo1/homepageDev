@@ -90,12 +90,12 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
   const site = sites.find(s => s.site_id === siteId) || null
   void codesTick // 공통코드 로드 후 옵션 라벨 재렌더
   const inquiry = site?.inquiry_id
-    ? inquiries.find(i => i.inquiry_id === site.inquiry_id)
-    : inquiries.find(i => i.customer_id === site?.customer_id) || null
+    ? inquiries.find(i => i.inquiry_id === site.inquiry_id) || null
+    : null
   const sub = subscriptions.find(s => s.site_id === siteId) || null
   const otps = oneTimePays.filter(p =>
     (p.use_flag === undefined || p.use_flag === 1) &&
-    (p.site_id === siteId || (site && p.customer_id === site.customer_id && p.type === 'dev_fee'))
+    p.site_id === siteId
   )
 
   async function run(fn, okMsg) {
@@ -203,8 +203,11 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
     }
 
     if (step === 'building') {
+      // 정방향: 선금 확인 → building + down_paid_at 설정. 선금은 유지, 잔금만 되돌림.
       await updateSite({ status: 'draft', deploy_status: 'pending', trial_started_at: null, trial_ends_at: null })
-      if (inquiry) await updateInquiry({ status: 'building', final_paid_at: null })
+      if (inquiry) {
+        await updateInquiry({ status: 'building', final_paid_at: null })
+      }
       await deleteDevFeeOtps()
       await deleteBillingThenSub()
     }
@@ -214,12 +217,13 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
     {
       key: 'building',
       title: '제작중',
-      desc: '사이트 draft · 문의 building · 구독/잔금결제 없음',
+      desc: '사이트 draft · 문의 building · 선금 유지 · 잔금/구독 없음',
       db: [
-        'UPDATE sites SET status=draft, deploy_status=pending, trial_started_at=NULL, trial_ends_at=NULL',
-        'UPDATE inquiries SET status=building, final_paid_at=NULL',
-        'DELETE FROM one_time_payments WHERE type=dev_fee',
-        'DELETE FROM subscriptions (+ billing_history)',
+        '[sites] status=draft, deploy_status=pending, trial_started_at=NULL, trial_ends_at=NULL',
+        '[inquiries] 있으면 → status=building, final_paid_at=NULL (down_paid_at 유지)',
+        '[one_time_payments] 이 사이트 dev_fee → use_flag=0 (소프트삭제)',
+        '[billing_history] 구독 있으면 DELETE',
+        '[subscriptions] 구독 있으면 DELETE',
       ].join('\n'),
     },
     {
@@ -227,10 +231,10 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
       title: '미리보기·잔금',
       desc: '검수중, 고객이 잔금 결제하기 전',
       db: [
-        'UPDATE sites SET status=review, deploy_status=live, trial_*=NULL',
-        'UPDATE inquiries SET status=review, final_paid_at=NULL',
-        'DELETE FROM one_time_payments WHERE type=dev_fee',
-        'DELETE FROM subscriptions (+ billing_history)',
+        '[sites] status=review, deploy_status=live, trial_started_at=NULL, trial_ends_at=NULL',
+        '[inquiries] 있으면 → status=review, final_paid_at=NULL (down_paid_at 유지)',
+        '[one_time_payments] 이 사이트 dev_fee → use_flag=0 (소프트삭제)',
+        '[billing_history] / [subscriptions] 있으면 DELETE',
       ].join('\n'),
     },
     {
@@ -238,10 +242,10 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
       title: '입금확인대기',
       desc: '고객이 잔금 입금 신청한 직후',
       db: [
-        'UPDATE sites SET status=review, deploy_status=live',
-        'UPDATE inquiries SET status=review, final_paid_at=NULL',
-        'UPSERT one_time_payments SET status=pending_confirm, paid_at=NULL',
-        'DELETE FROM subscriptions (+ billing_history)',
+        '[sites] status=review, deploy_status=live, trial_started_at=NULL, trial_ends_at=NULL',
+        '[inquiries] 있으면 → status=review, final_paid_at=NULL',
+        '[one_time_payments] 이 사이트 dev_fee → status=pending_confirm, paid_at=NULL (없으면 INSERT)',
+        '[billing_history] / [subscriptions] 있으면 DELETE',
       ].join('\n'),
     },
     {
@@ -249,10 +253,10 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
       title: '서비스 시작 준비',
       desc: '잔금 확인 완료. 구독 등록 전',
       db: [
-        'UPDATE sites SET status=review, deploy_status=live',
-        'UPDATE inquiries SET status=approved, final_paid_at=NOW()',
-        'UPSERT one_time_payments SET status=paid, paid_at=NOW()',
-        'DELETE FROM subscriptions (+ billing_history)',
+        '[sites] status=review, deploy_status=live, trial_started_at=NULL, trial_ends_at=NULL',
+        '[inquiries] 있으면 → status=approved, final_paid_at=NOW()',
+        '[one_time_payments] 이 사이트 dev_fee → status=paid, paid_at=NOW() (없으면 INSERT)',
+        '[billing_history] / [subscriptions] 있으면 DELETE',
       ].join('\n'),
     },
   ]
@@ -294,13 +298,16 @@ billing_history        (구독 삭제 시 함께 삭제)`}
         <>
           <div style={cardStyle}>
             <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#f1f5f9' }}>자주 쓰는 되돌리기</h3>
+            <p style={{ margin: '0 0 10px', fontSize: 11, color: '#64748b' }}>
+              카드에 적힌 [테이블] 컬럼만 변경됩니다. 문의·구독이 없으면 해당 줄은 스킵됩니다.
+            </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               {presets.map(p => (
                 <button
                   key={p.key}
                   disabled={busy}
                   onClick={() => {
-                    if (!window.confirm(`「${p.title}」\n\n${p.db}`)) return
+                    if (!window.confirm(`「${p.title}」적용\n\n변경되는 곳:\n${p.db}`)) return
                     run(() => rewindTo(p.key), `${p.title} 적용`)
                   }}
                   style={{
@@ -360,8 +367,13 @@ inquiries.dev_fee_total → 총 개발비`}</Hint>
                     onChange={e => {
                       const next = e.target.value
                       const patch = { status: next }
-                      if (['received', 'reviewing', 'building', 'review'].includes(next)) patch.final_paid_at = null
-                      run(() => updateInquiry(patch), 'UPDATE inquiries.status (+ final_paid_at)')
+                      if (['received', 'reviewing', 'building'].includes(next)) {
+                        patch.down_paid_at = null
+                        patch.final_paid_at = null
+                      } else if (next === 'review') {
+                        patch.final_paid_at = null
+                      }
+                      run(() => updateInquiry(patch), 'UPDATE inquiries.status (+ 선금/잔금일)')
                     }}
                     style={selectStyle}
                   >

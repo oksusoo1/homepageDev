@@ -650,20 +650,6 @@ export default function MySitesPage() {
                 </div>
               )
             })}
-
-            {/* 새 사이트 추가 카드 */}
-            <Link href="/templates" style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-              background: 'white', borderRadius: 14,
-              border: '2px dashed #e5e7eb', padding: '24px',
-              textDecoration: 'none', color: '#9ca3af', fontSize: 13, fontWeight: 600,
-              cursor: 'pointer', transition: 'border-color 0.15s',
-            }}
-              onMouseEnter={e => e.currentTarget.style.borderColor = '#9ca3af'}
-              onMouseLeave={e => e.currentTarget.style.borderColor = '#e5e7eb'}>
-              <span style={{ fontSize: 18 }}>+</span>
-              새 사이트 만들기
-            </Link>
           </div>
         )}
       </div>

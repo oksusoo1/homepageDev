@@ -4,12 +4,19 @@ import path from 'node:path'
 
 export const dynamic = 'force-dynamic'
 
-/** my-platform/docs — HTML 파일 (하위 폴더 포함) */
+/** my-platform/docs — HTML · Markdown (하위 폴더 포함) */
 export const DOCS_DIR = path.join(process.cwd(), 'docs')
 
-function pickTitle(html, fallback) {
+const DOC_EXT = /\.(html|md)$/i
+
+function pickTitleHtml(html, fallback) {
   const m = html.match(/<title>([\s\S]*?)<\/title>/i)
   return (m ? m[1] : fallback).trim()
+}
+
+function pickTitleMd(md, fallback) {
+  const m = md.match(/^#\s+(.+)$/m)
+  return (m ? m[1].trim() : fallback.replace(/\.md$/i, ''))
 }
 
 export function plainText(html) {
@@ -19,6 +26,16 @@ export function plainText(html) {
     .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&[a-z]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function plainTextMd(md) {
+  return md
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[*_`~>|-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -35,7 +52,11 @@ function pickCategory(relPath) {
   return '기타'
 }
 
-async function collectHtmlFiles(dir, prefix = '') {
+function docKind(name) {
+  return name.toLowerCase().endsWith('.md') ? 'md' : 'html'
+}
+
+async function collectDocFiles(dir, prefix = '') {
   const entries = await fs.readdir(dir, { withFileTypes: true })
   const rows = []
 
@@ -44,13 +65,13 @@ async function collectHtmlFiles(dir, prefix = '') {
     const full = path.join(dir, ent.name)
 
     if (ent.isDirectory()) {
-      rows.push(...await collectHtmlFiles(full, rel))
+      rows.push(...await collectDocFiles(full, rel))
       continue
     }
-    if (!ent.name.toLowerCase().endsWith('.html')) continue
+    if (!DOC_EXT.test(ent.name)) continue
 
-    const [st, html] = await Promise.all([fs.stat(full), fs.readFile(full, 'utf8')])
-    rows.push({ rel, full, st, html })
+    const [st, body] = await Promise.all([fs.stat(full), fs.readFile(full, 'utf8')])
+    rows.push({ rel, full, st, body, kind: docKind(ent.name) })
   }
 
   return rows
@@ -62,15 +83,17 @@ export async function GET(req) {
 
     let files
     try {
-      files = await collectHtmlFiles(DOCS_DIR)
+      files = await collectDocFiles(DOCS_DIR)
     } catch {
       return NextResponse.json({ rows: [], error: 'docs 폴더를 찾을 수 없습니다.' })
     }
 
     const rows = []
-    for (const { rel, st, html } of files) {
-      const text = plainText(html)
-      const title = pickTitle(html, rel.replace(/\.html$/i, ''))
+    for (const { rel, st, body, kind } of files) {
+      const title = kind === 'md'
+        ? pickTitleMd(body, rel)
+        : pickTitleHtml(body, rel.replace(/\.html$/i, ''))
+      const text = kind === 'md' ? plainTextMd(body) : plainText(body)
       const category = pickCategory(rel)
 
       if (q) {
@@ -87,6 +110,7 @@ export async function GET(req) {
       rows.push({
         name: rel,
         title,
+        kind,
         category,
         date: pickDate(rel, st.mtime),
         size: st.size,

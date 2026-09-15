@@ -67,29 +67,22 @@ function SetupForm() {
     return () => clearTimeout(timer)
   }, [form.subdomain])
 
-  // 사이트명 → 서브도메인 자동 추천
+  // 사이트명만 갱신 (주소명과 분리)
   function handleNameChange(value) {
-    setForm(prev => {
-      const newForm = { ...prev, name: value }
-      // 서브도메인이 비어있으면 자동 변환
-      if (!prev.subdomain) {
-        const auto = value
-          .toLowerCase()
-          .replace(/\s+/g, '')           // 공백 제거
-          .replace(/[^a-z0-9-]/g, '')    // 영문/숫자/- 만 허용
-          .slice(0, 20)
-        newForm.subdomain = auto
-      }
-      return newForm
-    })
+    setForm(prev => ({ ...prev, name: value }))
+  }
+
+  function handleSubdomainChange(value) {
+    const cleaned = value.toLowerCase().replace(/[^a-z0-9-]/g, '')
+    setForm(prev => ({ ...prev, subdomain: cleaned }))
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (subdomainStatus === 'taken') { setError('이미 사용 중인 서브도메인이에요'); return }
-    if (subdomainStatus === 'invalid') { setError('서브도메인은 영문 소문자, 숫자, - 만 사용 가능해요'); return }
+    if (subdomainStatus === 'taken') { setError('이미 사용 중인 사이트주소명이에요'); return }
+    if (subdomainStatus === 'invalid') { setError('사이트주소명은 영문 소문자, 숫자, - 만 사용 가능해요'); return }
     if (!form.name.trim()) { setError('사이트명을 입력해주세요'); return }
-    if (!form.subdomain.trim()) { setError('서브도메인을 입력해주세요'); return }
+    if (!form.subdomain.trim()) { setError('사이트주소명을 입력해주세요'); return }
 
     setLoading(true)
     setError('')
@@ -142,12 +135,12 @@ function SetupForm() {
     hint: { fontSize: 11, marginTop: 5 },
   }
 
-  // 서브도메인 상태 표시
+  // 사이트주소명 상태 표시 (idle일 때는 고정 안내만)
   const subdomainHint = {
-    idle:      { color: '#9ca3af', text: '영문 소문자, 숫자, - 만 사용 가능해요' },
+    idle:      null,
     checking:  { color: '#9ca3af', text: '확인 중...' },
-    available: { color: '#16a34a', text: '✓ 사용 가능한 주소예요' },
-    taken:     { color: '#dc2626', text: '✗ 이미 사용 중이에요. 다른 주소를 입력해주세요' },
+    available: { color: '#16a34a', text: '✓ 사용 가능한 주소명이에요' },
+    taken:     { color: '#dc2626', text: '✗ 이미 사용 중이에요. 다른 주소명을 입력해주세요' },
     invalid:   { color: '#dc2626', text: '✗ 영문 소문자, 숫자, - 만 사용 가능해요' },
   }[subdomainStatus]
 
@@ -222,50 +215,62 @@ function SetupForm() {
 
             {/* 사이트명 */}
             <div style={{ marginBottom: 20 }}>
-              <label style={css.label}>사이트명 (업체명) *</label>
+              <label style={{ ...css.label, display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                <span>사이트명 *</span>
+                <span style={{ fontSize: 11, fontWeight: 500, color: '#9ca3af' }}>한글·영문 가능</span>
+              </label>
               <input
                 type="text"
                 value={form.name}
                 onChange={e => handleNameChange(e.target.value)}
-                placeholder="예: 홍길동 카페"
+                placeholder="예: 마곡카페"
                 required
                 autoComplete="off"
                 style={css.input}
               />
             </div>
 
-            {/* 서브도메인 */}
+            {/* 사이트주소명 → subdomain */}
             <div style={{ marginBottom: 20 }}>
-              <label style={css.label}>사이트 주소 (서브도메인) *</label>
-              <div style={{ position: 'relative' }}>
+              <label style={{ ...css.label, display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                <span>사이트주소명 *</span>
+                <span style={{ fontSize: 11, fontWeight: 500, color: '#9ca3af' }}>영문 소문자, 숫자, - 만</span>
+              </label>
+              <div style={{
+                display: 'flex', alignItems: 'center',
+                border: '1.5px solid',
+                borderColor: subdomainStatus === 'available' ? '#16a34a'
+                  : subdomainStatus === 'taken' || subdomainStatus === 'invalid' ? '#dc2626'
+                  : '#e5e7eb',
+                borderRadius: 8, background: 'white', overflow: 'hidden',
+              }}>
                 <input
                   type="text"
                   value={form.subdomain}
-                  onChange={e => setForm({ ...form, subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
-                  placeholder="예: hongcafe"
+                  onChange={e => handleSubdomainChange(e.target.value)}
+                  placeholder="예: magokcafe"
                   required
                   autoComplete="off"
                   style={{
                     ...css.input,
-                    paddingRight: 160,
-                    borderColor: subdomainStatus === 'available' ? '#16a34a'
-                      : subdomainStatus === 'taken' || subdomainStatus === 'invalid' ? '#dc2626'
-                      : '#e5e7eb',
+                    border: 'none',
+                    borderRadius: 0,
+                    flex: 1,
+                    minWidth: 0,
                   }}
                 />
                 <span style={{
-                  position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)',
-                  fontSize: 12, color: '#9ca3af', pointerEvents: 'none',
+                  flexShrink: 0, padding: '0 14px', fontSize: 13, color: '#6b7280',
+                  background: '#f9fafb', alignSelf: 'stretch',
+                  display: 'flex', alignItems: 'center',
+                  borderLeft: '1px solid #e5e7eb',
                 }}>
                   .myplatform.com
                 </span>
               </div>
-              <div style={{ ...css.hint, color: subdomainHint.color }}>
-                {subdomainHint.text}
-              </div>
-              {form.subdomain && (
-                <div style={{ fontSize: 11, color: '#6b7280', marginTop: 3 }}>
-                  주소: <strong>https://{form.subdomain}.myplatform.com</strong>
+              {subdomainHint && (
+                <div style={{ ...css.hint, color: subdomainHint.color }}>
+                  {subdomainHint.text}
                 </div>
               )}
             </div>

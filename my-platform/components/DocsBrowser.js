@@ -86,18 +86,24 @@ export default function DocsBrowser() {
 
       {!loading && !rows.length && (
         <div style={{ padding: '48px 0', textAlign: 'center', color: '#64748b', fontSize: 14 }}>
-          {q ? `'${q}' 에 걸리는 문서가 없습니다.` : 'docs/ 폴더에 HTML 문서가 없습니다.'}
+          {q ? `'${q}' 에 걸리는 문서가 없습니다.` : 'docs/ 폴더에 HTML·MD 문서가 없습니다.'}
         </div>
       )}
 
       <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
         {rows.map((r) => {
           const catStyle = CATEGORY_STYLE[r.category] || CATEGORY_STYLE.기타
+          const kindStyle = r.kind === 'md'
+            ? { background: '#14532d', color: '#86efac' }
+            : { background: '#1e3a5f', color: '#93c5fd' }
           return (
           <button key={r.name} onClick={() => setOpen(r.name)} style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: '#64748b', marginBottom: 8 }}>
               <span style={{ fontFamily: 'monospace' }}>{r.date}</span>
               <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ ...kindStyle, fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4 }}>
+                  {(r.kind || 'html').toUpperCase()}
+                </span>
                 <span style={{ ...catStyle, fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4 }}>{r.category}</span>
                 <span>{fmtSize(r.size)}</span>
               </span>

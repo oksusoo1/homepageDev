@@ -1,9 +1,31 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { onlyActive, USE_FLAG_OFF, USE_FLAG_ON } from '@/lib/use-flag'
 import { clearCommonCodeCache, loadCommonCodes } from '@/lib/common-codes'
+import { matchesSearchQuery } from '@/lib/platform-list-search'
+import PlatformListSearch from '@/components/PlatformListSearch'
+
+/** 전체 그룹·코드 검색 → 그룹별 매칭 목록 */
+function buildCodeSearchResults(query, groups, allCodes) {
+  const q = String(query || '').trim()
+  if (!q) return []
+
+  return groups.flatMap(g => {
+    const codesInGroup = allCodes.filter(c => c.code_group_id === g.code_group_id)
+    const groupMatch = matchesSearchQuery(q, g.group_code, g.name, g.description, g.ref_hint)
+    const matchedCodes = codesInGroup.filter(c =>
+      matchesSearchQuery(q, c.code, c.label, c.description)
+    )
+    if (!groupMatch && matchedCodes.length === 0) return []
+
+    return [{
+      group: g,
+      codes: groupMatch ? codesInGroup : matchedCodes,
+    }]
+  })
+}
 
 /**
  * AIFRONT식 공통코드 관리
@@ -13,8 +35,11 @@ import { clearCommonCodeCache, loadCommonCodes } from '@/lib/common-codes'
  */
 export default function PlatformCommonCodes() {
   const [groups, setGroups] = useState([])
+  const [allCodes, setAllCodes] = useState([])
   const [groupId, setGroupId] = useState('')
   const [codes, setCodes] = useState([])
+  const [codeSearchInput, setCodeSearchInput] = useState('')
+  const [codeSearchQuery, setCodeSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -24,6 +49,10 @@ export default function PlatformCommonCodes() {
   const [showAddGroup, setShowAddGroup] = useState(false)
 
   const group = groups.find(g => g.code_group_id === groupId) || null
+  const searchResults = useMemo(
+    () => buildCodeSearchResults(codeSearchQuery, groups, allCodes),
+    [codeSearchQuery, groups, allCodes]
+  )
 
   useEffect(() => { refreshGroups() }, [])
 
@@ -44,10 +73,38 @@ export default function PlatformCommonCodes() {
       else if (groupId && data && !data.find(g => g.code_group_id === groupId) && data[0]) {
         setGroupId(data[0].code_group_id)
       }
+      await refreshAllCodes(data || [])
     } catch (e) {
       setMsg('❌ ' + (e.message || String(e)))
     }
     setLoading(false)
+  }
+
+  /** 그룹별로 코드 로드 (전체 select가 비는 경우 대비 — 검색용) */
+  async function refreshAllCodes(groupList) {
+    const list = groupList || groups
+    if (!list.length) {
+      setAllCodes([])
+      return
+    }
+    const results = await Promise.all(
+      list.map(g =>
+        supabase
+          .from('common_codes')
+          .select('*')
+          .eq('code_group_id', g.code_group_id)
+          .order('sort_order')
+      )
+    )
+    const merged = []
+    for (const { data, error } of results) {
+      if (error) {
+        setMsg('❌ ' + error.message)
+        return
+      }
+      merged.push(...(data || []))
+    }
+    setAllCodes(merged)
   }
 
   async function refreshCodes(gid) {
@@ -61,6 +118,10 @@ export default function PlatformCommonCodes() {
       return
     }
     setCodes(data || [])
+    setAllCodes(prev => {
+      const others = prev.filter(c => c.code_group_id !== gid)
+      return [...others, ...(data || [])]
+    })
     const d = {}
     for (const c of data || []) {
       d[c.common_code_id] = {
@@ -90,6 +151,43 @@ export default function PlatformCommonCodes() {
     else {
       setMsg('✅ 저장됨 — 「코드 적용」을 누르면 화면 표시에 반영')
       await refreshCodes(groupId)
+      await refreshAllCodes(groups)
+    }
+  }
+
+  /** 현재 그룹 drafts 일괄 저장 */
+  async function saveAllRows() {
+    if (!codes.length) return
+    setBusy(true)
+    setMsg('')
+    const now = new Date().toISOString()
+    let fail = null
+    for (const c of codes) {
+      const d = drafts[c.common_code_id]
+      if (!d) continue
+      const label = (d.label || '').trim()
+      if (!label) {
+        fail = `코드 "${c.code}" 표시명이 비어 있습니다`
+        break
+      }
+      const { error } = await supabase.from('common_codes').update({
+        label,
+        description: (d.description || '').trim() || null,
+        sort_order: Number(d.sort_order) || 10,
+        use_flag: d.use_flag ? USE_FLAG_ON : USE_FLAG_OFF,
+        updated_at: now,
+      }).eq('common_code_id', c.common_code_id)
+      if (error) {
+        fail = error.message
+        break
+      }
+    }
+    setBusy(false)
+    if (fail) setMsg('❌ ' + fail)
+    else {
+      setMsg(`✅ ${codes.length}건 일괄 저장됨 — 「코드 적용」을 누르면 화면 표시에 반영`)
+      await refreshCodes(groupId)
+      await refreshAllCodes(groups)
     }
   }
 
@@ -105,6 +203,7 @@ export default function PlatformCommonCodes() {
     else {
       setMsg('✅ 사용안함 처리')
       await refreshCodes(groupId)
+      await refreshAllCodes(groups)
     }
   }
 
@@ -130,7 +229,14 @@ export default function PlatformCommonCodes() {
       setNewCode({ code: '', label: '', description: '', sort_order: 99 })
       setMsg('✅ 코드 추가됨')
       await refreshCodes(groupId)
+      await refreshAllCodes(groups)
     }
+  }
+
+  function openGroupFromSearch(gid) {
+    setGroupId(gid)
+    setCodeSearchInput('')
+    setCodeSearchQuery('')
   }
 
   async function addGroup() {
@@ -215,6 +321,53 @@ export default function PlatformCommonCodes() {
         </div>
       )}
 
+      <PlatformListSearch
+        value={codeSearchInput}
+        onChange={setCodeSearchInput}
+        onSearch={() => setCodeSearchQuery(codeSearchInput.trim())}
+        onReset={() => { setCodeSearchInput(''); setCodeSearchQuery('') }}
+        placeholder="그룹코드, 그룹명, 코드, 표시명, 설명"
+        applied={!!codeSearchQuery}
+        resultLabel={`${searchResults.length}개 그룹`}
+      />
+
+      {codeSearchQuery && (
+        <div style={{
+          marginBottom: 16, border: '1px solid #1e293b', borderRadius: 10,
+          background: '#0f172a', overflow: 'hidden',
+        }}>
+          {searchResults.length === 0 ? (
+            <p style={{ margin: 0, padding: '16px 14px', fontSize: 13, color: '#64748b' }}>
+              검색 결과가 없습니다
+            </p>
+          ) : searchResults.map(({ group: g, codes: matched }) => (
+            <button
+              key={g.code_group_id}
+              type="button"
+              onClick={() => openGroupFromSearch(g.code_group_id)}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '12px 14px', border: 'none', borderBottom: '1px solid #1e293b',
+                background: groupId === g.code_group_id ? '#1e293b' : 'transparent',
+                cursor: 'pointer', color: '#e2e8f0',
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
+                {g.group_code}
+                <span style={{ fontWeight: 500, color: '#94a3b8', marginLeft: 8 }}>{g.name}</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.5 }}>
+                {matched.map(c => (
+                  <span key={c.common_code_id} style={{ marginRight: 12 }}>
+                    <code style={{ color: '#cbd5e1' }}>{c.code}</code> {c.label}
+                  </span>
+                ))}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
         <select
           value={groupId}
@@ -242,6 +395,18 @@ export default function PlatformCommonCodes() {
             {group.ref_hint}
           </span>
         )}
+        <button
+          type="button"
+          disabled={busy || codes.length === 0}
+          onClick={saveAllRows}
+          style={{
+            marginLeft: 'auto', padding: '8px 14px', background: '#1e40af', color: 'white',
+            border: 'none', borderRadius: 7, cursor: busy || codes.length === 0 ? 'default' : 'pointer',
+            fontSize: 12, fontWeight: 700, opacity: busy || codes.length === 0 ? 0.5 : 1,
+          }}
+        >
+          일괄 저장
+        </button>
       </div>
 
       {showAddGroup && (

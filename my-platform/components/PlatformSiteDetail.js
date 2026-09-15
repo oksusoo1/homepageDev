@@ -222,9 +222,7 @@ export default function PlatformSiteDetail({
   if (isManaged && site.status === 'draft') {
     nextActions.push({ label: '검수용 공개', color: '#8b5cf6', run: () => onStatusAction?.(site.site_id, 'review') })
   }
-  if (!isManaged && site.status === 'draft') {
-    nextActions.push({ label: '배포', color: '#16a34a', run: () => onStatusAction?.(site.site_id, 'published') })
-  }
+  // 직접제작 배포는 사장님(에디터/admin)만 — 본사에서 status만 published로 바꾸면 사고 위험
   if (site.status === 'published') {
     nextActions.push({ label: '정지', color: '#dc2626', run: () => onStatusAction?.(site.site_id, 'suspended') })
   }
@@ -458,6 +456,11 @@ export default function PlatformSiteDetail({
       </Section>
 
       <Section title="다음에 할 일">
+        {!isManaged && site.status === 'draft' && (
+          <p style={{ margin: '0 0 10px', fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>
+            직접제작 — 배포는 사장님이 사이트 관리/에디터에서 합니다. 본사에서 강제 배포하지 않습니다.
+          </p>
+        )}
         {nextActions.length === 0 ? (
           <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>특별 액션 없음</p>
         ) : (
