@@ -1,20 +1,24 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { sitePublicPath } from '@/lib/site-paths'
-import { INQUIRY_CUSTOMER_STEPS, getInquiryStepIndex } from '@/lib/payment/one-time'
+import { sitePublicPath, siteAdminPath } from '@/lib/site-paths'
 import { getSitePeriodInfo } from '@/lib/site-period'
 import { codeLabel, codeColor } from '@/lib/common-codes'
+import {
+  FLOW_STEPS,
+  SELF_FLOW_STEPS,
+  resolveManagedFlowStep,
+  resolveSelfFlowStep,
+  resolveHqInquiryAction,
+  flowStepLabel,
+  flowStepDesc,
+  getFlowStepIndex,
+  canOpenHqEditor,
+} from '@/lib/flow-step'
+import { canCancelManagedIntake } from '@/lib/managed-flow'
 
 const SITE_STATUS_OPTS = ['draft', 'review', 'published', 'suspended', 'cancelled']
 const DEPLOY_STATUS_OPTS = ['pending', 'building', 'live', 'failed']
-
-const SELF_STEPS = [
-  { key: 'draft', label: '준비중' },
-  { key: 'live', label: '배포·체험' },
-  { key: 'active', label: '구독운영' },
-  { key: 'suspended', label: '정지' },
-]
 
 const inputStyle = {
   width: '100%', padding: '7px 10px', background: '#0f172a', color: '#e2e8f0',
@@ -125,13 +129,6 @@ function Stepper({ steps, currentIndex }) {
   )
 }
 
-function getSelfStepIndex(site, sub) {
-  if (site.status === 'suspended' || site.status === 'cancelled') return 3
-  if (sub?.status === 'active') return 2
-  if (site.status === 'published' || site.trial_started_at || sub?.status === 'trial') return 1
-  return 0
-}
-
 function moneyLabel(inquiry, otpDevFee) {
   if (!inquiry?.dev_fee_total) return null
   const half = Math.floor(inquiry.dev_fee_total / 2)
@@ -166,9 +163,13 @@ export default function PlatformSiteDetail({
   inquiry,
   subscription,
   oneTimePays = [],
+  finalPending = false,
   onClose,
   onStatusAction,
   onConfirmFinal,
+  onStartDeposit,
+  onConfirmDeposit,
+  onCancelManaged,
   onGoInquiries,
   onGoPayments,
   onGoCustomer,
@@ -196,32 +197,60 @@ export default function PlatformSiteDetail({
   const trialEnds = site.trial_ends_at ? new Date(site.trial_ends_at) : null
   const daysLeft = period.daysLeft
 
+  const flowStep = isManaged
+    ? resolveManagedFlowStep(inquiry, { site, subscription, finalPending })
+    : resolveSelfFlowStep(site, { subscription })
+  const hq = isManaged
+    ? resolveHqInquiryAction(flowStep, inquiry, { linkedSite: site, finalPending })
+    : { key: 'open_editor', label: '에디터 열기', hint: flowStepDesc(flowStep) || '고객 직접 제작 — 에디터는 참고용으로 열 수 있습니다.' }
+
   let flowTitle = '진행 상태'
-  let flowHint = ''
-  let stepIndex = 0
-  let steps = SELF_STEPS
+  let flowHint = flowStepDesc(flowStep) || ''
+  const stepCodes = isManaged ? FLOW_STEPS.filter(s => s !== 'suspended') : SELF_FLOW_STEPS.filter(s => s !== 'suspended')
+  const steps = stepCodes.map(code => ({
+    key: code,
+    label: codeLabel('FLOW_STEP', code, flowStepLabel(code)),
+  }))
+  let stepIndex = getFlowStepIndex(flowStep, isManaged ? 'managed' : 'self')
+  // suspended는 필터에서 빠지므로 마지막 표시 인덱스로
+  if (flowStep === 'suspended') stepIndex = steps.length - 1
+  else stepIndex = Math.min(stepIndex, steps.length - 1)
 
   if (isManaged) {
-    steps = INQUIRY_CUSTOMER_STEPS
-    if (inquiry) {
-      stepIndex = getInquiryStepIndex(inquiry.status)
-      flowTitle = '본사 대리 제작 흐름'
-      flowHint = INQUIRY_CUSTOMER_STEPS[stepIndex]?.desc || ''
-    } else {
-      flowTitle = '본사 대리 (문의 미연결)'
+    flowTitle = inquiry ? '본사 대리 제작 흐름' : '본사 대리 (문의 미연결)'
+    if (!inquiry) {
       flowHint = 'sites.inquiry_id 가 없거나 문의를 찾을 수 없습니다.'
       stepIndex = -1
     }
   } else {
-    stepIndex = getSelfStepIndex(site, subscription)
     flowTitle = '고객 직접 제작 흐름'
-    flowHint = ['준비중', '배포·체험', '구독 운영', '정지/해지'][stepIndex] || ''
   }
 
-  const nextActions = []
-  if (isManaged && site.status === 'draft') {
-    nextActions.push({ label: '검수용 공개', color: '#8b5cf6', run: () => onStatusAction?.(site.site_id, 'review') })
+  function openEditor() {
+    if (!site.subdomain) return
+    window.open(siteAdminPath(site.subdomain, '/editor'), '_blank')
   }
+
+  function runHqPrimary() {
+    const key = hq.key
+    if (key === 'start_deposit' && inquiry) return onStartDeposit?.(inquiry.inquiry_id)
+    if (key === 'confirm_deposit' && inquiry) return onConfirmDeposit?.(inquiry.inquiry_id)
+    if (key === 'open_editor') return openEditor()
+    if (key === 'open_preview') return onStatusAction?.(site.site_id, 'review')
+    if (key === 'confirm_balance' && inquiry) return onConfirmFinal?.(inquiry.inquiry_id)
+    if (key === 'view_site') return openEditor()
+    if (key === 'need_fee' || key === 'wait_balance') return onGoInquiries?.()
+  }
+
+  // 대리: 선금 확인 전 에디터 숨김 · 라벨 없을 때 에디터로 대체하지 않음
+  const canEditor = !!site.subdomain && canOpenHqEditor(site.build_type, flowStep)
+  const editorIsPrimary = canEditor && (hq.key === 'open_editor' || hq.key === 'view_site')
+  const primaryLabel = hq.label
+    || (hq.key === 'need_fee' ? '제작 문의로 (견적 입력)' : null)
+    || (hq.key === 'wait_balance' ? '제작 문의로' : null)
+  const showEditorSecondary = canEditor && !!primaryLabel && !editorIsPrimary
+
+  const nextActions = []
   // 직접제작 배포는 사장님(에디터/admin)만 — 본사에서 status만 published로 바꾸면 사고 위험
   if (site.status === 'published') {
     nextActions.push({ label: '정지', color: '#dc2626', run: () => onStatusAction?.(site.site_id, 'suspended') })
@@ -236,9 +265,6 @@ export default function PlatformSiteDetail({
       ),
     })
   }
-  if (isManaged && inquiry && ['building', 'review'].includes(inquiry.status) && !inquiry.final_paid_at) {
-    nextActions.push({ label: '잔금 확인', color: '#2563eb', run: () => onConfirmFinal?.(inquiry.inquiry_id) })
-  }
   if (otpLatest?.status === 'pending_confirm') {
     nextActions.push({ label: '1회성결제로', color: '#f59e0b', run: () => onGoPayments?.() })
   }
@@ -248,6 +274,8 @@ export default function PlatformSiteDetail({
   if (site.customer_id && onGoCustomer) {
     nextActions.push({ label: '이 회원 보기', color: '#38bdf8', run: () => onGoCustomer(site.customer_id) })
   }
+
+  const showCancel = isManaged && inquiry && canCancelManagedIntake(inquiry) && onCancelManaged
 
   async function handleSave(e) {
     e.preventDefault()
@@ -327,14 +355,13 @@ export default function PlatformSiteDetail({
       background: '#111827', border: '1px solid #334155', borderRadius: 12,
       padding: 20, position: 'sticky', top: 16, maxHeight: 'calc(100vh - 40px)', overflowY: 'auto',
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>사이트 상세</div>
           <h3 style={{ margin: 0, fontSize: 18, color: '#f1f5f9', fontWeight: 800 }}>{site.name}</h3>
           <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {badge(codeColor('FLOW_STEP', flowStep), codeLabel('FLOW_STEP', flowStep, flowStepLabel(flowStep)))}
             {badge(codeColor('SITE_STATUS', site.status), codeLabel('SITE_STATUS', site.status))}
-            {badge(codeColor('DEPLOY_STATUS', site.deploy_status),
-              codeLabel('DEPLOY_STATUS', site.deploy_status, site.deploy_status || '—'))}
             {badge(codeColor('BUILD_TYPE', site.build_type), codeLabel('BUILD_TYPE', site.build_type))}
           </div>
         </div>
@@ -348,6 +375,62 @@ export default function PlatformSiteDetail({
         >
           닫기
         </button>
+      </div>
+
+      {/* 지금 할 일 — 상세 진입 시 바로 보이게 */}
+      <div style={{
+        marginBottom: 16, padding: '12px 14px', borderRadius: 10,
+        background: '#0f172a', border: '1px solid #334155',
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', marginBottom: 6, letterSpacing: 0.3 }}>
+          지금 할 일
+        </div>
+        {(hq.hint || flowHint) && (
+          <p style={{ margin: '0 0 10px', fontSize: 12, color: '#cbd5e1', lineHeight: 1.5 }}>
+            {hq.hint || flowHint}
+          </p>
+        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {primaryLabel && (
+            <button
+              type="button"
+              onClick={runHqPrimary}
+              style={{
+                padding: '9px 14px', background: '#2563eb', color: 'white',
+                border: 'none', borderRadius: 8, cursor: 'pointer',
+                fontSize: 13, fontWeight: 700,
+              }}
+            >
+              {primaryLabel}
+            </button>
+          )}
+          {showEditorSecondary && (
+            <button
+              type="button"
+              onClick={openEditor}
+              style={{
+                padding: '9px 14px', background: 'transparent', color: '#93c5fd',
+                border: '1px solid #3b82f6', borderRadius: 8, cursor: 'pointer',
+                fontSize: 13, fontWeight: 700,
+              }}
+            >
+              에디터 열기
+            </button>
+          )}
+          {showCancel && (
+            <button
+              type="button"
+              onClick={() => onCancelManaged()}
+              style={{
+                padding: '9px 14px', background: 'transparent', color: '#fca5a5',
+                border: '1px solid #7f1d1d', borderRadius: 8, cursor: 'pointer',
+                fontSize: 13, fontWeight: 700,
+              }}
+            >
+              접수 취소
+            </button>
+          )}
+        </div>
       </div>
 
       <Section title="식별 · 고객">
@@ -455,14 +538,14 @@ export default function PlatformSiteDetail({
         </Row>
       </Section>
 
-      <Section title="다음에 할 일">
+      <Section title="기타 액션">
         {!isManaged && site.status === 'draft' && (
           <p style={{ margin: '0 0 10px', fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>
             직접제작 — 배포는 사장님이 사이트 관리/에디터에서 합니다. 본사에서 강제 배포하지 않습니다.
           </p>
         )}
         {nextActions.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>특별 액션 없음</p>
+          <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>추가 액션 없음</p>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {nextActions.map(a => (

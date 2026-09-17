@@ -184,3 +184,6 @@ npm run dev
 
 - 규칙 추가·수정 시 이 표도 같이 갱신한다.
 
+- 메인 플로우 스텝: `FLOW_STEP` 공통코드 + `my-platform/lib/flow-step.js`  
+  (시드 SQL: `my-platform/docs/db/sql/migrations/013_flow_step.sql`)
+

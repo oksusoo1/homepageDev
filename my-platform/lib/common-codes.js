@@ -77,6 +77,13 @@ const COLORS = {
     received: '#60a5fa', reviewing: '#a78bfa', building: '#f59e0b',
     review: '#f472b6', approved: '#34d399', done: '#22c55e',
   },
+  FLOW_STEP: {
+    intake: '#b45309', deposit: '#b45309',
+    building: '#2563eb', done_build: '#2563eb',
+    preview: '#b45309', balance: '#b45309',
+    pay_method: '#2563eb', trial: '#2563eb',
+    subscribed: '#2563eb', suspended: '#2563eb',
+  },
   TICKET_STATUS: { open: '#f59e0b', in_progress: '#60a5fa', resolved: '#22c55e' },
   TICKET_PRIORITY: { low: '#60a5fa', normal: '#60a5fa', high: '#f59e0b', urgent: '#ef4444' },
   CUSTOMER_STATUS: { active: '#22c55e', suspended: '#f59e0b', withdrawn: '#ef4444' },

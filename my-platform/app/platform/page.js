@@ -9,11 +9,22 @@ import PlatformSiteDetail from '@/components/PlatformSiteDetail'
 import PlatformCustomerDetail from '@/components/PlatformCustomerDetail'
 import PlatformCommonCodes from '@/components/PlatformCommonCodes'
 import PlatformListSearch from '@/components/PlatformListSearch'
-import { sitePublicPath } from '@/lib/site-paths'
+import { sitePublicPath, siteAdminPath } from '@/lib/site-paths'
 import { getSitePeriodInfo } from '@/lib/site-period'
 import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
 import { matchesSearchQuery } from '@/lib/platform-list-search'
 import { onlyActive, softDelete } from '@/lib/use-flag'
+import {
+  FLOW_STEPS,
+  flowStepLabel,
+  flowStepDesc,
+  getFlowStepIndex,
+  resolveManagedFlowStep,
+  resolveSelfFlowStep,
+  resolveHqInquiryAction,
+  canOpenHqEditor,
+} from '@/lib/flow-step'
+import { canCancelManagedIntake, cancelManagedIntake } from '@/lib/managed-flow'
 
 const NAV = [
   { key: 'dashboard', label: '대시보드', icon: '📊' },
@@ -43,20 +54,64 @@ export default function AdminConsole() {
   const [expandedSubId, setExpandedSubId] = useState(null)     // 펼쳐진 구독 행
   const [billingHistory, setBillingHistory] = useState({})      // { sub_id: [...records] }
   const [inquiryDevFee, setInquiryDevFee] = useState({})        // { inquiry_id: 금액 } — 견적 편집용
+  const [inquiryNotes, setInquiryNotes] = useState({})          // { inquiry_id: admin_note }
   const [loading, setLoading] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const [message, setMessage] = useState('')
   const [selectedSiteId, setSelectedSiteId] = useState(null)   // 사이트 상세
   const [selectedCustomerId, setSelectedCustomerId] = useState(null) // 회원 상세
-  const [showCreateForm, setShowCreateForm] = useState(false)  // 새 사이트 폼
+  const [showCreateForm, setShowCreateForm] = useState(false)  // 사이트 개설 모달
+  const [createLockedCustomer, setCreateLockedCustomer] = useState(false)
   const [siteSearchInput, setSiteSearchInput] = useState('')
   const [siteSearchQuery, setSiteSearchQuery] = useState('')
   const [form, setForm] = useState({
-    customer_name: '', customer_email: '', customer_phone: '',
+    customer_id: '', customer_name: '', customer_email: '', customer_phone: '',
     site_name: '', subdomain: '', description: '',
     address: '', phone: '', email: '',
     template_id: '', build_type: 'self', inquiry_id: '',
   })
+
+  const emptyCreateForm = {
+    customer_id: '', customer_name: '', customer_email: '', customer_phone: '',
+    site_name: '', subdomain: '', description: '',
+    address: '', phone: '', email: '', template_id: '', build_type: 'self', inquiry_id: '',
+  }
+
+  function openCreateModalBlank() {
+    setForm({ ...emptyCreateForm, build_type: 'self' })
+    setCreateLockedCustomer(false)
+    setMessage('')
+    setShowCreateForm(true)
+  }
+
+  function openCreateModalFromInquiry(inq) {
+    if (!inq.customer_id) {
+      setMessage('❌ 문의에 연결된 회원이 없습니다.')
+      return
+    }
+    const cust = inq.customers
+    setForm({
+      ...emptyCreateForm,
+      customer_id: inq.customer_id,
+      customer_name: cust?.name || '',
+      customer_email: cust?.email || '',
+      customer_phone: inq.phone || cust?.phone || '',
+      description: inq.description || '',
+      phone: inq.phone || cust?.phone || '',
+      email: cust?.email || '',
+      build_type: 'managed',
+      inquiry_id: inq.inquiry_id,
+    })
+    setCreateLockedCustomer(true)
+    setMessage('')
+    setShowCreateForm(true)
+  }
+
+  function closeCreateModal() {
+    setShowCreateForm(false)
+    setCreateLockedCustomer(false)
+    setForm({ ...emptyCreateForm })
+  }
 
   useEffect(() => { checkAdminAuth() }, [])
 
@@ -111,60 +166,94 @@ export default function AdminConsole() {
     setLoading(true)
     setMessage('')
     try {
-      // 1. 기존 고객 조회 → 없으면 신규 생성
-      let customer
-      const { data: existing } = await onlyActive(
-        supabase.from('customers').select('*').eq('email', form.customer_email)
-      ).maybeSingle()
+      const subdomain = (form.subdomain || '').trim().toLowerCase()
+      if (!/^[a-z0-9-]+$/.test(subdomain)) {
+        throw new Error('서브도메인은 영문 소문자·숫자·하이픈만 가능합니다.')
+      }
+      if (!form.site_name?.trim()) throw new Error('사이트명을 입력하세요.')
 
-      if (existing) {
-        customer = existing
+      // 대리제작은 고객 문의 접수 시 사이트가 생기거나, 제작문의에서만 개설
+      if (!form.inquiry_id && form.build_type === 'managed') {
+        throw new Error('대리제작은 「제작문의」에서만 진행합니다. 사이트 목록에서는 직접제작만 개설할 수 있습니다.')
+      }
+      const buildType = form.inquiry_id ? 'managed' : 'self'
+
+      // 1. 고객 — 가입 회원 ID 우선 (문의에서 온 경우 새 회원 만들지 않음)
+      let customer
+      if (form.customer_id) {
+        const { data: byId, error: idErr } = await onlyActive(
+          supabase.from('customers').select('*').eq('customer_id', form.customer_id)
+        ).maybeSingle()
+        if (idErr) throw new Error('회원 조회 오류: ' + idErr.message)
+        if (!byId) throw new Error('가입 회원을 찾을 수 없습니다. 제작문의·회원 탭을 확인하세요.')
+        customer = byId
+      } else if (form.customer_email?.trim()) {
+        const email = form.customer_email.trim()
+        const { data: existing } = await onlyActive(
+          supabase.from('customers').select('*').eq('email', email)
+        ).maybeSingle()
+        if (existing) {
+          customer = existing
+        } else {
+          const { data: newCust, error: cErr } = await supabase
+            .from('customers')
+            .insert([{
+              email,
+              name: form.customer_name || email,
+              phone: form.customer_phone || null,
+            }])
+            .select()
+            .single()
+          if (cErr) throw new Error('고객 생성 오류: ' + cErr.message)
+          customer = newCust
+        }
       } else {
-        const { data: newCust, error: cErr } = await supabase
-          .from('customers')
-          .insert([{
-            email: form.customer_email,
-            name: form.customer_name,
-            phone: form.customer_phone,
-          }])
-          .select()
-          .single()
-        if (cErr) throw new Error('고객 생성 오류: ' + cErr.message)
-        customer = newCust
+        throw new Error('회원을 선택하거나 이메일을 입력하세요.')
+      }
+
+      // 문의 연결 시 문의의 customer_id 와 일치 확인
+      if (form.inquiry_id) {
+        const { data: inq } = await onlyActive(
+          supabase.from('inquiries').select('customer_id, inquiry_id').eq('inquiry_id', form.inquiry_id)
+        ).maybeSingle()
+        if (!inq) throw new Error('연결할 제작 문의가 없습니다.')
+        if (inq.customer_id !== customer.customer_id) {
+          throw new Error('문의 회원과 사이트 회원이 다릅니다. 가입 회원으로 다시 열어 주세요.')
+        }
       }
 
       // 2. 사이트 생성
-      const site_code = form.subdomain + '_' + Date.now()
-      const { error: sErr } = await supabase
+      const site_code = subdomain + '_' + Date.now()
+      const { data: newSite, error: sErr } = await supabase
         .from('sites')
         .insert([{
           site_code,
           customer_id: customer.customer_id,
           template_id: form.template_id || null,
-          name: form.site_name,
-          subdomain: form.subdomain,
-          description: form.description,
-          address: form.address,
-          phone: form.phone,
-          email: form.email,
-          build_type: form.build_type,
+          name: form.site_name.trim(),
+          subdomain,
+          description: form.description || null,
+          address: form.address || null,
+          phone: form.phone || customer.phone || null,
+          email: form.email || customer.email || null,
+          build_type: buildType,
           inquiry_id: form.inquiry_id || null,
           status: 'draft',
           deploy_status: 'pending',
         }])
-        .select()
+        .select('site_id, subdomain, name')
         .single()
       if (sErr) throw new Error('사이트 생성 오류: ' + sErr.message)
 
-      // 구독은 고객이 카드 등록 + 배포 시점에 생성 (deploy.js에서 처리)
-      setMessage('✅ 사이트가 생성되었습니다!')
-      setShowCreateForm(false)
-      setForm({
-        customer_name: '', customer_email: '', customer_phone: '',
-        site_name: '', subdomain: '', description: '',
-        address: '', phone: '', email: '', template_id: '', build_type: 'self', inquiry_id: '',
-      })
-      fetchAll()
+      const offerEditor = buildType === 'managed' || !!form.inquiry_id
+      closeCreateModal()
+      setMessage(`✅ 「${newSite.name}」개설됨 · 회원 ${customer.name || customer.email}`)
+      await fetchAll()
+      setSelectedSiteId(newSite.site_id)
+      if (offerEditor) {
+        const go = window.confirm('사이트가 개설되었습니다.\n에디터에서 제작을 시작할까요?')
+        if (go) window.open(siteAdminPath(newSite.subdomain, '/editor'), '_blank')
+      }
     } catch (err) {
       setMessage('❌ ' + err.message)
     }
@@ -495,22 +584,57 @@ export default function AdminConsole() {
     fetchAll()
   }
 
-  // 견적 금액 저장
+  // 견적 금액 저장 — 접수(intake)면 선금(deposit) 단계로
   async function saveDevFee(inquiryId, amount) {
     const num = parseInt(amount, 10)
     if (isNaN(num) || num <= 0) { alert('올바른 금액을 입력해주세요.'); return }
+    const inq = inquiries.find(i => i.inquiry_id === inquiryId)
+    const patch = { dev_fee_total: num, updated_at: new Date().toISOString() }
+    if (inq?.status === 'received') patch.status = 'reviewing'
+    await supabase.from('inquiries').update(patch).eq('inquiry_id', inquiryId)
+    fetchAll()
+  }
+
+  // 선금 확인 → 제작(building) · FLOW_STEP deposit → building
+  async function confirmDownPayment(inquiryId) {
+    if (!window.confirm('선금 납부를 확인하셨나요?\n다음 단계: 제작')) return
     await supabase.from('inquiries')
-      .update({ dev_fee_total: num, updated_at: new Date().toISOString() })
+      .update({ down_paid_at: new Date().toISOString(), status: 'building', updated_at: new Date().toISOString() })
       .eq('inquiry_id', inquiryId)
     fetchAll()
   }
 
-  // 선금 50% 확인 → building으로 전환
-  async function confirmDownPayment(inquiryId) {
-    if (!window.confirm('선금 50% 납부를 확인하셨나요?\n상태가 "제작중"으로 변경됩니다.')) return
+  // 접수 → 선금 단계만 이동 (견적 금액은 이후 저장)
+  async function startDepositStep(inquiryId) {
     await supabase.from('inquiries')
-      .update({ down_paid_at: new Date().toISOString(), status: 'building', updated_at: new Date().toISOString() })
+      .update({ status: 'reviewing', updated_at: new Date().toISOString() })
       .eq('inquiry_id', inquiryId)
+    fetchAll()
+  }
+
+  /** 대리 접수 취소 (선금 전) — 문의·사이트 soft delete */
+  async function handleCancelManagedIntake(inquiryId) {
+    if (!inquiryId) return
+    if (!window.confirm('대리 접수를 취소할까요?\n연결된 사이트·문의가 목록에서 삭제됩니다. (선금 확인 전만 가능)')) return
+    try {
+      await cancelManagedIntake(supabase, inquiryId)
+      setSelectedSiteId(null)
+      setMessage('✅ 대리 접수 취소됨')
+      await fetchAll()
+    } catch (err) {
+      setMessage('❌ ' + (err.message || err))
+    }
+  }
+
+  async function saveAdminNote(inquiryId) {
+    const note = inquiryNotes[inquiryId]
+    const text = note !== undefined
+      ? note
+      : (inquiries.find(i => i.inquiry_id === inquiryId)?.admin_note || '')
+    await supabase.from('inquiries')
+      .update({ admin_note: text, updated_at: new Date().toISOString() })
+      .eq('inquiry_id', inquiryId)
+    setMessage('메모 저장됨')
     fetchAll()
   }
 
@@ -692,6 +816,156 @@ export default function AdminConsole() {
 
   return (
     <div style={{ ...css.page, display: 'flex', minHeight: '100vh' }}>
+
+      {/* 사이트 개설 모달 — 제작문의·사이트 리스트 공통 */}
+      {showCreateForm && (
+        <div
+          onClick={closeCreateModal}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 80,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '100%', maxWidth: 520, background: '#0f172a', border: '1px solid #334155',
+              borderRadius: 12, padding: '22px 22px 18px', maxHeight: '90vh', overflowY: 'auto',
+            }}
+          >
+            <h3 style={{ margin: '0 0 6px', fontSize: 16, color: '#f1f5f9', fontWeight: 800 }}>
+              사이트 개설
+            </h3>
+            <p style={{ margin: '0 0 16px', fontSize: 12, color: '#64748b' }}>
+              {createLockedCustomer
+                ? '가입 회원·제작문의에 연결됩니다. (구 데이터 보완용)'
+                : '가입 회원을 선택하세요. 직접제작만 개설됩니다.'}
+            </p>
+            <form onSubmit={createSite}>
+              <div style={{ marginBottom: 14 }}>
+                <label style={css.label}>회원 *</label>
+                {createLockedCustomer ? (
+                  <div style={{
+                    padding: '10px 12px', background: '#1e293b', borderRadius: 8,
+                    border: '1px solid #334155', fontSize: 13, color: '#e2e8f0',
+                  }}>
+                    <div style={{ fontWeight: 700 }}>{form.customer_name || '—'}</div>
+                    <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+                      {form.customer_email} · {form.customer_phone || '연락처 없음'}
+                    </div>
+                    {form.inquiry_id && (
+                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>
+                        제작문의 연결 · {codeLabel('BUILD_TYPE', 'managed')}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <select
+                    value={form.customer_id}
+                    onChange={e => {
+                      const id = e.target.value
+                      const c = customers.find(x => x.customer_id === id)
+                      setForm(f => ({
+                        ...f,
+                        customer_id: id,
+                        customer_name: c?.name || '',
+                        customer_email: c?.email || '',
+                        customer_phone: c?.phone || '',
+                        phone: f.phone || c?.phone || '',
+                        email: f.email || c?.email || '',
+                      }))
+                    }}
+                    style={{ ...css.input, cursor: 'pointer' }}
+                    required
+                  >
+                    <option value="">가입 회원 선택</option>
+                    {customers.map(c => (
+                      <option key={c.customer_id} value={c.customer_id}>
+                        {c.name} ({c.email})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ marginBottom: 14 }}>
+                <div>
+                  <label style={css.label}>사이트명 *</label>
+                  <input
+                    value={form.site_name}
+                    onChange={e => setForm({ ...form, site_name: e.target.value })}
+                    placeholder="마곡카페"
+                    required
+                    style={css.input}
+                  />
+                </div>
+                <div>
+                  <label style={css.label}>서브도메인 *</label>
+                  <input
+                    value={form.subdomain}
+                    onChange={e => setForm({ ...form, subdomain: e.target.value.toLowerCase() })}
+                    placeholder="magokcafe"
+                    required
+                    style={css.input}
+                  />
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
+                    {form.subdomain || '…'}.myplatform.com
+                  </div>
+                </div>
+              </div>
+
+              {!createLockedCustomer && (
+                <div style={{
+                  marginBottom: 14, padding: '10px 12px', borderRadius: 8,
+                  background: '#1e293b', border: '1px solid #334155', fontSize: 12, color: '#94a3b8',
+                }}>
+                  여기서는 <strong style={{ color: '#e2e8f0' }}>직접제작</strong>만 개설합니다.
+                  대리제작은 고객이 문의한 뒤 <strong style={{ color: '#e2e8f0' }}>제작문의</strong>에서 진행하세요.
+                </div>
+              )}
+
+              <div style={{ marginBottom: 14 }}>
+                <label style={css.label}>템플릿</label>
+                <select
+                  value={form.template_id}
+                  onChange={e => setForm({ ...form, template_id: e.target.value })}
+                  style={{ ...css.input, cursor: 'pointer' }}
+                >
+                  <option value="">선택 안 함</option>
+                  {templates.map(t => (
+                    <option key={t.template_id} value={t.template_id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {message && showCreateForm && (
+                <div style={{
+                  marginBottom: 12, fontSize: 12,
+                  color: message.startsWith('✅') ? '#22c55e' : '#f87171',
+                }}>
+                  {message}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" onClick={closeCreateModal} style={{
+                  padding: '9px 16px', background: 'transparent', color: '#94a3b8',
+                  border: '1px solid #334155', borderRadius: 7, cursor: 'pointer', fontSize: 13,
+                }}>
+                  취소
+                </button>
+                <button type="submit" disabled={loading} style={{
+                  padding: '9px 18px', background: '#2563eb', color: 'white',
+                  border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 13,
+                  fontWeight: 700, opacity: loading ? 0.6 : 1,
+                }}>
+                  {loading ? '개설 중…' : '개설하기'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* 왼쪽 사이드바 */}
       <aside style={{
@@ -969,14 +1243,14 @@ export default function AdminConsole() {
                 </h3>
                 <button
                   type="button"
-                  onClick={() => setShowCreateForm(v => !v)}
+                  onClick={openCreateModalBlank}
                   style={{
-                    padding: '8px 14px', background: showCreateForm ? '#1e293b' : '#2563eb',
+                    padding: '8px 14px', background: '#2563eb',
                     color: 'white', border: 'none', borderRadius: 7, cursor: 'pointer',
                     fontSize: 13, fontWeight: 700,
                   }}
                 >
-                  {showCreateForm ? '개설 폼 닫기' : '+ 새 사이트'}
+                  + 새 사이트
                 </button>
               </div>
 
@@ -990,84 +1264,6 @@ export default function AdminConsole() {
                 resultLabel={`검색 결과 ${filteredSites.length}건`}
               />
 
-              {showCreateForm && (
-                <div style={css.card}>
-                  <h3 style={{ margin: '0 0 20px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>+ 새 사이트 개설</h3>
-                  <form onSubmit={createSite}>
-                    <p style={{ ...css.label, marginBottom: 10 }}>고객 정보</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                      {[
-                        { key: 'customer_name',  label: '이름 *',  ph: '홍길동' },
-                        { key: 'customer_email', label: '이메일 *', ph: 'hong@email.com' },
-                        { key: 'customer_phone', label: '연락처',   ph: '010-0000-0000' },
-                      ].map(({ key, label, ph }) => (
-                        <div key={key}>
-                          <label style={css.label}>{label}</label>
-                          <input value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })}
-                            placeholder={ph} required={label.includes('*')} style={css.input} />
-                        </div>
-                      ))}
-                    </div>
-                    <p style={{ ...css.label, margin: '18px 0 10px' }}>사이트 정보</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                      {[
-                        { key: 'site_name',  label: '사이트명 *', ph: '홍길동 카페' },
-                        { key: 'subdomain',  label: '서브도메인 *', ph: 'hong' },
-                        { key: 'phone',      label: '전화번호', ph: '02-0000-0000' },
-                        { key: 'email',      label: '사이트 이메일', ph: 'info@site.com' },
-                        { key: 'address',    label: '주소', ph: '서울시 강남구...' },
-                      ].map(({ key, label, ph }) => (
-                        <div key={key}>
-                          <label style={css.label}>{label}</label>
-                          <input value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })}
-                            placeholder={ph} required={label.includes('*')} style={css.input} />
-                        </div>
-                      ))}
-                      <div>
-                        <label style={css.label}>개발 유형 *</label>
-                        <select value={form.build_type} onChange={e => setForm({ ...form, build_type: e.target.value })}
-                          style={{ ...css.input, cursor: 'pointer' }}>
-                          <option value="self">{codeLabel('BUILD_TYPE', 'self')} (루트 A)</option>
-                          <option value="managed">{codeLabel('BUILD_TYPE', 'managed')} (루트 B)</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div className="mt-3.5 grid grid-cols-1 sm:grid-cols-[2fr_1fr] gap-3.5">
-                      <div>
-                        <label style={css.label}>소개글</label>
-                        <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-                          placeholder="업체 소개를 입력하세요..." rows={2}
-                          style={{ ...css.input, resize: 'vertical' }} />
-                      </div>
-                      <div>
-                        <label style={css.label}>템플릿</label>
-                        <select value={form.template_id} onChange={e => setForm({ ...form, template_id: e.target.value })}
-                          style={{ ...css.input, cursor: 'pointer', height: 72 }}>
-                          <option value="">선택 안 함</option>
-                          {templates.map(t => (
-                            <option key={t.template_id} value={t.template_id}>{t.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
-                      <button type="submit" disabled={loading} style={{
-                        padding: '9px 22px', background: '#2563eb', color: 'white',
-                        border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 13,
-                        fontWeight: 700, opacity: loading ? 0.6 : 1
-                      }}>
-                        {loading ? '생성 중...' : '사이트 개설'}
-                      </button>
-                      {message && (
-                        <span style={{ fontSize: 13, color: message.startsWith('✅') ? '#22c55e' : '#ef4444' }}>
-                          {message}
-                        </span>
-                      )}
-                    </div>
-                  </form>
-                </div>
-              )}
-
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: selectedSite ? 'minmax(0, 1.1fr) minmax(320px, 0.9fr)' : '1fr',
@@ -1078,14 +1274,14 @@ export default function AdminConsole() {
                   <div className="overflow-x-auto -mx-6 px-6">
                     <table style={css.table}>
                       <thead>
-                        <tr>{['사이트명', '고객', '유형', '기간', '상태'].map(h =>
-                          <th key={h} style={{ ...css.th, whiteSpace: 'nowrap' }}>{h}</th>)}
+                        <tr>{['사이트명', '고객', '유형', '기간', '상태', ''].map((h, i) =>
+                          <th key={h || `a${i}`} style={{ ...css.th, whiteSpace: 'nowrap' }}>{h}</th>)}
                         </tr>
                       </thead>
                       <tbody>
                         {filteredSites.length === 0 ? (
                           <tr>
-                            <td colSpan={5} style={{ ...css.td, color: '#64748b', textAlign: 'center', padding: '28px 12px' }}>
+                            <td colSpan={6} style={{ ...css.td, color: '#64748b', textAlign: 'center', padding: '28px 12px' }}>
                               {siteSearchQuery ? '검색 결과가 없습니다' : '사이트가 없습니다'}
                             </td>
                           </tr>
@@ -1130,6 +1326,35 @@ export default function AdminConsole() {
                                   <div style={{ marginTop: 4 }}>{badge('#f59e0b', '잔금신청')}</div>
                                 )}
                               </td>
+                              <td style={{ ...css.td, width: 72 }} onClick={e => e.stopPropagation()}>
+                                {(() => {
+                                  const inq = site.inquiry_id
+                                    ? inquiries.find(i => i.inquiry_id === site.inquiry_id)
+                                    : null
+                                  const step = site.build_type === 'managed'
+                                    ? resolveManagedFlowStep(inq, {
+                                      site,
+                                      subscription: sub,
+                                      finalPending: hasPendingDeposit(site.customer_id) && !inq?.final_paid_at,
+                                    })
+                                    : resolveSelfFlowStep(site, { subscription: sub })
+                                  if (!site.subdomain || !canOpenHqEditor(site.build_type, step)) return null
+                                  return (
+                                    <button
+                                      type="button"
+                                      title="에디터 열기"
+                                      onClick={() => window.open(siteAdminPath(site.subdomain, '/editor'), '_blank')}
+                                      style={{
+                                        padding: '4px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                                        background: '#0f172a', color: '#93c5fd',
+                                        border: '1px solid #334155', borderRadius: 6,
+                                      }}
+                                    >
+                                      에디터
+                                    </button>
+                                  )
+                                })()}
+                              </td>
                             </tr>
                           )
                         })}
@@ -1144,9 +1369,17 @@ export default function AdminConsole() {
                     inquiry={selectedInquiry}
                     subscription={selectedSub}
                     oneTimePays={selectedOtps}
+                    finalPending={
+                      hasPendingDeposit(selectedSite.customer_id) && !selectedInquiry?.final_paid_at
+                    }
                     onClose={() => setSelectedSiteId(null)}
                     onStatusAction={updateSiteStatus}
                     onConfirmFinal={confirmFinalPayment}
+                    onStartDeposit={startDepositStep}
+                    onConfirmDeposit={confirmDownPayment}
+                    onCancelManaged={
+                      selectedInquiry ? () => handleCancelManagedIntake(selectedInquiry.inquiry_id) : undefined
+                    }
                     onGoInquiries={() => setNav('inquiries')}
                     onGoPayments={() => setNav('payments')}
                     onGoCustomer={openCustomerDetail}
@@ -1358,26 +1591,42 @@ export default function AdminConsole() {
                 )}
                 {inquiries.map(inq => {
                   const localFee = inquiryDevFee[inq.inquiry_id] ?? (inq.dev_fee_total ? String(inq.dev_fee_total) : '')
+                  const linkedSite = sites.find(s => s.inquiry_id === inq.inquiry_id) || null
+                  const finalPending = hasPendingDeposit(inq.customer_id) && !inq.final_paid_at
+                  const flowStep = resolveManagedFlowStep(inq, { site: linkedSite, finalPending })
+                  const stepLabel = codeLabel('FLOW_STEP', flowStep, flowStepLabel(flowStep))
+                  const hq = resolveHqInquiryAction(flowStep, inq, { linkedSite, finalPending })
+
+                  function openCreateSite() {
+                    openCreateModalFromInquiry(inq)
+                  }
+
+                  function openLinkedSite() {
+                    if (!linkedSite) return
+                    setNav('sites')
+                    setSelectedSiteId(linkedSite.site_id)
+                    setShowCreateForm(false)
+                    setMessage(`ℹ️ ${linkedSite.subdomain} 상세`)
+                  }
+
+                  function runHqAction(key) {
+                    if (key === 'start_deposit') return startDepositStep(inq.inquiry_id)
+                    if (key === 'confirm_deposit') return confirmDownPayment(inq.inquiry_id)
+                    if (key === 'create_site') return openCreateSite()
+                    if (key === 'open_editor' && linkedSite) {
+                      return window.open(siteAdminPath(linkedSite.subdomain, '/editor'), '_blank')
+                    }
+                    if (key === 'open_preview' && linkedSite) return updateSiteStatus(linkedSite.site_id, 'review')
+                    if (key === 'confirm_balance') return confirmFinalPayment(inq.inquiry_id)
+                    if (key === 'view_site') return openLinkedSite()
+                  }
+
                   return (
                     <div key={inq.inquiry_id} style={{
                       background: '#0f172a',
-                      border: hasPendingDeposit(inq.customer_id) ? '1px solid #f59e0b66' : '1px solid #1e293b',
+                      border: finalPending ? '1px solid #f59e0b66' : '1px solid #1e293b',
                       borderRadius: 10, padding: '16px 20px',
                     }}>
-                      {hasPendingDeposit(inq.customer_id) && (
-                        <div style={{
-                          marginBottom: 12, padding: '10px 12px', borderRadius: 8,
-                          background: '#f59e0b18', border: '1px solid #f59e0b44',
-                          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-                        }}>
-                          {badge(codeColor('OTP_STATUS', 'pending_confirm'), codeLabel('OTP_STATUS', 'pending_confirm'))}
-                          <span style={{ fontSize: 12, color: '#fbbf24', flex: 1 }}>
-                            고객이 잔금 입금을 신청했습니다. 통장 확인 후 「잔금 확인」을 눌러 주세요.
-                          </span>
-                          {!inq.final_paid_at && btn('#2563eb', '잔금 확인', () => confirmFinalPayment(inq.inquiry_id))}
-                        </div>
-                      )}
-                      {/* 헤더 행 */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
                         <div style={{ fontWeight: 700, color: '#f1f5f9', fontSize: 14 }}>
                           {inq.customers?.name}
@@ -1387,107 +1636,149 @@ export default function AdminConsole() {
                         <div style={{ fontSize: 12, color: '#94a3b8' }}>
                           {codeLabel('BUSINESS_TYPE', inq.business_type, '-')}
                         </div>
-                        {badge(
-                          codeColor('INQUIRY_STATUS', inq.status),
-                          codeLabel('INQUIRY_STATUS', inq.status)
-                        )}
+                        {badge(codeColor('FLOW_STEP', flowStep), stepLabel)}
                         <div style={{ marginLeft: 'auto', fontSize: 11, color: '#475569' }}>
                           {new Date(inq.created_at).toLocaleDateString('ko-KR')} 접수
                         </div>
                       </div>
 
-                      {/* 요청 내용 */}
                       {inq.description && (
                         <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12, lineHeight: 1.6, borderLeft: '2px solid #334155', paddingLeft: 10 }}>
                           {inq.description}
                         </div>
                       )}
 
-                      {/* 개발비 / 납부 현황 */}
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-                        <span style={{ fontSize: 12, color: '#64748b' }}>총 개발비:</span>
-                        <input
-                          type="number"
-                          value={localFee}
-                          onChange={e => setInquiryDevFee(f => ({ ...f, [inq.inquiry_id]: e.target.value }))}
-                          placeholder="견적 금액 입력"
-                          style={{ width: 130, padding: '4px 8px', background: '#1e293b', border: '1px solid #334155', borderRadius: 6, color: '#e2e8f0', fontSize: 12 }}
+                      {/* 전체 FLOW_STEP */}
+                      {(() => {
+                        const progressSteps = FLOW_STEPS.filter(s => s !== 'suspended')
+                        const safeStep = getFlowStepIndex(flowStep, 'managed')
+                        const progressIdx = Math.min(safeStep, progressSteps.length - 1)
+                        return (
+                          <div style={{
+                            display: 'flex', alignItems: 'flex-start', gap: 0,
+                            marginBottom: 12, overflowX: 'auto', paddingBottom: 6,
+                          }}>
+                            {progressSteps.map((code, i) => (
+                              <div key={code} style={{
+                                display: 'flex', alignItems: 'center',
+                                flex: i < progressSteps.length - 1 ? 1 : 'none', minWidth: 48,
+                              }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                                  <div style={{
+                                    width: 24, height: 24, borderRadius: '50%', fontSize: 10, fontWeight: 700,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    background: i <= progressIdx ? '#e2e8f0' : '#1e293b',
+                                    color: i <= progressIdx ? '#0f172a' : '#64748b',
+                                  }}>{i < progressIdx ? '✓' : i + 1}</div>
+                                  <span style={{
+                                    fontSize: 9, textAlign: 'center', lineHeight: 1.2, maxWidth: 52,
+                                    color: i === progressIdx ? '#f1f5f9' : '#64748b',
+                                    fontWeight: i === progressIdx ? 700 : 400,
+                                  }}>
+                                    {codeLabel('FLOW_STEP', code, flowStepLabel(code))}
+                                  </span>
+                                </div>
+                                {i < progressSteps.length - 1 && (
+                                  <div style={{
+                                    flex: 1, height: 2, minWidth: 6, margin: '0 2px', marginBottom: 16,
+                                    background: i < progressIdx ? '#94a3b8' : '#1e293b',
+                                  }} />
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      })()}
+
+                      <div style={{
+                        marginBottom: 12, padding: '10px 12px', borderRadius: 8,
+                        background: '#1e293b', border: '1px solid #334155',
+                      }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', marginBottom: 4 }}>
+                          지금: {stepLabel}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                          {hq.hint || flowStepDesc(flowStep)}
+                        </div>
+                      </div>
+
+                      {/* 직원 메모 */}
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>메모 (직원용)</div>
+                        <textarea
+                          value={inquiryNotes[inq.inquiry_id] ?? inq.admin_note ?? ''}
+                          onChange={e => setInquiryNotes(n => ({ ...n, [inq.inquiry_id]: e.target.value }))}
+                          placeholder="상담·합의 내용, 인수인계 메모…"
+                          rows={2}
+                          style={{
+                            width: '100%', boxSizing: 'border-box', padding: '8px 10px',
+                            background: '#0f172a', border: '1px solid #334155', borderRadius: 6,
+                            color: '#e2e8f0', fontSize: 12, resize: 'vertical',
+                          }}
                         />
-                        <span style={{ fontSize: 12, color: '#64748b' }}>원</span>
-                        {btn('#334155', '저장', () => saveDevFee(inq.inquiry_id, localFee))}
-                        {inq.dev_fee_total && (
-                          <span style={{ fontSize: 12, color: '#94a3b8' }}>
-                            선금 {(inq.dev_fee_total / 2).toLocaleString()}원 / 잔금 {(inq.dev_fee_total / 2).toLocaleString()}원
+                        <div style={{ marginTop: 6 }}>
+                          {btn('#334155', '메모 저장', () => saveAdminNote(inq.inquiry_id))}
+                        </div>
+                      </div>
+
+                      {/* 선금 단계: 견적 입력 */}
+                      {(['intake', 'deposit'].includes(flowStep) || !inq.down_paid_at) && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+                          <span style={{ fontSize: 12, color: '#64748b' }}>총 개발비(견적):</span>
+                          <input
+                            type="number"
+                            value={localFee}
+                            onChange={e => setInquiryDevFee(f => ({ ...f, [inq.inquiry_id]: e.target.value }))}
+                            placeholder="견적 금액"
+                            style={{ width: 130, padding: '4px 8px', background: '#1e293b', border: '1px solid #334155', borderRadius: 6, color: '#e2e8f0', fontSize: 12 }}
+                          />
+                          <span style={{ fontSize: 12, color: '#64748b' }}>원</span>
+                          {btn('#334155', '저장', () => saveDevFee(inq.inquiry_id, localFee))}
+                          {inq.dev_fee_total && (
+                            <span style={{ fontSize: 12, color: '#94a3b8' }}>
+                              선금 {(inq.dev_fee_total / 2).toLocaleString()}원 / 잔금 {(inq.dev_fee_total / 2).toLocaleString()}원
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {inq.down_paid_at && (
+                        <div style={{ display: 'flex', gap: 6, fontSize: 11, color: '#64748b', marginBottom: 12 }}>
+                          <span style={{ color: '#22c55e' }}>
+                            선금 ✓ {new Date(inq.down_paid_at).toLocaleDateString('ko-KR')}
                           </span>
-                        )}
-                      </div>
+                          <span style={{ color: '#334155' }}>·</span>
+                          <span style={{ color: inq.final_paid_at ? '#22c55e' : '#475569' }}>
+                            잔금 {inq.final_paid_at ? `✓ ${new Date(inq.final_paid_at).toLocaleDateString('ko-KR')}` : '미확인'}
+                          </span>
+                        </div>
+                      )}
 
-                      {/* 납부 확인 현황 */}
-                      <div style={{ display: 'flex', gap: 6, fontSize: 11, color: '#64748b', marginBottom: 12 }}>
-                        <span style={{ color: inq.down_paid_at ? '#22c55e' : '#475569' }}>
-                          선금 {inq.down_paid_at ? `✓ ${new Date(inq.down_paid_at).toLocaleDateString('ko-KR')}` : '미확인'}
-                        </span>
-                        <span style={{ color: '#334155' }}>·</span>
-                        <span style={{ color: inq.final_paid_at ? '#22c55e' : '#475569' }}>
-                          잔금 {inq.final_paid_at ? `✓ ${new Date(inq.final_paid_at).toLocaleDateString('ko-KR')}` : '미확인'}
-                        </span>
-                      </div>
-
-                      {/* 액션 버튼 행 */}
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                        {/* 상태 드롭다운 */}
+                        {hq.label && btn('#2563eb', hq.label, () => runHqAction(hq.key))}
+                        {linkedSite && canOpenHqEditor('managed', flowStep) && hq.key !== 'open_editor' && (
+                          btn('#2563eb', '에디터', () => window.open(siteAdminPath(linkedSite.subdomain, '/editor'), '_blank'))
+                        )}
+                        {linkedSite && flowStep === 'building' && (
+                          btn('#334155', '검수용 공개', () => updateSiteStatus(linkedSite.site_id, 'review'))
+                        )}
+                        {linkedSite && hq.key !== 'view_site' && btn('#334155', `사이트 (${linkedSite.subdomain})`, openLinkedSite)}
+                        {canCancelManagedIntake(inq) && (
+                          btn('#7f1d1d', '접수 취소', () => handleCancelManagedIntake(inq.inquiry_id))
+                        )}
                         <select
                           value={inq.status}
                           onChange={e => updateInquiryStatus(inq.inquiry_id, e.target.value)}
-                          style={{ padding: '5px 8px', background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
-                          <option value="received">접수</option>
-                          <option value="reviewing">검토/견적</option>
-                          <option value="building">제작중</option>
-                          <option value="review">검수대기</option>
-                          <option value="approved">잔금완료</option>
-                          <option value="done">배포완료</option>
+                          title="문의 DB 상태 (고급)"
+                          style={{ marginLeft: 'auto', padding: '5px 8px', background: '#0f172a', color: '#64748b', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}
+                        >
+                          <option value="received">DB: received</option>
+                          <option value="reviewing">DB: reviewing</option>
+                          <option value="building">DB: building</option>
+                          <option value="review">DB: review</option>
+                          <option value="approved">DB: approved</option>
+                          <option value="done">DB: done</option>
                         </select>
-
-                        {/* 선금 확인 — reviewing 이고 선금 미확인일 때 */}
-                        {inq.status === 'reviewing' && !inq.down_paid_at && (
-                          btn('#16a34a', '선금 확인', () => confirmDownPayment(inq.inquiry_id))
-                        )}
-
-                        {/* 잔금 확인 — building/review이고 잔금 미확인일 때 */}
-                        {['building', 'review'].includes(inq.status) && !inq.final_paid_at && (
-                          btn('#2563eb', '잔금 확인', () => confirmFinalPayment(inq.inquiry_id))
-                        )}
-
-                        {/* 사이트 생성 / 확인 — 이미 사이트가 있으면 "사이트 확인→" */}
-                        {(() => {
-                          const linkedSite = sites.find(s => s.inquiry_id === inq.inquiry_id)
-                          if (linkedSite) {
-                            return btn('#334155', `사이트 확인→ (${linkedSite.subdomain})`, () => {
-                              setNav('sites')
-                              setSelectedSiteId(linkedSite.site_id)
-                              setShowCreateForm(false)
-                              setMessage(`ℹ️ ${inq.customers?.name} 고객의 사이트(${linkedSite.subdomain}) 상세를 열었습니다.`)
-                            })
-                          }
-                          if (['building', 'review', 'approved', 'done'].includes(inq.status)) {
-                            return btn('#6366f1', '사이트 생성→', () => {
-                              setForm(f => ({
-                                ...f,
-                                customer_name:  inq.customers?.name  || '',
-                                customer_email: inq.customers?.email || '',
-                                customer_phone: inq.phone || inq.customers?.phone || '',
-                                description:    inq.description || '',
-                                build_type:     'managed',
-                                inquiry_id:     inq.inquiry_id,
-                              }))
-                              setNav('sites')
-                              setShowCreateForm(true)
-                              setSelectedSiteId(null)
-                              setMessage(`📋 ${inq.customers?.name} 고객 정보를 불러왔습니다. 사이트명과 서브도메인을 입력해주세요.`)
-                            })
-                          }
-                          return <span style={{ fontSize: 11, color: '#475569' }}>선금 확인 후 사이트 생성 가능</span>
-                        })()}
                       </div>
                     </div>
                   )
