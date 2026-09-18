@@ -1,0 +1,33 @@
+---
+description: DB 데이터 확인 시 docs/db 조회 CLI 사용
+alwaysApply: true
+---
+
+# DB 조회 (개발)
+
+플로우·화면 이슈를 볼 때 **추측만 하지 말고**, 필요하면 DB를 조회해서 확인한다.
+
+## 도구
+
+- 스크립트: `my-platform/docs/db/tools/db-query.mjs`
+- 설명: `my-platform/docs/db/tools/README.md`
+- 연결: `my-platform/.env.local`의 `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+  - (권장) `SUPABASE_SERVICE_ROLE_KEY`가 있으면 그걸로 조회 (RLS 우회)
+
+## 실행 예
+
+```bash
+cd my-platform
+node docs/db/tools/db-query.mjs snapshot
+node docs/db/tools/db-query.mjs related --email test2@test.com
+node docs/db/tools/db-query.mjs sites --build_type managed
+node docs/db/tools/db-query.mjs inquiries --email test2@test.com
+```
+
+- 기본: `use_flag = 1`만
+- 삭제분 포함: `--all`
+
+## 주의
+
+- **조회 전용**. INSERT/UPDATE/DELETE는 이 CLI로 하지 않는다.
+- 쓰기·마이그레이션 SQL은 사용자 승인 후 안내/실행한다 (`ask-before-edit` 준수).

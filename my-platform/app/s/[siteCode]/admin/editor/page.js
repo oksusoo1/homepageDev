@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { use } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
+import { requireAuthUser, isPlatformAdmin } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
 import { deploySite as deployAction } from '@/lib/deploy'
 import { getBillingReadiness, paymentMethodUrl } from '@/lib/billing'
@@ -14,6 +14,7 @@ import {
   sitePublicHostname,
 } from '@/lib/site-paths'
 import Link from 'next/link'
+import AuthUserBar from '@/components/AuthUserBar'
 
 const PRESET_COLORS = ['#1c1917', '#1e3a5f', '#14532d', '#4c1d95', '#7f1d1d', '#0f172a']
 
@@ -188,6 +189,7 @@ export default function EditorPage({ params }) {
   const router = useRouter()
   const [site, setSite] = useState(null)
   const [customer, setCustomer] = useState(null)
+  const [isStaffEditor, setIsStaffEditor] = useState(false)
   const [content, setContent] = useState(null)
   const [loading, setLoading] = useState(true)
   const [contact, setContact] = useState({ address: '', phone: '', email: '' })
@@ -202,33 +204,13 @@ export default function EditorPage({ params }) {
 
   useEffect(() => { init() }, [siteCode])
 
-  async function init() {
-    const user = await requireAuthUser()
-    if (!user) { router.push('/login'); return }
-
-    const { data: cust } = await onlyActive(
-      supabase.from('customers').select('*').eq('auth_id', user.id)
-    ).single()
-    if (!cust) { router.push('/login'); return }
-    setCustomer(cust)
-
-    const { data: siteData } = await onlyActive(
-      supabase.from('sites').select('*')
-        .eq('subdomain', siteCode)
-        .eq('customer_id', cust.customer_id)
-    ).single()
-    if (!siteData) { router.push('/my'); return }
-
+  function applySiteToEditor(siteData) {
     setSite(siteData)
-
-    // 연락처 초기화 (sites 테이블 직접 필드)
     setContact({
       address: siteData.address || '',
       phone:   siteData.phone   || '',
       email:   siteData.email   || '',
     })
-
-    // 저장된 content가 있으면 그걸 쓰고, 없으면 사이트 기본값으로 초기화
     const saved = siteData.content || {}
     setContent({
       hero: {
@@ -248,7 +230,38 @@ export default function EditorPage({ params }) {
       sns:   saved.sns   || {},
       gallery: saved.gallery || [],
     })
+  }
 
+  async function init() {
+    const user = await requireAuthUser()
+    if (!user) { router.push('/login'); return }
+
+    // 본사: 에디터만 허용 (고객 포털은 불가)
+    if (await isPlatformAdmin()) {
+      setIsStaffEditor(true)
+      const { data: siteData } = await onlyActive(
+        supabase.from('sites').select('*').eq('subdomain', siteCode)
+      ).maybeSingle()
+      if (!siteData) { router.push('/platform'); return }
+      applySiteToEditor(siteData)
+      setLoading(false)
+      return
+    }
+
+    const { data: cust } = await onlyActive(
+      supabase.from('customers').select('*').eq('auth_id', user.id)
+    ).maybeSingle()
+    if (!cust) { router.push('/login'); return }
+    setCustomer(cust)
+
+    const { data: siteData } = await onlyActive(
+      supabase.from('sites').select('*')
+        .eq('subdomain', siteCode)
+        .eq('customer_id', cust.customer_id)
+    ).maybeSingle()
+    if (!siteData) { router.push('/my'); return }
+
+    applySiteToEditor(siteData)
     setLoading(false)
   }
 
@@ -277,6 +290,11 @@ export default function EditorPage({ params }) {
   }
 
   async function handleDeploy() {
+    if (isStaffEditor || !customer) {
+      setSaveMsg('❌ 배포는 고객 계정에서 / 검수는 본사 제작문의에서')
+      setTimeout(() => setSaveMsg(''), 3500)
+      return
+    }
     const { data: card } = await onlyActive(
       supabase
         .from('customer_payment_methods')
@@ -386,12 +404,23 @@ export default function EditorPage({ params }) {
       {/* 상단 툴바 */}
       <div className="h-[52px] bg-[#111827] flex items-center justify-between px-3 sm:px-5 border-b border-[#1f2937] shrink-0">
         <div className="flex items-center gap-2 sm:gap-3.5">
-          <Link href={siteAdminPath(siteCode)} className="text-xs text-gray-500 no-underline">
-            ← 포털
-          </Link>
+          {isStaffEditor ? (
+            <Link href="/platform" className="text-xs text-gray-500 no-underline">
+              ← 본사
+            </Link>
+          ) : (
+            <Link href={siteAdminPath(siteCode)} className="text-xs text-gray-500 no-underline">
+              ← 포털
+            </Link>
+          )}
           <span className="text-[#1f2937] hidden sm:inline">|</span>
           <span className="text-[13px] font-bold text-white hidden sm:inline">에디터</span>
           <span className="text-xs text-gray-600 hidden sm:inline">{site.name}</span>
+          {isStaffEditor && (
+            <span className="text-[10px] font-bold text-amber-400 border border-amber-700/50 rounded px-1.5 py-0.5">
+              본사 편집
+            </span>
+          )}
         </div>
 
         {/* 디바이스 전환 — 데스크톱만 */}
@@ -409,6 +438,9 @@ export default function EditorPage({ params }) {
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2.5">
+          <div className="mr-1 max-w-[40vw] sm:max-w-none overflow-hidden">
+            <AuthUserBar variant="dark" showLogout />
+          </div>
           {saveMsg && (
             <span className={`text-xs ${saveMsg.startsWith('✅') ? 'text-green-400' : 'text-red-400'}`}>
               {saveMsg}
@@ -420,7 +452,9 @@ export default function EditorPage({ params }) {
           <button onClick={save} disabled={saving} className="px-3 sm:px-5 py-1.5 bg-[#374151] text-white border-none rounded-lg text-[13px] font-semibold cursor-pointer disabled:opacity-70">
             {saving ? '저장 중...' : '저장'}
           </button>
-          {site.deploy_status !== 'live' ? (
+          {isStaffEditor ? (
+            <span className="hidden sm:inline text-[11px] text-gray-500">검수는 본사「제작 문의」</span>
+          ) : site.deploy_status !== 'live' ? (
             <button onClick={handleDeploy} disabled={deploying} className="px-3 sm:px-5 py-1.5 bg-teal-600 text-white border-none rounded-lg text-[13px] font-bold cursor-pointer disabled:opacity-70">
               {deploying ? '배포 중...' : '🚀 배포'}
             </button>

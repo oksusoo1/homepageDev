@@ -6,6 +6,13 @@ import { getPostLoginPath } from '@/lib/auth'
 import Link from 'next/link'
 import { Suspense } from 'react'
 
+/** open redirect 방지 — 같은 앱 내부 경로만 */
+function safeNextPath(raw) {
+  if (!raw || typeof raw !== 'string') return null
+  if (!raw.startsWith('/') || raw.startsWith('//')) return null
+  return raw
+}
+
 // useSearchParams는 Suspense 안에서만 사용 가능
 function LoginForm() {
   const router = useRouter()
@@ -31,11 +38,14 @@ function LoginForm() {
     ;(async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (cancelled || !session) return
+      const next = safeNextPath(searchParams.get('next'))
       const path = await getPostLoginPath()
-      if (!cancelled && path) router.replace(path)
+      if (cancelled || !path) return
+      // 고객이 사이트에서 온 경우 next 우선
+      router.replace(path === '/my' && next ? next : path)
     })()
     return () => { cancelled = true }
-  }, [router])
+  }, [router, searchParams])
 
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   const [signupForm, setSignupForm] = useState({ email: '', password: '', passwordConfirm: '', name: '', phone: '' })
@@ -57,6 +67,7 @@ function LoginForm() {
       return
     }
 
+    const next = safeNextPath(searchParams.get('next'))
     const path = await getPostLoginPath()
     if (!path) {
       await supabase.auth.signOut()
@@ -64,7 +75,7 @@ function LoginForm() {
       setLoading(false)
       return
     }
-    router.push(path)
+    router.push(path === '/my' && next ? next : path)
   }
 
   // ── 회원가입 ──

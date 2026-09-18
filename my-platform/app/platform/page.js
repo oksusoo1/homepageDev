@@ -9,6 +9,7 @@ import PlatformSiteDetail from '@/components/PlatformSiteDetail'
 import PlatformCustomerDetail from '@/components/PlatformCustomerDetail'
 import PlatformCommonCodes from '@/components/PlatformCommonCodes'
 import PlatformListSearch from '@/components/PlatformListSearch'
+import AuthUserBar from '@/components/AuthUserBar'
 import { sitePublicPath, siteAdminPath } from '@/lib/site-paths'
 import { getSitePeriodInfo } from '@/lib/site-period'
 import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
@@ -64,6 +65,16 @@ export default function AdminConsole() {
   const [createLockedCustomer, setCreateLockedCustomer] = useState(false)
   const [siteSearchInput, setSiteSearchInput] = useState('')
   const [siteSearchQuery, setSiteSearchQuery] = useState('')
+  const [inquirySearchInput, setInquirySearchInput] = useState('')
+  const [inquirySearchQuery, setInquirySearchQuery] = useState('')
+  const [customerSearchInput, setCustomerSearchInput] = useState('')
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('')
+  const [subSearchInput, setSubSearchInput] = useState('')
+  const [subSearchQuery, setSubSearchQuery] = useState('')
+  const [ticketSearchInput, setTicketSearchInput] = useState('')
+  const [ticketSearchQuery, setTicketSearchQuery] = useState('')
+  const [paymentSearchInput, setPaymentSearchInput] = useState('')
+  const [paymentSearchQuery, setPaymentSearchQuery] = useState('')
   const [form, setForm] = useState({
     customer_id: '', customer_name: '', customer_email: '', customer_phone: '',
     site_name: '', subdomain: '', description: '',
@@ -116,18 +127,12 @@ export default function AdminConsole() {
   useEffect(() => { checkAdminAuth() }, [])
 
   async function checkAdminAuth() {
-    // isPlatformAdmin → requireAuthUser (세션 우선)
     if (!(await isPlatformAdmin())) {
       router.push('/login')
       return
     }
     setAuthChecked(true)
     fetchAll()
-  }
-
-  async function handleLogout() {
-    await supabase.auth.signOut()
-    router.push('/login')
   }
 
   async function fetchAll() {
@@ -1020,17 +1025,12 @@ export default function AdminConsole() {
           <div style={{ fontSize: 11, color: '#475569', marginBottom: 10, padding: '0 4px' }}>
             회원 {customers.length} · 사이트 {sites.length} · 구독 {activeSubCount}
           </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            style={{
-              width: '100%', padding: '9px 12px', borderRadius: 8,
-              border: '1px solid #334155', background: 'transparent',
-              color: '#94a3b8', fontSize: 12, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
-            }}
-          >
-            로그아웃
-          </button>
+          <div style={{
+            marginBottom: 4, padding: '8px 10px', borderRadius: 8,
+            background: '#0f172a', border: '1px solid #1e293b',
+          }}>
+            <AuthUserBar variant="dark" />
+          </div>
         </div>
       </aside>
 
@@ -1051,10 +1051,6 @@ export default function AdminConsole() {
               입금확인 대기 {pendingConfirmOtp.length}건
             </button>
           )}
-          <div className="ml-auto hidden sm:flex gap-4 text-xs text-gray-500">
-            <span>사이트 {sites.length}개</span>
-            <span>구독 {activeSubCount}개</span>
-          </div>
         </div>
 
         <div style={{ ...css.content, maxWidth: 1100, width: '100%' }}>
@@ -1121,17 +1117,37 @@ export default function AdminConsole() {
 
         {/* ── 회원 (customers) ── */}
         {nav === 'customers' && (() => {
-          const selectedCustomer = customers.find(c => c.customer_id === selectedCustomerId) || null
+          const filteredCustomers = customers.filter(c =>
+            matchesSearchQuery(
+              customerSearchQuery,
+              c.name,
+              c.email,
+              c.phone,
+              codeLabel('CUSTOMER_STATUS', c.status, c.status),
+            )
+          )
+          const selectedCustomer = filteredCustomers.find(c => c.customer_id === selectedCustomerId)
+            || customers.find(c => c.customer_id === selectedCustomerId)
+            || null
           return (
             <>
               <div style={{ marginBottom: 12 }}>
                 <h3 style={{ margin: 0, fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
-                  회원 목록 ({customers.length}명)
+                  회원 목록 ({filteredCustomers.length}{customerSearchQuery ? ` / ${customers.length}` : ''}명)
                   <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: '#64748b' }}>
                     행 클릭 → 상세 · 보유 사이트
                   </span>
                 </h3>
               </div>
+              <PlatformListSearch
+                value={customerSearchInput}
+                onChange={setCustomerSearchInput}
+                onSearch={() => setCustomerSearchQuery(customerSearchInput.trim())}
+                onReset={() => { setCustomerSearchInput(''); setCustomerSearchQuery('') }}
+                placeholder="이름, 이메일, 연락처, 상태"
+                applied={!!customerSearchQuery}
+                resultLabel={`검색 결과 ${filteredCustomers.length}건`}
+              />
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: selectedCustomer ? 'minmax(0, 1.1fr) minmax(320px, 0.9fr)' : '1fr',
@@ -1147,7 +1163,7 @@ export default function AdminConsole() {
                         </tr>
                       </thead>
                       <tbody>
-                        {customers.map(c => {
+                        {filteredCustomers.map(c => {
                           const siteCount = sites.filter(s => s.customer_id === c.customer_id).length
                           const active = selectedCustomerId === c.customer_id
                           return (
@@ -1177,10 +1193,10 @@ export default function AdminConsole() {
                             </tr>
                           )
                         })}
-                        {customers.length === 0 && (
+                        {filteredCustomers.length === 0 && (
                           <tr>
                             <td colSpan={6} style={{ ...css.td, textAlign: 'center', color: '#475569' }}>
-                              회원이 없습니다
+                              {customerSearchQuery ? '검색 결과가 없습니다' : '회원이 없습니다'}
                             </td>
                           </tr>
                         )}
@@ -1393,13 +1409,29 @@ export default function AdminConsole() {
         })()}
 
         {/* ── 탭 1: 구독 현황 ── */}
-        {nav === 'subs' && (
+        {nav === 'subs' && (() => {
+          const filteredSubs = subscriptions.filter(sub =>
+            matchesSearchQuery(
+              subSearchQuery,
+              sub.customers?.name,
+              sub.sites?.site_name,
+              sub.sites?.subdomain,
+              codeLabel('PAYMENT_METHOD', sub.payment_method, sub.payment_method),
+              codeLabel('SUB_STATUS', sub.status, sub.status),
+            )
+          )
+          return (
           <div style={css.card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
               <h3 style={{ margin: 0, fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
                 구독 현황 — 이번달 예상 ₩{(activeSubCount * 30000).toLocaleString()}
+                {subSearchQuery && (
+                  <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: '#64748b' }}>
+                    ({filteredSubs.length} / {subscriptions.length}건)
+                  </span>
+                )}
               </h3>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {/* next_billing_date 도래한 구독 자동 결제 */}
                 <button onClick={handleProcessBilling}
                   style={{ fontSize: 12, padding: '6px 14px', background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
@@ -1416,6 +1448,15 @@ export default function AdminConsole() {
                 </button>
               </div>
             </div>
+            <PlatformListSearch
+              value={subSearchInput}
+              onChange={setSubSearchInput}
+              onSearch={() => setSubSearchQuery(subSearchInput.trim())}
+              onReset={() => { setSubSearchInput(''); setSubSearchQuery('') }}
+              placeholder="고객명, 사이트명, 결제방식, 상태"
+              applied={!!subSearchQuery}
+              resultLabel={`검색 결과 ${filteredSubs.length}건`}
+            />
             <div className="overflow-x-auto -mx-6 px-6">
             <table style={css.table}>
               <thead>
@@ -1424,7 +1465,7 @@ export default function AdminConsole() {
                 </tr>
               </thead>
               <tbody>
-                {subscriptions.map(sub => {
+                {filteredSubs.map(sub => {
                   const isExpanded = expandedSubId === sub.subscription_id
                   const history = billingHistory[sub.subscription_id] || []
                   const COLS = 8
@@ -1518,18 +1559,53 @@ export default function AdminConsole() {
                     </React.Fragment>
                   )
                 })}
+                {filteredSubs.length === 0 && (
+                  <tr>
+                    <td colSpan={8} style={{ ...css.td, textAlign: 'center', color: '#475569' }}>
+                      {subSearchQuery ? '검색 결과가 없습니다' : '구독이 없습니다'}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
             </div>
           </div>
-        )}
+          )
+        })()}
 
         {/* ── 탭 2: 수정 요청 ── */}
-        {nav === 'tickets' && (
+        {nav === 'tickets' && (() => {
+          const filteredTickets = tickets.filter(t =>
+            matchesSearchQuery(
+              ticketSearchQuery,
+              t.sites?.name,
+              t.customers?.name,
+              t.title,
+              codeLabel('TICKET_CATEGORY', t.category, t.category),
+              codeLabel('TICKET_PRIORITY', t.priority, t.priority),
+              codeLabel('TICKET_STATUS', t.status, t.status),
+            )
+          )
+          const filteredPending = filteredTickets.filter(t => t.status !== 'resolved').length
+          return (
           <div style={css.card}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
-              수정 요청 — {pendingTickets}건 미처리
+            <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
+              수정 요청 — {filteredPending}건 미처리
+              {ticketSearchQuery && (
+                <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: '#64748b' }}>
+                  ({filteredTickets.length} / {tickets.length}건)
+                </span>
+              )}
             </h3>
+            <PlatformListSearch
+              value={ticketSearchInput}
+              onChange={setTicketSearchInput}
+              onSearch={() => setTicketSearchQuery(ticketSearchInput.trim())}
+              onReset={() => { setTicketSearchInput(''); setTicketSearchQuery('') }}
+              placeholder="사이트, 고객, 제목, 유형, 상태"
+              applied={!!ticketSearchQuery}
+              resultLabel={`검색 결과 ${filteredTickets.length}건`}
+            />
             <div className="overflow-x-auto -mx-6 px-6">
             <table style={css.table}>
               <thead>
@@ -1538,7 +1614,7 @@ export default function AdminConsole() {
                 </tr>
               </thead>
               <tbody>
-                {tickets.map(t => {
+                {filteredTickets.map(t => {
                   const overdue = new Date(t.deadline_at) < new Date() && t.status !== 'resolved'
                   return (
                     <tr key={t.ticket_id}>
@@ -1567,29 +1643,67 @@ export default function AdminConsole() {
                     </tr>
                   )
                 })}
-                {tickets.length === 0 && (
-                  <tr><td colSpan={8} style={{ ...css.td, textAlign: 'center', color: '#475569' }}>티켓이 없습니다</td></tr>
+                {filteredTickets.length === 0 && (
+                  <tr>
+                    <td colSpan={8} style={{ ...css.td, textAlign: 'center', color: '#475569' }}>
+                      {ticketSearchQuery ? '검색 결과가 없습니다' : '티켓이 없습니다'}
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
             </div>
           </div>
-        )}
+          )
+        })()}
 
         {/* ── 탭 4: 제작 문의 ── */}
         {nav === 'inquiries' && (() => {
-          const pendingInquiries = inquiries.filter(i => i.status !== 'done').length
+          const filteredInquiries = inquiries.filter(inq => {
+            const linked = sites.find(s => s.inquiry_id === inq.inquiry_id)
+            return matchesSearchQuery(
+              inquirySearchQuery,
+              inq.customers?.name,
+              inq.customers?.email,
+              inq.phone,
+              inq.customers?.phone,
+              inq.business_type,
+              codeLabel('BUSINESS_TYPE', inq.business_type, ''),
+              inq.description,
+              inq.admin_note,
+              linked?.name,
+              linked?.subdomain,
+            )
+          })
+          const pendingInquiries = filteredInquiries.filter(i => i.status !== 'done').length
 
           return (
             <div style={css.card}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
                 제작 문의 — {pendingInquiries}건 대기중
+                {inquirySearchQuery && (
+                  <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: '#64748b' }}>
+                    ({filteredInquiries.length} / {inquiries.length}건)
+                  </span>
+                )}
               </h3>
+              <PlatformListSearch
+                value={inquirySearchInput}
+                onChange={setInquirySearchInput}
+                onSearch={() => setInquirySearchQuery(inquirySearchInput.trim())}
+                onReset={() => { setInquirySearchInput(''); setInquirySearchQuery('') }}
+                placeholder="고객명, 이메일, 전화, 업종, 내용, 사이트명"
+                applied={!!inquirySearchQuery}
+                resultLabel={`검색 결과 ${filteredInquiries.length}건`}
+              />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {inquiries.length === 0 && (
                   <div style={{ color: '#475569', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>접수된 문의가 없습니다</div>
                 )}
-                {inquiries.map(inq => {
+                {inquiries.length > 0 && filteredInquiries.length === 0 && (
+                  <div style={{ color: '#475569', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>검색 결과가 없습니다</div>
+                )}
+                {filteredInquiries.map(inq => {
                   const localFee = inquiryDevFee[inq.inquiry_id] ?? (inq.dev_fee_total ? String(inq.dev_fee_total) : '')
                   const linkedSite = sites.find(s => s.inquiry_id === inq.inquiry_id) || null
                   const finalPending = hasPendingDeposit(inq.customer_id) && !inq.final_paid_at
@@ -1815,11 +1929,39 @@ export default function AdminConsole() {
         )}
 
         {/* ── 탭 3: 1회성 결제 ── */}
-        {nav === 'payments' && (
+        {nav === 'payments' && (() => {
+          const filteredPays = oneTimePays.filter(pay =>
+            matchesSearchQuery(
+              paymentSearchQuery,
+              pay.customers?.name,
+              pay.sites?.name,
+              codeLabel('OTP_TYPE', pay.type, pay.type),
+              codeLabel('OTP_STATUS', pay.status, pay.status),
+              pay.note,
+              pay.amount != null ? String(pay.amount) : '',
+            )
+          )
+          const filteredPending = filteredPays.filter(p => p.status === 'pending_confirm').length
+          const filteredUnpaid = filteredPays.filter(p => p.status === 'unpaid').length
+          return (
           <div style={css.card}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
-              1회성 결제 — 확인대기 {pendingConfirmOtp.length}건 · 미납 {oneTimePays.filter(p => p.status === 'unpaid').length}건
+            <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
+              1회성 결제 — 확인대기 {filteredPending}건 · 미납 {filteredUnpaid}건
+              {paymentSearchQuery && (
+                <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: '#64748b' }}>
+                  ({filteredPays.length} / {oneTimePays.length}건)
+                </span>
+              )}
             </h3>
+            <PlatformListSearch
+              value={paymentSearchInput}
+              onChange={setPaymentSearchInput}
+              onSearch={() => setPaymentSearchQuery(paymentSearchInput.trim())}
+              onReset={() => { setPaymentSearchInput(''); setPaymentSearchQuery('') }}
+              placeholder="고객, 사이트, 유형, 상태, 메모"
+              applied={!!paymentSearchQuery}
+              resultLabel={`검색 결과 ${filteredPays.length}건`}
+            />
             <div className="overflow-x-auto -mx-6 px-6">
             <table style={css.table}>
               <thead>
@@ -1828,7 +1970,7 @@ export default function AdminConsole() {
                 </tr>
               </thead>
               <tbody>
-                {oneTimePays.map(pay => (
+                {filteredPays.map(pay => (
                   <tr key={pay.payment_id} style={pay.status === 'pending_confirm' ? { background: '#f59e0b0d' } : undefined}>
                     <td style={css.td}>{pay.customers?.name}</td>
                     <td style={css.td}>{pay.sites?.name || '-'}</td>
@@ -1849,14 +1991,19 @@ export default function AdminConsole() {
                     </td>
                   </tr>
                 ))}
-                {oneTimePays.length === 0 && (
-                  <tr><td colSpan={7} style={{ ...css.td, textAlign: 'center', color: '#475569' }}>내역이 없습니다</td></tr>
+                {filteredPays.length === 0 && (
+                  <tr>
+                    <td colSpan={7} style={{ ...css.td, textAlign: 'center', color: '#475569' }}>
+                      {paymentSearchQuery ? '검색 결과가 없습니다' : '내역이 없습니다'}
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
             </div>
           </div>
-        )}
+          )
+        })()}
 
       </div>
       </div>

@@ -1,18 +1,22 @@
-import { getVisitorSite } from '@/lib/site-public'
+import { getVisitorSiteBundle } from '@/lib/site-public'
 import { SiteStatusRibbonHost } from '@/components/SiteStatusRibbon'
 
 /**
  * /s/[siteCode] 공통 레이아웃
- * 방문자 페이지(홈/게시판/문의)에 상태 리본을 항상 표시
- * SiteStatusRibbonHost가 /admin 경로에서는 숨김
+ * 방문자 페이지에 공개 범위 리본 표시 (/admin 제외)
  */
 export default async function SiteCodeLayout({ children, params }) {
   const { siteCode } = await params
-  const site = await getVisitorSite(siteCode)
+  const bundle = await getVisitorSiteBundle(siteCode)
 
   return (
     <>
-      {site && <SiteStatusRibbonHost status={site.status} />}
+      {bundle && (
+        <SiteStatusRibbonHost
+          status={bundle.site.status}
+          visibility={bundle.visibility === 'public' ? null : bundle.visibility}
+        />
+      )}
       {children}
     </>
   )

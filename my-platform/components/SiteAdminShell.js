@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { siteAdminPath, sitePublicPath, sitePublicHostname } from '@/lib/site-paths'
 import { codeLabel } from '@/lib/common-codes'
+import AuthUserBar from '@/components/AuthUserBar'
 
 /**
  * 사장님 사이트 관리 — left 메뉴 셸 (아임웹보다 단순한 3그룹)
@@ -54,6 +55,7 @@ export function parentKeyOf(menuKey) {
 export default function SiteAdminShell({
   site,
   siteCode,
+  customer = null,
   menuKey,
   onMenuChange,
   openGroups,
@@ -176,6 +178,21 @@ export default function SiteAdminShell({
           )
         })}
       </nav>
+
+      {(customer?.name || customer?.email) && (
+        <div style={{
+          marginTop: 'auto', padding: '12px 14px', borderTop: '1px solid #f3f4f6',
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
+            {customer?.name || '회원'}님
+          </div>
+          {customer?.email && (
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, wordBreak: 'break-all' }}>
+              {customer.email}
+            </div>
+          )}
+        </div>
+      )}
     </aside>
   )
 
@@ -209,7 +226,8 @@ export default function SiteAdminShell({
             {findNavLabel(menuKey)}
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <AuthUserBar variant="light" />
           <a
             href={sitePublicPath(siteCode)}
             target="_blank"
@@ -226,13 +244,6 @@ export default function SiteAdminShell({
           }}>
             ● {codeLabel('SITE_STATUS', site?.status)}
           </span>
-          <button
-            type="button"
-            onClick={onLogout}
-            style={{ fontSize: 12, color: '#9ca3af', background: 'transparent', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 10px', cursor: 'pointer' }}
-          >
-            로그아웃
-          </button>
         </div>
       </header>
 

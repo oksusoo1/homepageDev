@@ -10,6 +10,7 @@ import { getBillingReadiness, paymentMethodUrl, getBankAccountText } from '@/lib
 import Link from 'next/link'
 import UserMessagesInbox from '@/components/UserMessagesInbox'
 import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
+import AuthUserBar from '@/components/AuthUserBar'
 
 const TABS = ['내 사이트', '방문자 문의', '수정 요청', '요청 현황', '결제']
 const CATEGORIES = [
@@ -357,7 +358,7 @@ export default function CustomerPortal({ params }) {
           <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold ${site.status === 'published' ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'}`}>
             ● {codeLabel('SITE_STATUS', site.status)}
           </span>
-          <button onClick={handleLogout} className="text-xs text-gray-400 bg-transparent border border-gray-200 rounded-md px-3 py-1 cursor-pointer">로그아웃</button>
+          <AuthUserBar variant="light" />
         </div>
       </div>
 

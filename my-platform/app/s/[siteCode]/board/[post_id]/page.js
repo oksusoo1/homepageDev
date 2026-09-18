@@ -1,8 +1,8 @@
 ﻿import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import SiteHeader from '@/components/SiteHeader'
-import ReviewSiteGate from '@/components/ReviewSiteGate'
-import { getPublicSite } from '@/lib/site-public'
+import SiteVisibilityGate from '@/components/SiteVisibilityGate'
+import { getVisitorSiteBundle } from '@/lib/site-public'
 import { sitePublicPath } from '@/lib/site-paths'
 import { supabase } from '@/lib/supabase'
 import { onlyActive } from '@/lib/use-flag'
@@ -19,8 +19,10 @@ async function getPost(postId) {
 
 export default async function PostDetailPage({ params }) {
   const { siteCode, post_id } = await params
-  const site = await getPublicSite(siteCode)
-  if (!site) notFound()
+  const bundle = await getVisitorSiteBundle(siteCode)
+  if (!bundle) notFound()
+  const { site, visibility } = bundle
+  if (visibility === 'hidden') notFound()
 
   const post = await getPost(post_id)
   if (!post) notFound()
@@ -74,13 +76,11 @@ export default async function PostDetailPage({ params }) {
     </div>
   )
 
-  if (site.status === 'review' || site.status === 'draft') {
-    return (
-      <ReviewSiteGate site={site} siteCode={siteCode}>
-        {body}
-      </ReviewSiteGate>
-    )
-  }
+  if (visibility === 'public') return body
 
-  return body
+  return (
+    <SiteVisibilityGate site={site} siteCode={siteCode} visibility={visibility}>
+      {body}
+    </SiteVisibilityGate>
+  )
 }

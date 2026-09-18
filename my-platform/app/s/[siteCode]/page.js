@@ -1,8 +1,9 @@
 ﻿import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { getVisitorSite } from '@/lib/site-public'
+import { getVisitorSiteBundle } from '@/lib/site-public'
 import { sitePublicPath } from '@/lib/site-paths'
-import ReviewSiteGate from '@/components/ReviewSiteGate'
+import SiteVisibilityGate from '@/components/SiteVisibilityGate'
+import SiteHeader from '@/components/SiteHeader'
 import { onlyActive } from '@/lib/use-flag'
 
 async function getRecentPosts(siteId) {
@@ -18,41 +19,45 @@ async function getRecentPosts(siteId) {
   return data || []
 }
 
+function HiddenSitePage({ cancelled }) {
+  return (
+    <div className="min-h-screen bg-surface flex items-center justify-center font-sans relative">
+      <div className="text-center px-5 py-10">
+        <div className="text-6xl mb-5">{cancelled ? '⏹' : '🔒'}</div>
+        <h1 className="text-2xl font-extrabold text-gray-900 mb-3">
+          {cancelled ? '서비스가 종료되었습니다' : '사이트 준비 중입니다'}
+        </h1>
+        <p className="text-[15px] text-gray-500 leading-relaxed mb-2">
+          {cancelled
+            ? <>이 사이트의 서비스가 해지되었습니다.<br />사이트 운영자에게 문의해 주세요.</>
+            : <>현재 이 사이트는 일시적으로 운영이 중단되었습니다.<br />사이트 운영자에게 문의해 주세요.</>}
+        </p>
+        <p className="text-xs text-gray-400 mt-6">Powered by MyPlatform</p>
+      </div>
+    </div>
+  )
+}
+
 export default async function CustomerSitePage({ params }) {
   const { siteCode } = await params
-  const site = await getVisitorSite(siteCode)
-  if (!site) notFound()
+  const bundle = await getVisitorSiteBundle(siteCode)
+  if (!bundle) notFound()
 
-  if (site.status === 'suspended' || site.status === 'cancelled') {
-    return (
-      <div className="min-h-screen bg-surface flex items-center justify-center font-sans relative">
-        <div className="text-center px-5 py-10">
-          <div className="text-6xl mb-5">{site.status === 'cancelled' ? '⏹' : '🔒'}</div>
-          <h1 className="text-2xl font-extrabold text-gray-900 mb-3">
-            {site.status === 'cancelled' ? '서비스가 종료되었습니다' : '사이트 준비 중입니다'}
-          </h1>
-          <p className="text-[15px] text-gray-500 leading-relaxed mb-2">
-            {site.status === 'cancelled'
-              ? <>이 사이트의 서비스가 해지되었습니다.<br />사이트 운영자에게 문의해 주세요.</>
-              : <>현재 이 사이트는 일시적으로 운영이 중단되었습니다.<br />사이트 운영자에게 문의해 주세요.</>}
-          </p>
-          <p className="text-xs text-gray-400 mt-6">Powered by MyPlatform</p>
-        </div>
-      </div>
-    )
+  const { site, visibility } = bundle
+
+  if (visibility === 'hidden') {
+    return <HiddenSitePage cancelled={site.status === 'cancelled'} />
   }
 
   const pageBody = await renderSiteBody(site, siteCode)
 
-  if (site.status === 'review' || site.status === 'draft') {
-    return (
-      <ReviewSiteGate site={site} siteCode={siteCode}>
-        {pageBody}
-      </ReviewSiteGate>
-    )
-  }
+  if (visibility === 'public') return pageBody
 
-  return pageBody
+  return (
+    <SiteVisibilityGate site={site} siteCode={siteCode} visibility={visibility}>
+      {pageBody}
+    </SiteVisibilityGate>
+  )
 }
 
 async function renderSiteBody(site, siteCode) {
@@ -89,26 +94,12 @@ async function renderSiteBody(site, siteCode) {
 
   return (
     <div className="min-h-screen bg-[#fafaf9] font-serif">
-      <header
-        className="flex items-center justify-between px-5 sm:px-10 h-16"
-        style={{ background: heroBg }}
-      >
-        <h1 className="text-lg sm:text-xl font-semibold text-white tracking-tight m-0">
-          {site.name}
-        </h1>
-        <nav className="flex gap-4 sm:gap-7">
-          {[
-            { label: '홈', href: sitePublicPath(siteCode) },
-            { label: '게시판', href: sitePublicPath(siteCode, '/board') },
-            { label: '문의', href: sitePublicPath(siteCode, '/contact') },
-          ].map(({ label, href }) => (
-            <Link key={label} href={href}
-              className="text-stone-300 no-underline text-xs sm:text-sm">
-              {label}
-            </Link>
-          ))}
-        </nav>
-      </header>
+      <SiteHeader
+        siteName={site.name}
+        siteCode={siteCode}
+        bgColor={heroBg}
+        activePage="home"
+      />
 
       <section
         className="text-white py-16 sm:py-24 md:py-28 px-5 sm:px-10 text-center"

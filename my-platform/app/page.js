@@ -1,26 +1,11 @@
 import Link from 'next/link'
+import LandingHeader from '@/components/LandingHeader'
 
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white font-sans">
 
-      {/* 헤더 */}
-      <header className="flex items-center justify-between px-6 md:px-12 h-16 border-b border-[#1f1f1f]">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-[15px] text-[#0a0a0a] font-black">
-            M
-          </div>
-          <span className="text-[15px] font-bold tracking-tight">MyPlatform</span>
-        </div>
-        <div className="flex gap-3 items-center">
-          <Link href="/login" className="text-[13px] text-gray-400 no-underline px-4 py-1.5 hidden sm:block">
-            로그인
-          </Link>
-          <Link href="/login?tab=signup" className="text-[13px] text-[#0a0a0a] bg-white no-underline px-4 py-1.5 rounded-lg font-bold">
-            무료 시작하기
-          </Link>
-        </div>
-      </header>
+      <LandingHeader />
 
       {/* 히어로 */}
       <section className="max-w-[900px] mx-auto px-6 md:px-12 pt-20 md:pt-[120px] pb-20 md:pb-[100px] text-center">

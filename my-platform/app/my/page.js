@@ -21,6 +21,7 @@ import { canCancelManagedIntake, cancelManagedIntake } from '@/lib/managed-flow'
 import DevFeeSummary from '@/components/DevFeeSummary'
 import { onlyActive } from '@/lib/use-flag'
 import { loadCommonCodes, codeLabel } from '@/lib/common-codes'
+import AuthUserBar from '@/components/AuthUserBar'
 
 export default function MySitesPage() {
   const router = useRouter()
@@ -652,14 +653,7 @@ export default function MySitesPage() {
           }}>M</div>
           <span style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>내 사이트</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <span style={{ fontSize: 13, color: '#6b7280' }}>{customer?.name}님</span>
-          <button onClick={handleLogout} style={{
-            fontSize: 12, color: '#9ca3af', background: 'none',
-            border: '1px solid #e5e7eb', borderRadius: 6,
-            padding: '5px 12px', cursor: 'pointer',
-          }}>로그아웃</button>
-        </div>
+        <AuthUserBar variant="light" />
       </div>
 
       {/* 콘텐츠 */}

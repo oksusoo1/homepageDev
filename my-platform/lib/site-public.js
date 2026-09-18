@@ -1,7 +1,9 @@
 import { supabase } from '@/lib/supabase'
 import { onlyActive } from '@/lib/use-flag'
+import { resolveSiteVisibility } from '@/lib/site-visibility'
 
-const VISITOR_STATUSES = ['published', 'suspended', 'review']
+/** 공개 URL에서 다룰 status (admin 제외) */
+const VISITOR_STATUSES = ['draft', 'review', 'published', 'suspended', 'cancelled']
 
 /**
  * URL 식별자(subdomain 또는 site_code)로 사이트 조회
@@ -23,9 +25,10 @@ export async function getSiteByCode(siteCode) {
 }
 
 /**
- * 방문자용 사이트 조회 (published / suspended / review)
+ * 방문자용 번들: site + inquiry + subscription + visibility
+ * draft/review 도 포함 (게이트에서 누가 볼지 결정)
  */
-export async function getVisitorSite(siteCode) {
+export async function getVisitorSiteBundle(siteCode) {
   const site = await getSiteByCode(siteCode)
   if (!site || !VISITOR_STATUSES.includes(site.status)) return null
 
@@ -43,10 +46,52 @@ export async function getVisitorSite(siteCode) {
     await supabase.from('sites')
       .update({ status: 'suspended', updated_at: new Date().toISOString() })
       .eq('site_id', site.site_id)
-    return { ...site, status: 'suspended' }
+    const suspended = { ...site, status: 'suspended' }
+    return {
+      site: suspended,
+      inquiry: null,
+      subscription: null,
+      ...resolveSiteVisibility(suspended),
+    }
   }
 
-  return site
+  let inquiry = null
+  if (site.inquiry_id) {
+    const { data } = await onlyActive(
+      supabase.from('inquiries').select('*').eq('inquiry_id', site.inquiry_id)
+    ).maybeSingle()
+    inquiry = data
+  }
+
+  let finalPending = false
+  if (inquiry?.customer_id && inquiry?.status === 'review' && !inquiry?.final_paid_at) {
+    const { data: otp } = await onlyActive(
+      supabase
+        .from('one_time_payments')
+        .select('payment_id')
+        .eq('customer_id', inquiry.customer_id)
+        .eq('type', 'dev_fee')
+        .eq('status', 'pending_confirm')
+        .limit(1)
+    )
+    finalPending = !!(otp && otp.length)
+  }
+
+  const { flowStep, visibility } = resolveSiteVisibility(site, {
+    inquiry,
+    subscription: sub,
+    finalPending,
+  })
+
+  return { site, inquiry, subscription: sub, flowStep, visibility }
+}
+
+/**
+ * 방문자용 사이트 조회 (호환)
+ */
+export async function getVisitorSite(siteCode) {
+  const bundle = await getVisitorSiteBundle(siteCode)
+  return bundle?.site || null
 }
 
 /** @deprecated getVisitorSite 사용 */

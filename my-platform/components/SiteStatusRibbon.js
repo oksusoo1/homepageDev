@@ -3,26 +3,45 @@
 import { usePathname } from 'next/navigation'
 
 /**
- * 방문자/미리보기용 사이트 상태 리본 (우측 상단 대각선, fixed)
- * published → 표시 없음
+ * 방문자용 공개 범위 리본
+ * published(공개) → 표시 없음
  */
 
 const RIBBON = {
-  review: {
-    label: '미공개',
+  producer: {
+    label: '제작 중',
+    hint: '제작자만',
+    bg: '#64748b',
+    fg: '#ffffff',
+  },
+  partial: {
+    label: '부분공개',
     hint: '본사·회원만',
     bg: '#f59e0b',
     fg: '#1c1917',
   },
+  hidden: {
+    label: '미공개',
+    hint: '이용 중단',
+    bg: '#dc2626',
+    fg: '#ffffff',
+  },
+  // status 호환 (구 호출)
   draft: {
-    label: '준비 중',
-    hint: '미배포',
+    label: '제작 중',
+    hint: '제작자만',
     bg: '#64748b',
     fg: '#ffffff',
   },
+  review: {
+    label: '부분공개',
+    hint: '본사·회원만',
+    bg: '#f59e0b',
+    fg: '#1c1917',
+  },
   suspended: {
-    label: '이용 정지',
-    hint: '공개 중단',
+    label: '미공개',
+    hint: '이용 중단',
     bg: '#dc2626',
     fg: '#ffffff',
   },
@@ -34,8 +53,9 @@ const RIBBON = {
   },
 }
 
-export default function SiteStatusRibbon({ status, position = 'top-right' }) {
-  const cfg = RIBBON[status]
+export default function SiteStatusRibbon({ status, visibility, position = 'top-right' }) {
+  const key = visibility || status
+  const cfg = RIBBON[key]
   if (!cfg) return null
 
   const isLeft = position === 'top-left'
@@ -55,7 +75,6 @@ export default function SiteStatusRibbon({ status, position = 'top-right' }) {
         pointerEvents: 'none',
       }}
     >
-      {/* 접힌 그림자 느낌 */}
       <div
         style={{
           position: 'absolute',
@@ -110,14 +129,15 @@ export default function SiteStatusRibbon({ status, position = 'top-right' }) {
 /**
  * /s/[siteCode] layout용 — admin 경로에서는 숨김
  */
-export function SiteStatusRibbonHost({ status }) {
+export function SiteStatusRibbonHost({ status, visibility }) {
   const pathname = usePathname() || ''
-  if (!status || !RIBBON[status]) return null
   if (pathname.includes('/admin')) return null
-  return <SiteStatusRibbon status={status} position="top-right" />
+  const key = visibility || status
+  if (!key || !RIBBON[key]) return null
+  return <SiteStatusRibbon status={status} visibility={visibility} position="top-right" />
 }
 
-/** status에 리본이 필요한지 */
-export function needsStatusRibbon(status) {
-  return Boolean(RIBBON[status])
+/** status/visibility에 리본이 필요한지 */
+export function needsStatusRibbon(status, visibility) {
+  return Boolean(RIBBON[visibility] || RIBBON[status])
 }

@@ -448,6 +448,7 @@ export default function CustomerPortal({ params }) {
       <SiteAdminShell
         site={site}
         siteCode={siteCode}
+        customer={customer}
         menuKey={menuKey}
         onMenuChange={selectMenu}
         openGroups={openGroups}

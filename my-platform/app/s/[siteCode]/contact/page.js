@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabase'
 import { onlyActive } from '@/lib/use-flag'
 import { sitePublicPath } from '@/lib/site-paths'
 import SiteHeader from '@/components/SiteHeader'
+import SiteVisibilityGate from '@/components/SiteVisibilityGate'
+import { resolveSiteVisibility } from '@/lib/site-visibility'
 
 /**
  * 사용자 문의 게시판
@@ -17,6 +19,7 @@ import SiteHeader from '@/components/SiteHeader'
 export default function ContactPage({ params }) {
   const { siteCode } = use(params)
   const [site, setSite] = useState(null)
+  const [visibility, setVisibility] = useState('public')
   const [messages, setMessages] = useState([])
   const [loadingList, setLoadingList] = useState(true)
   const [form, setForm] = useState({
@@ -33,7 +36,7 @@ export default function ContactPage({ params }) {
     const { data: siteData } = await onlyActive(
       supabase
         .from('sites')
-        .select('site_id, name')
+        .select('*')
         .eq('subdomain', siteCode)
     ).maybeSingle()
 
@@ -42,6 +45,25 @@ export default function ContactPage({ params }) {
       return
     }
     setSite(siteData)
+
+    let inquiry = null
+    if (siteData.inquiry_id) {
+      const { data: inq } = await onlyActive(
+        supabase.from('inquiries').select('*').eq('inquiry_id', siteData.inquiry_id)
+      ).maybeSingle()
+      inquiry = inq
+    }
+    const { data: sub } = await onlyActive(
+      supabase
+        .from('subscriptions')
+        .select('subscription_id, status')
+        .eq('site_id', siteData.site_id)
+    ).maybeSingle()
+    const { visibility: vis } = resolveSiteVisibility(siteData, {
+      inquiry,
+      subscription: sub,
+    })
+    setVisibility(vis)
 
     const { data } = await onlyActive(
       supabase
@@ -108,7 +130,7 @@ export default function ContactPage({ params }) {
 
   const siteName = site?.name || siteCode
 
-  return (
+  const pageBody = (
     <div style={{ minHeight: '100vh', background: '#fafaf9', fontFamily: "'Georgia', serif" }}>
       <SiteHeader siteName={siteName} siteCode={siteCode} activePage="contact" />
 
@@ -297,6 +319,14 @@ export default function ContactPage({ params }) {
         </section>
       </div>
     </div>
+  )
+
+  if (!site || visibility === 'public') return pageBody
+
+  return (
+    <SiteVisibilityGate site={site} siteCode={siteCode} visibility={visibility}>
+      {pageBody}
+    </SiteVisibilityGate>
   )
 }
 
