@@ -94,16 +94,15 @@ export async function POST(req) {
     if (siteId) {
       await supabase.from('subscriptions').update({
         payment_method: 'card',
-        status: 'active',
         cancelled_at: null,
         cancels_at: null,
         updated_at: now.toISOString(),
         ...(isResubscription && { next_billing_date: newNextBillingDate }),
       }).eq('site_id', siteId)
 
-      // 재구독 시 사이트도 published로 복원
+      // 재구독 시 사이트도 subscribed로 복원
       if (isResubscription) {
-        await supabase.from('sites').update({ status: 'published', deploy_status: 'live' }).eq('site_id', siteId)
+        await supabase.from('sites').update({ status: 'subscribed', updated_at: now.toISOString() }).eq('site_id', siteId)
       }
     }
 

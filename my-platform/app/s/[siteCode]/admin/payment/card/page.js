@@ -107,12 +107,6 @@ function CardRegisterForm() {
     // redirect=deploy: 카드 등록 완료 후 자동 배포 (trial 구독은 deploySite에서 생성)
     if (redirectParam === 'deploy' && site && customer) {
       await deploySite(site.site_id, customer.customer_id, subscription, site, 'card')
-      // 루트 B: inquiry가 연결돼 있으면 → done으로 변경
-      if (site.inquiry_id) {
-        await supabase.from('inquiries')
-          .update({ status: 'done', updated_at: new Date().toISOString() })
-          .eq('inquiry_id', site.inquiry_id)
-      }
       router.push(siteAdminPath(siteCode))
       return
     }
@@ -131,16 +125,15 @@ function CardRegisterForm() {
 
         await supabase.from('subscriptions').update({
           payment_method: 'card',
-          status: 'active',
           cancelled_at: null,
           cancels_at: null,
           updated_at: now.toISOString(),
           next_billing_date: newNextBillingDate,
         }).eq('site_id', siteId)
 
-        // 재구독 시 사이트도 published로 복구
+        // 재구독 시 사이트도 subscribed로 복구
         if (isResubscription) {
-          await supabase.from('sites').update({ status: 'published', deploy_status: 'live' }).eq('site_id', siteId)
+          await supabase.from('sites').update({ status: 'subscribed', updated_at: now.toISOString() }).eq('site_id', siteId)
         }
 
         // 즉시 결제 처리 (재구독 시 이번 달치 결제)

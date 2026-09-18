@@ -61,10 +61,6 @@ export function codesInGroup(groupCode) {
 /** 뱃지 색 (표시용 — DB 아님) */
 const COLORS = {
   BUILD_TYPE: { self: '#60a5fa', managed: '#f59e0b' },
-  SITE_STATUS: {
-    draft: '#f59e0b', review: '#8b5cf6', published: '#22c55e',
-    suspended: '#ef4444', cancelled: '#6b7280',
-  },
   SUB_STATUS: {
     pending: '#64748b', trial: '#f59e0b', active: '#22c55e',
     paused: '#f59e0b', cancelled: '#6b7280',
@@ -73,13 +69,9 @@ const COLORS = {
   OTP_TYPE: { domain_setup: '#8b5cf6', dev_fee: '#f59e0b', extra: '#6b7280' },
   OTP_STATUS: { unpaid: '#64748b', pending_confirm: '#f59e0b', paid: '#22c55e' },
   BILLING_STATUS: { unpaid: '#f59e0b', paid: '#22c55e', overdue: '#ef4444' },
-  INQUIRY_STATUS: {
-    received: '#60a5fa', reviewing: '#a78bfa', building: '#f59e0b',
-    review: '#f472b6', approved: '#34d399', done: '#22c55e',
-  },
   FLOW_STEP: {
     intake: '#b45309', deposit: '#b45309',
-    building: '#2563eb', done_build: '#2563eb',
+    building: '#2563eb',
     preview: '#b45309', balance: '#b45309',
     pay_method: '#2563eb', trial: '#2563eb',
     subscribed: '#2563eb', suspended: '#2563eb',
@@ -87,9 +79,6 @@ const COLORS = {
   TICKET_STATUS: { open: '#f59e0b', in_progress: '#60a5fa', resolved: '#22c55e' },
   TICKET_PRIORITY: { low: '#60a5fa', normal: '#60a5fa', high: '#f59e0b', urgent: '#ef4444' },
   CUSTOMER_STATUS: { active: '#22c55e', suspended: '#f59e0b', withdrawn: '#ef4444' },
-  DEPLOY_STATUS: {
-    pending: '#64748b', building: '#f59e0b', live: '#22c55e', failed: '#ef4444',
-  },
 }
 
 export function codeColor(groupCode, code, fallback = '#6b7280') {

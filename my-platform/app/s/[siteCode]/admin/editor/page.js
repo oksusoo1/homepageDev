@@ -319,7 +319,7 @@ export default function EditorPage({ params }) {
     )
 
     if (!error) {
-      setSite(prev => ({ ...prev, status: 'published', deploy_status: 'live', trial_ends_at: trialEndsAt }))
+      setSite(prev => ({ ...prev, status: 'trial', trial_ends_at: trialEndsAt }))
       setShowDeployModal(true)
     }
     setDeploying(false)
@@ -454,7 +454,7 @@ export default function EditorPage({ params }) {
           </button>
           {isStaffEditor ? (
             <span className="hidden sm:inline text-[11px] text-gray-500">검수는 본사「제작 문의」</span>
-          ) : site.deploy_status !== 'live' ? (
+          ) : !(site.trial_started_at || ['trial', 'subscribed'].includes(site.status)) ? (
             <button onClick={handleDeploy} disabled={deploying} className="px-3 sm:px-5 py-1.5 bg-teal-600 text-white border-none rounded-lg text-[13px] font-bold cursor-pointer disabled:opacity-70">
               {deploying ? '배포 중...' : '🚀 배포'}
             </button>

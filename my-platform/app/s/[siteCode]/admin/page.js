@@ -7,6 +7,7 @@ import { requireAuthUser } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
 import { deploySite as deployAction } from '@/lib/deploy'
 import { getBillingReadiness, paymentMethodUrl, getBankAccountText } from '@/lib/billing'
+import { isPaidSubscription, getSubscriptionUiFlags } from '@/lib/subscription-life'
 import {
   canStartManagedService,
   managedBlockedMessage,
@@ -151,8 +152,8 @@ export default function CustomerPortal({ params }) {
   }
 
   async function handleDeploy() {
-    if (site.build_type === 'managed' && !canStartManagedService(inquiry)) {
-      alert(managedBlockedMessage(inquiry))
+    if (site.build_type === 'managed' && !canStartManagedService(inquiry, site)) {
+      alert(managedBlockedMessage(inquiry, site))
       return
     }
 
@@ -180,7 +181,11 @@ export default function CustomerPortal({ params }) {
     )
 
     if (!error) {
-      setSite(prev => ({ ...prev, status: 'published', deploy_status: 'live', trial_ends_at: trialEndsAt }))
+      setSite(prev => ({
+        ...prev,
+        status: requireBillingSetup ? 'pay_method' : 'trial',
+        trial_ends_at: trialEndsAt,
+      }))
       if (requireBillingSetup) {
         router.push(paymentMethodUrl(siteCode, 'deploy'))
       } else {
@@ -233,10 +238,7 @@ export default function CustomerPortal({ params }) {
     )
     const siteIds = allSites?.map(s => s.site_id) || []
 
-    const isActiveSubscription =
-      subscription?.status === 'active' &&
-      subscription?.payment_method === 'card' &&
-      subscription?.next_billing_date
+    const isActiveSubscription = isPaidSubscription(site, subscription)
 
     if (isActiveSubscription) {
       // ── 구독 중 탈퇴: 잔여 기간(next_billing_date) 보장 ──
@@ -248,7 +250,7 @@ export default function CustomerPortal({ params }) {
           .update({ cancelled_at: now.toISOString(), cancels_at: subscription.next_billing_date })
           .in('site_id', siteIds)
       }
-      // 고객에 탈퇴 예정일 기록 (status는 active 유지 → 잔여 기간 로그인 가능)
+      // 고객에 탈퇴 예정일 기록 (잔여 기간 로그인 가능)
       await supabase.from('customers')
         .update({ withdraw_at: withdrawAt })
         .eq('customer_id', customer.customer_id)
@@ -259,10 +261,10 @@ export default function CustomerPortal({ params }) {
       // ── Trial 중 또는 구독 없음: 즉시 탈퇴 ──
       if (siteIds.length) {
         await supabase.from('subscriptions')
-          .update({ status: 'cancelled', cancelled_at: now.toISOString(), cancels_at: null })
+          .update({ cancelled_at: now.toISOString(), cancels_at: null })
           .in('site_id', siteIds)
         await supabase.from('sites')
-          .update({ status: 'cancelled' })
+          .update({ status: 'suspended' })
           .in('site_id', siteIds)
       }
       await supabase.from('customers')
@@ -306,7 +308,7 @@ export default function CustomerPortal({ params }) {
 
   const deployPanel = (() => {
     // 서비스/배포 이미 시작됨 → 운영 중 (inquiry가 done이 되어도 검수 안내로 가면 안 됨)
-    const alreadyLive = !!(site.trial_started_at || site.deploy_status === 'live')
+    const alreadyLive = !!(site.trial_started_at || ['trial', 'subscribed'].includes(site.status))
     if (alreadyLive) {
       return (
         <div style={{ ...css.card, border: '1px solid #d1fae5', background: '#f0fdf4' }}>
@@ -325,12 +327,12 @@ export default function CustomerPortal({ params }) {
     }
 
     // managed: 잔금·승인 전 → 안내만
-    if (site.build_type === 'managed' && !canStartManagedService(inquiry)) {
+    if (site.build_type === 'managed' && !canStartManagedService(inquiry, site)) {
       return (
         <div style={{ ...css.card, border: '1px solid #e9d5ff', background: '#faf5ff' }}>
           <h3 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 700, color: '#6b21a8' }}>검수·잔금 단계</h3>
           <p style={{ margin: 0, fontSize: 13, color: '#7c3aed' }}>
-            {managedBlockedMessage(inquiry) || '본사 검수가 진행 중입니다.'}
+            {managedBlockedMessage(inquiry, site) || '본사 검수가 진행 중입니다.'}
           </p>
         </div>
       )
@@ -498,7 +500,7 @@ export default function CustomerPortal({ params }) {
             {[
               { label: '플랫폼 주소', value: sitePublicHostname(site.subdomain) },
               { label: '커스텀 도메인', value: site.domain || '미연결' },
-              { label: '사이트 상태', value: codeLabel('SITE_STATUS', site.status) },
+              { label: '사이트 상태', value: codeLabel('FLOW_STEP', site.status) },
               { label: '개발 방식', value: codeLabel('BUILD_TYPE', site.build_type) },
               { label: '결제 방식', value: subscription?.payment_method
                 ? codeLabel('PAYMENT_METHOD', subscription.payment_method)
@@ -604,24 +606,17 @@ export default function CustomerPortal({ params }) {
                   사이트 배포 후 구독이 시작됩니다.
                 </p>
               ) : (() => {
-                const isTrial = subscription.status === 'trial'
-                const isPendingCancel = !!subscription.cancelled_at && !!subscription.cancels_at && subscription.status !== 'cancelled'
-                const isCancelled = subscription.status === 'cancelled'
+                const { isTrial, isPendingCancel, isCancelled, canCancel, statusText } = getSubscriptionUiFlags(site, subscription)
                 const trialDaysLeft = site?.trial_ends_at
                   ? Math.ceil((new Date(site.trial_ends_at) - new Date()) / (1000 * 60 * 60 * 24))
                   : null
-                const statusText = isPendingCancel
-                  ? '해지 예정'
-                  : isCancelled
-                    ? codeLabel('SUB_STATUS', 'cancelled')
-                    : codeLabel('SUB_STATUS', subscription.status)
                 const rows = [
                   { label: '구독 상태', value: statusText },
                   ...(isTrial && trialDaysLeft !== null ? [{ label: '체험 만료일', value: `${new Date(site.trial_ends_at).toLocaleDateString('ko-KR')} (D-${Math.max(trialDaysLeft, 0)})` }] : []),
                   ...(isPendingCancel ? [{ label: '해지 적용일', value: `${new Date(subscription.cancels_at).toLocaleDateString('ko-KR')} (이날까지 이용 가능)` }] : []),
                   { label: '월 구독료', value: `${subscription.amount.toLocaleString()}원` },
                   { label: '결제 방식', value: codeLabel('PAYMENT_METHOD', subscription.payment_method) },
-                  ...(!isCancelled && !isPendingCancel && ['trial', 'active'].includes(subscription.status)
+                  ...(!isCancelled && !isPendingCancel
                     ? [{ label: '다음 결제일', value: subscription.next_billing_date ? new Date(subscription.next_billing_date).toLocaleDateString('ko-KR') : '-' }]
                     : []),
                 ]
@@ -651,7 +646,7 @@ export default function CustomerPortal({ params }) {
                       </div>
                     ))}
                     <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid #f3f4f6', display: 'flex', justifyContent: 'flex-end' }}>
-                      {!isCancelled && !isPendingCancel && subscription.status === 'active' && (
+                      {canCancel && (
                         <button onClick={handleCancelSubscription}
                           style={{ fontSize: 12, color: '#ef4444', background: 'none', border: '1px solid #fecaca', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}>
                           구독 해지
@@ -752,7 +747,7 @@ export default function CustomerPortal({ params }) {
         )}
 
         {menuKey === 'billing.account' && (() => {
-          const isPendingCancel = !!subscription?.cancelled_at && !!subscription?.cancels_at && subscription?.status !== 'cancelled'
+          const isPendingCancel = getSubscriptionUiFlags(site, subscription).isPendingCancel
           if (isPendingCancel) {
             return (
               <div style={{ ...css.card, border: '1px solid #e5e7eb', background: '#f9fafb' }}>

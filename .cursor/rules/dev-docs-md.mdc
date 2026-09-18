@@ -1,0 +1,32 @@
+---
+description: 개발 명세는 my-platform/docs 에 Markdown 3종만
+alwaysApply: true
+---
+
+# 개발 문서 작성
+
+## 현행 문서 (이 3개만)
+
+| 문서 | 경로 |
+|------|------|
+| **플로우** | `my-platform/docs/플로우.md` |
+| **ERD** | `my-platform/docs/db/ERD.md` |
+| **테이블명세** | `my-platform/docs/db/테이블명세.md` |
+
+- 신규는 Markdown만
+- `/platform` 개발문서 목록은 위 3개만 보이게 (`sql/` · `tools/` 제외)
+- 버전 목록·구 HTML·도식 별도 파일 **추가하지 않음** — 내용이 바뀌면 **해당 파일만** 갱신
+
+## 플로우·스키마가 바뀌면
+
+1. 위 3개 중 해당 파일 수정 (필요하면 셋 다)
+2. 마이그레이션 SQL은 `docs/db/sql/migrations/` 에 추가
+3. 전체 dump는 `docs/db/sql/schema/` 갱신
+4. `flow-change-checklist` 전수
+
+## 하지 말 것
+
+- 같은 주제 문서를 버전 파일로 무한 증식
+- HTML로 새 명세 작성
+- docs 없이 코드만 바꾸고 “문서화는 나중에”
+- `작업내역/`에 SSOT·스키마 본문만 길게 쓰기

@@ -1,60 +1,59 @@
 /**
- * 본사 대리(managed) 제작·구독 플로우 (v1.3.2)
- *
- * 제작(inquiries) → 검수(review) → 잔금(approved) → 서비스 시작 → trial/active
- * 월 구독·next_billing_date는 서비스 시작 시점에만 생성
+ * 본사 대리(managed) 제작·구독 플로우
+ * 진도 SSOT = sites.status (FLOW_STEP)
  */
 
 import { onlyActive, softDelete, USE_FLAG_OFF } from '@/lib/use-flag'
+import { isSiteFlowStep } from '@/lib/site-flow'
 
 export function isManagedSite(site) {
   return site?.build_type === 'managed'
 }
 
-/** 잔금 확인 후 월 구독·결제 수단 등록 가능 */
-export function canStartManagedService(inquiry) {
-  return !!(inquiry?.final_paid_at && inquiry?.status === 'approved')
+/** 잔금 확인 후 · sites.status 가 pay_method 이상 */
+export function canStartManagedService(inquiry, site) {
+  if (!inquiry?.final_paid_at) return false
+  const st = site?.status
+  return isSiteFlowStep(st) && ['pay_method', 'trial', 'subscribed'].includes(st)
 }
 
-/** 결제 수단 선택/등록 화면 진입 가능 여부 */
 export function canAccessPaymentSetup(site, inquiry) {
   if (!isManagedSite(site)) return true
-  return canStartManagedService(inquiry)
+  return canStartManagedService(inquiry, site)
 }
 
-/** 고객 포털 「서비스 시작」 버튼 노출 */
 export function managedNeedsGoLive(site, inquiry) {
   if (!isManagedSite(site)) return false
-  if (!canStartManagedService(inquiry)) return false
+  if (!canStartManagedService(inquiry, site)) return false
   if (site.trial_started_at) return false
-  return site.status === 'review' || site.status === 'published'
+  return site.status === 'pay_method'
 }
 
 export function isInReviewPhase(site) {
-  return site?.status === 'review'
+  return site?.status === 'preview' || site?.status === 'balance'
 }
 
-export function managedBlockedMessage(inquiry) {
+export function managedBlockedMessage(inquiry, site) {
   if (!inquiry) return '본사 제작 문의가 연결되지 않았습니다.'
   if (!inquiry.final_paid_at) return '잔금 확인 후 서비스를 시작할 수 있습니다.'
-  if (inquiry.status !== 'approved') return '승인 완료 후 서비스를 시작할 수 있습니다.'
+  if (!canStartManagedService(inquiry, site)) {
+    return '카드/계좌 등록 단계가 되면 서비스를 시작할 수 있습니다.'
+  }
   return null
 }
 
-/**
- * 대리 접수 취소 가능 — 선금 확인 전만 (고객·직원 공통)
- */
-export function canCancelManagedIntake(inquiry) {
+/** 선금 확인 전만 취소 — down_paid_at 또는 flow>=building 이면 불가 */
+export function canCancelManagedIntake(inquiry, site) {
   if (!inquiry?.inquiry_id) return false
   if (inquiry.down_paid_at) return false
+  const st = site?.status
+  if (isSiteFlowStep(st)) {
+    const idx = ['intake', 'deposit', 'building', 'preview', 'balance', 'pay_method', 'trial', 'subscribed', 'suspended']
+    return idx.indexOf(st) <= idx.indexOf('deposit')
+  }
   return true
 }
 
-/**
- * 대리 접수 취소: 문의·연결 사이트·구독·1회성결제 soft delete (use_flag=0)
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase
- * @param {string} inquiryId
- */
 export async function cancelManagedIntake(supabase, inquiryId) {
   if (!inquiryId) throw new Error('inquiry_id가 필요합니다.')
 
@@ -69,7 +68,7 @@ export async function cancelManagedIntake(supabase, inquiryId) {
   if (inq.down_paid_at) throw new Error('선금 확인 후에는 접수 취소할 수 없습니다.')
 
   const { data: linkedSites, error: siteErr } = await onlyActive(
-    supabase.from('sites').select('site_id').eq('inquiry_id', inquiryId)
+    supabase.from('sites').select('site_id, status').eq('inquiry_id', inquiryId)
   )
   if (siteErr) throw new Error(siteErr.message)
 
@@ -78,7 +77,7 @@ export async function cancelManagedIntake(supabase, inquiryId) {
 
   for (const siteId of siteIds) {
     const { error: sErr } = await supabase.from('sites').update({
-      status: 'cancelled',
+      status: 'suspended',
       use_flag: USE_FLAG_OFF,
       updated_at: now,
     }).eq('site_id', siteId)

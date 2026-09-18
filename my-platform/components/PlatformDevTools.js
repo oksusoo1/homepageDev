@@ -18,9 +18,7 @@ function opts(group, fallbackCodes) {
 }
 
 const FALLBACK = {
-  SITE_STATUS: ['draft', 'review', 'published', 'suspended', 'cancelled'],
-  DEPLOY_STATUS: ['pending', 'building', 'live', 'failed'],
-  INQUIRY_STATUS: ['received', 'reviewing', 'building', 'review', 'approved', 'done'],
+  FLOW_STEP: ['intake', 'deposit', 'building', 'preview', 'balance', 'pay_method', 'trial', 'subscribed', 'suspended'],
   SUB_STATUS: ['pending', 'trial', 'active', 'paused', 'cancelled'],
   OTP_STATUS: ['unpaid', 'pending_confirm', 'paid'],
 }
@@ -149,15 +147,15 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
     if (!site) throw new Error('사이트를 선택하세요.')
 
     if (step === 'preview') {
-      await updateSite({ status: 'review', deploy_status: 'live', trial_started_at: null, trial_ends_at: null })
-      if (inquiry) await updateInquiry({ status: 'review', final_paid_at: null })
+      await updateSite({ status: 'preview', trial_started_at: null, trial_ends_at: null })
+      if (inquiry) await updateInquiry({ final_paid_at: null })
       await deleteDevFeeOtps()
       await deleteBillingThenSub()
     }
 
     if (step === 'deposit_pending') {
-      await updateSite({ status: 'review', deploy_status: 'live', trial_started_at: null, trial_ends_at: null })
-      if (inquiry) await updateInquiry({ status: 'review', final_paid_at: null })
+      await updateSite({ status: 'balance', trial_started_at: null, trial_ends_at: null })
+      if (inquiry) await updateInquiry({ final_paid_at: null })
       const existing = otps.find(o => o.type === 'dev_fee')
       if (existing) {
         const { error } = await supabase.from('one_time_payments').update({
@@ -181,8 +179,8 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
     }
 
     if (step === 'ready_golive') {
-      await updateSite({ status: 'review', deploy_status: 'live', trial_started_at: null, trial_ends_at: null })
-      if (inquiry) await updateInquiry({ status: 'approved', final_paid_at: now })
+      await updateSite({ status: 'pay_method', trial_started_at: null, trial_ends_at: null })
+      if (inquiry) await updateInquiry({ final_paid_at: now })
       const existing = otps.find(o => o.type === 'dev_fee')
       if (existing) {
         const { error } = await supabase.from('one_time_payments').update({ status: 'paid', paid_at: now }).eq('payment_id', existing.payment_id)
@@ -203,11 +201,9 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
     }
 
     if (step === 'building') {
-      // 정방향: 선금 확인 → building + down_paid_at 설정. 선금은 유지, 잔금만 되돌림.
-      await updateSite({ status: 'draft', deploy_status: 'pending', trial_started_at: null, trial_ends_at: null })
-      if (inquiry) {
-        await updateInquiry({ status: 'building', final_paid_at: null })
-      }
+      // 정방향: 선금 확인 → building + down_paid_at. 선금 유지, 잔금만 되돌림.
+      await updateSite({ status: 'building', trial_started_at: null, trial_ends_at: null })
+      if (inquiry) await updateInquiry({ final_paid_at: null })
       await deleteDevFeeOtps()
       await deleteBillingThenSub()
     }
@@ -217,46 +213,45 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
     {
       key: 'building',
       title: '제작중',
-      desc: '사이트 draft · 문의 building · 선금 유지 · 잔금/구독 없음',
+      desc: 'sites.status=building · 선금 유지 · 잔금/구독 없음',
       db: [
-        '[sites] status=draft, deploy_status=pending, trial_started_at=NULL, trial_ends_at=NULL',
-        '[inquiries] 있으면 → status=building, final_paid_at=NULL (down_paid_at 유지)',
-        '[one_time_payments] 이 사이트 dev_fee → use_flag=0 (소프트삭제)',
-        '[billing_history] 구독 있으면 DELETE',
-        '[subscriptions] 구독 있으면 DELETE',
+        '[sites] status=building, trial_started_at=NULL, trial_ends_at=NULL',
+        '[inquiries] final_paid_at=NULL (down_paid_at 유지)',
+        '[one_time_payments] 이 사이트 dev_fee → use_flag=0',
+        '[billing_history]/[subscriptions] 있으면 DELETE',
       ].join('\n'),
     },
     {
       key: 'preview',
-      title: '미리보기·잔금',
+      title: '검토',
       desc: '검수중, 고객이 잔금 결제하기 전',
       db: [
-        '[sites] status=review, deploy_status=live, trial_started_at=NULL, trial_ends_at=NULL',
-        '[inquiries] 있으면 → status=review, final_paid_at=NULL (down_paid_at 유지)',
-        '[one_time_payments] 이 사이트 dev_fee → use_flag=0 (소프트삭제)',
-        '[billing_history] / [subscriptions] 있으면 DELETE',
+        '[sites] status=preview, trial_started_at=NULL, trial_ends_at=NULL',
+        '[inquiries] final_paid_at=NULL (down_paid_at 유지)',
+        '[one_time_payments] 이 사이트 dev_fee → use_flag=0',
+        '[billing_history]/[subscriptions] 있으면 DELETE',
       ].join('\n'),
     },
     {
       key: 'deposit_pending',
-      title: '입금확인대기',
+      title: '잔금(입금확인대기)',
       desc: '고객이 잔금 입금 신청한 직후',
       db: [
-        '[sites] status=review, deploy_status=live, trial_started_at=NULL, trial_ends_at=NULL',
-        '[inquiries] 있으면 → status=review, final_paid_at=NULL',
-        '[one_time_payments] 이 사이트 dev_fee → status=pending_confirm, paid_at=NULL (없으면 INSERT)',
-        '[billing_history] / [subscriptions] 있으면 DELETE',
+        '[sites] status=balance, trial_started_at=NULL, trial_ends_at=NULL',
+        '[inquiries] final_paid_at=NULL',
+        '[one_time_payments] dev_fee → status=pending_confirm',
+        '[billing_history]/[subscriptions] 있으면 DELETE',
       ].join('\n'),
     },
     {
       key: 'ready_golive',
-      title: '서비스 시작 준비',
+      title: '카드/계좌 등록',
       desc: '잔금 확인 완료. 구독 등록 전',
       db: [
-        '[sites] status=review, deploy_status=live, trial_started_at=NULL, trial_ends_at=NULL',
-        '[inquiries] 있으면 → status=approved, final_paid_at=NOW()',
-        '[one_time_payments] 이 사이트 dev_fee → status=paid, paid_at=NOW() (없으면 INSERT)',
-        '[billing_history] / [subscriptions] 있으면 DELETE',
+        '[sites] status=pay_method, trial_started_at=NULL, trial_ends_at=NULL',
+        '[inquiries] final_paid_at=NOW()',
+        '[one_time_payments] dev_fee → status=paid',
+        '[billing_history]/[subscriptions] 있으면 DELETE',
       ].join('\n'),
     },
   ]
@@ -266,9 +261,9 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
       <div style={{ ...cardStyle, border: '1px solid #f59e0b44', background: '#1a1408' }}>
         <div style={{ fontSize: 12, fontWeight: 800, color: '#f59e0b', marginBottom: 8 }}>개발 전용 · 테이블 / 컬럼</div>
         <div style={{ fontSize: 11, color: '#94a3b8', ...mono, lineHeight: 1.7, whiteSpace: 'pre-line' }}>
-{`sites                  status, deploy_status, trial_started_at, trial_ends_at
-inquiries              status, down_paid_at, final_paid_at, dev_fee_total
-subscriptions          status, payment_method, next_billing_date
+{`sites                  status(=FLOW_STEP), trial_started_at, trial_ends_at
+inquiries              down_paid_at, final_paid_at, dev_fee_total
+subscriptions          payment_method, next_billing_date, cancelled_at
 one_time_payments      status, amount, paid_at, type, note
 billing_history        (구독 삭제 시 함께 삭제)`}
         </div>
@@ -280,7 +275,7 @@ billing_history        (구독 삭제 시 함께 삭제)`}
             <option value="">— 선택 —</option>
             {sites.map(s => (
               <option key={s.site_id} value={s.site_id}>
-                {s.name} ({s.subdomain}) · {devOpt('BUILD_TYPE', s.build_type)} · {devOpt('SITE_STATUS', s.status)}
+                {s.name} ({s.subdomain}) · {devOpt('BUILD_TYPE', s.build_type)} · {devOpt('FLOW_STEP', s.status)}
               </option>
             ))}
           </select>
@@ -327,18 +322,12 @@ billing_history        (구독 삭제 시 함께 삭제)`}
             <h3 style={{ margin: '0 0 6px', fontSize: 14, color: '#f1f5f9' }}>
               테이블 <span style={{ color: '#60a5fa' }}>sites</span>
             </h3>
-            <Hint>{`sites.status → 검수/운영/정지
-sites.deploy_status → URL 배포 여부
+            <Hint>{`sites.status = FLOW_STEP (진도·공개 SSOT)
 sites.trial_started_at / sites.trial_ends_at → 체험`}</Hint>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <Field label={<>sites.status<Cur name="status" value={site.status} /></>}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+              <Field label={<>sites.status (FLOW)<Cur name="status" value={site.status} /></>}>
                 <select value={site.status} onChange={e => run(() => updateSite({ status: e.target.value }), 'UPDATE sites.status')} style={selectStyle}>
-                  {opts('SITE_STATUS', FALLBACK.SITE_STATUS).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </Field>
-              <Field label={<>sites.deploy_status<Cur name="deploy_status" value={site.deploy_status} /></>}>
-                <select value={site.deploy_status} onChange={e => run(() => updateSite({ deploy_status: e.target.value }), 'UPDATE sites.deploy_status')} style={selectStyle}>
-                  {opts('DEPLOY_STATUS', FALLBACK.DEPLOY_STATUS).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  {opts('FLOW_STEP', FALLBACK.FLOW_STEP).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </Field>
             </div>
@@ -355,31 +344,12 @@ sites.trial_started_at / sites.trial_ends_at → 체험`}</Hint>
             <h3 style={{ margin: '0 0 6px', fontSize: 14, color: '#f1f5f9' }}>
               테이블 <span style={{ color: '#60a5fa' }}>inquiries</span> {inquiry ? '' : '(없음)'}
             </h3>
-            <Hint>{`inquiries.status → /my 진행 단계
+            <Hint>{`진도는 sites.status. 문의는 금액·납부일만.
 inquiries.down_paid_at → 선금 확인일
-inquiries.final_paid_at → 잔금 확인일 (/my 「남은 잔금 완료」)
+inquiries.final_paid_at → 잔금 확인일
 inquiries.dev_fee_total → 총 개발비`}</Hint>
             {inquiry ? (
               <>
-                <Field label={<>inquiries.status<Cur name="status" value={inquiry.status} /></>}>
-                  <select
-                    value={inquiry.status}
-                    onChange={e => {
-                      const next = e.target.value
-                      const patch = { status: next }
-                      if (['received', 'reviewing', 'building'].includes(next)) {
-                        patch.down_paid_at = null
-                        patch.final_paid_at = null
-                      } else if (next === 'review') {
-                        patch.final_paid_at = null
-                      }
-                      run(() => updateInquiry(patch), 'UPDATE inquiries.status (+ 선금/잔금일)')
-                    }}
-                    style={selectStyle}
-                  >
-                    {opts('INQUIRY_STATUS', FALLBACK.INQUIRY_STATUS).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </Field>
                 <div style={{ fontSize: 11, color: '#64748b', marginBottom: 10, ...mono }}>
                   inquiries.down_paid_at = {inquiry.down_paid_at || 'NULL'}
                   {' · '}
@@ -391,7 +361,7 @@ inquiries.dev_fee_total → 총 개발비`}</Hint>
                   <button disabled={busy} onClick={() => run(() => updateInquiry({ down_paid_at: null }), 'UPDATE inquiries.down_paid_at=NULL')} style={ghostBtn}>
                     UPDATE inquiries.down_paid_at = NULL
                   </button>
-                  <button disabled={busy} onClick={() => run(() => updateInquiry({ final_paid_at: null, status: 'review' }), 'UPDATE inquiries.final_paid_at=NULL, status=review')} style={ghostBtn}>
+                  <button disabled={busy} onClick={() => run(() => updateInquiry({ final_paid_at: null }), 'UPDATE inquiries.final_paid_at=NULL')} style={ghostBtn}>
                     UPDATE inquiries.final_paid_at = NULL
                   </button>
                 </div>
@@ -405,14 +375,18 @@ inquiries.dev_fee_total → 총 개발비`}</Hint>
             <h3 style={{ margin: '0 0 6px', fontSize: 14, color: '#f1f5f9' }}>
               테이블 <span style={{ color: '#60a5fa' }}>subscriptions</span> {sub ? '' : '(없음)'}
             </h3>
-            <Hint>{`subscriptions.status → trial / active / paused / cancelled
+            <Hint>{`청구 대상 = sites.status trial|subscribed + cancelled_at NULL
 DELETE 시 billing_history 도 함께 삭제`}</Hint>
             {sub ? (
               <>
-                <Field label={<>subscriptions.status<Cur name="status" value={sub.status} /></>}>
-                  <select value={sub.status} onChange={e => run(() => updateSub({ status: e.target.value }), 'UPDATE subscriptions.status')} style={selectStyle}>
-                    {opts('SUB_STATUS', FALLBACK.SUB_STATUS).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+                <Field label={<>cancelled_at<Cur name="cancelled_at" value={sub.cancelled_at} /></>}>
+                  <span style={{ fontSize: 12, color: '#94a3b8' }}>{sub.cancelled_at || 'NULL'}</span>
+                </Field>
+                <Field label={<>cancels_at<Cur name="cancels_at" value={sub.cancels_at} /></>}>
+                  <span style={{ fontSize: 12, color: '#94a3b8' }}>{sub.cancels_at || 'NULL'}</span>
+                </Field>
+                <Field label={<>next_billing_date<Cur name="next_billing_date" value={sub.next_billing_date} /></>}>
+                  <span style={{ fontSize: 12, color: '#94a3b8' }}>{sub.next_billing_date || 'NULL'}</span>
                 </Field>
                 <button
                   disabled={busy}

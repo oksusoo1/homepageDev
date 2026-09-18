@@ -1,9 +1,10 @@
 import { supabase } from '@/lib/supabase'
 import { onlyActive } from '@/lib/use-flag'
 import { resolveSiteVisibility } from '@/lib/site-visibility'
+import { FLOW_STEPS } from '@/lib/flow-step'
 
-/** 공개 URL에서 다룰 status (admin 제외) */
-const VISITOR_STATUSES = ['draft', 'review', 'published', 'suspended', 'cancelled']
+/** 공개 URL — FLOW_STEP 전부 (게이트에서 가림) */
+const VISITOR_STATUSES = [...FLOW_STEPS]
 
 /**
  * URL 식별자(subdomain 또는 site_code)로 사이트 조회
@@ -25,8 +26,7 @@ export async function getSiteByCode(siteCode) {
 }
 
 /**
- * 방문자용 번들: site + inquiry + subscription + visibility
- * draft/review 도 포함 (게이트에서 누가 볼지 결정)
+ * 방문자용 번들: site + inquiry + visibility
  */
 export async function getVisitorSiteBundle(siteCode) {
   const site = await getSiteByCode(siteCode)
@@ -35,22 +35,24 @@ export async function getVisitorSiteBundle(siteCode) {
   const { data: sub } = await onlyActive(
     supabase
       .from('subscriptions')
-      .select('subscription_id, cancels_at, status')
+      .select('subscription_id, cancels_at, cancelled_at')
       .eq('site_id', site.site_id)
   ).maybeSingle()
 
-  if (sub?.cancels_at && new Date(sub.cancels_at) <= new Date() && sub.status !== 'cancelled') {
+  if (sub?.cancels_at && new Date(sub.cancels_at) <= new Date() && !sub.cancelled_at) {
+    const now = new Date().toISOString()
     await supabase.from('subscriptions')
-      .update({ status: 'cancelled' })
+      .update({ cancelled_at: now, updated_at: now })
       .eq('subscription_id', sub.subscription_id)
     await supabase.from('sites')
-      .update({ status: 'suspended', updated_at: new Date().toISOString() })
+      .update({ status: 'suspended', updated_at: now })
       .eq('site_id', site.site_id)
     const suspended = { ...site, status: 'suspended' }
+    const endedSub = { ...sub, cancelled_at: now }
     return {
       site: suspended,
       inquiry: null,
-      subscription: null,
+      subscription: endedSub,
       ...resolveSiteVisibility(suspended),
     }
   }
@@ -64,7 +66,11 @@ export async function getVisitorSiteBundle(siteCode) {
   }
 
   let finalPending = false
-  if (inquiry?.customer_id && inquiry?.status === 'review' && !inquiry?.final_paid_at) {
+  if (
+    inquiry?.customer_id
+    && !inquiry?.final_paid_at
+    && (site.status === 'preview' || site.status === 'balance')
+  ) {
     const { data: otp } = await onlyActive(
       supabase
         .from('one_time_payments')
@@ -86,9 +92,6 @@ export async function getVisitorSiteBundle(siteCode) {
   return { site, inquiry, subscription: sub, flowStep, visibility }
 }
 
-/**
- * 방문자용 사이트 조회 (호환)
- */
 export async function getVisitorSite(siteCode) {
   const bundle = await getVisitorSiteBundle(siteCode)
   return bundle?.site || null

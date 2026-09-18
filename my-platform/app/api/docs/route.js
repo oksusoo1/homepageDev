@@ -65,6 +65,8 @@ async function collectDocFiles(dir, prefix = '') {
     const full = path.join(dir, ent.name)
 
     if (ent.isDirectory()) {
+      // SQL·도구 README는 명세 목록에서 제외
+      if (ent.name === 'sql' || ent.name === 'tools') continue
       rows.push(...await collectDocFiles(full, rel))
       continue
     }

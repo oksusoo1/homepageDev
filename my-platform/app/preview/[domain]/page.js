@@ -7,22 +7,22 @@ import SiteStatusRibbon from '@/components/SiteStatusRibbon'
 async function getSite(domain) {
   const subdomain = domain.split('.')[0]
 
-  // 커스텀 도메인 먼저 조회 (published/suspended만 허용, draft는 404)
+  // 커스텀 도메인 먼저 조회 (공개 FLOW + suspended)
+  const publicStatuses = ['pay_method', 'trial', 'subscribed', 'suspended']
   let { data } = await onlyActive(
     supabase
       .from('sites')
       .select('*')
       .eq('domain', domain)
-      .in('status', ['published', 'suspended'])
+      .in('status', publicStatuses)
   ).single()
   if (!data) {
-    // 서브도메인으로 조회
     ;({ data } = await onlyActive(
       supabase
         .from('sites')
         .select('*')
         .eq('subdomain', subdomain)
-        .in('status', ['published', 'suspended'])
+        .in('status', publicStatuses)
     ).single())
   }
   if (!data) return null
@@ -31,16 +31,17 @@ async function getSite(domain) {
   const { data: sub } = await onlyActive(
     supabase
       .from('subscriptions')
-      .select('subscription_id, cancels_at, status')
+      .select('subscription_id, cancels_at, cancelled_at')
       .eq('site_id', data.site_id)
   ).maybeSingle()
 
-  if (sub?.cancels_at && new Date(sub.cancels_at) <= new Date() && sub.status !== 'cancelled') {
+  if (sub?.cancels_at && new Date(sub.cancels_at) <= new Date() && !sub.cancelled_at) {
+    const now = new Date().toISOString()
     await supabase.from('subscriptions')
-      .update({ status: 'cancelled' })
+      .update({ cancelled_at: now, updated_at: now })
       .eq('subscription_id', sub.subscription_id)
     await supabase.from('sites')
-      .update({ status: 'suspended', updated_at: new Date().toISOString() })
+      .update({ status: 'suspended', updated_at: now })
       .eq('site_id', data.site_id)
     return { ...data, status: 'suspended' }
   }

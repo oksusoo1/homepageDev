@@ -59,7 +59,7 @@ export function getSitePeriodInfo(site, subscription = null, now = new Date()) {
     trialEnds &&
     daysLeft != null &&
     daysLeft > 0 &&
-    (subStatus === 'trial' || (!subStatus && site?.status === 'published'))
+    (subStatus === 'trial' || site?.status === 'trial')
 
   if (inTrial) {
     return {
@@ -76,7 +76,7 @@ export function getSitePeriodInfo(site, subscription = null, now = new Date()) {
   }
 
   const trialOver = trialEnds && daysLeft != null && daysLeft <= 0
-  if (trialOver && (site?.status === 'suspended' || subStatus === 'paused' || subStatus === 'trial')) {
+  if (trialOver && (site?.status === 'suspended' || subStatus === 'paused' || subStatus === 'trial' || site?.status === 'trial')) {
     return {
       kind: 'expired',
       label: site?.status === 'suspended' ? '만료·정지' : '만료',
@@ -90,10 +90,8 @@ export function getSitePeriodInfo(site, subscription = null, now = new Date()) {
     }
   }
 
-  // 유료/운영: trial 끝난 뒤 published + (active 또는 trial 아님)
-  if (trialEnds && daysLeft != null && daysLeft <= 0 && site?.status === 'published') {
-    opDay = Math.max(1, dayIndex(trialEnds, now)) // 종료일 당일을 운영 1일로 볼지: 종료 다음날=1이 더 자연 → dayIndex(trialEnds+1day)?
-    // 종료일 다음날부터 운영 1일
+  // 유료/운영: trial 끝난 뒤 subscribed
+  if (trialEnds && daysLeft != null && daysLeft <= 0 && site?.status === 'subscribed') {
     const opsStart = new Date(trialEnds)
     opsStart.setDate(opsStart.getDate() + 1)
     if (now < startOfLocalDay(opsStart)) {
@@ -104,7 +102,7 @@ export function getSitePeriodInfo(site, subscription = null, now = new Date()) {
     return {
       kind: 'ops',
       label: `운영 ${opDay}일`,
-      subLabel: subStatus === 'active' ? '유료' : (subStatus || null),
+      subLabel: subStatus === 'active' || site?.status === 'subscribed' ? '유료' : (subStatus || null),
       color: '#22c55e',
       trialDay,
       trialTotal,
@@ -114,8 +112,7 @@ export function getSitePeriodInfo(site, subscription = null, now = new Date()) {
     }
   }
 
-  // trial 없이 published (예외)
-  if (site?.status === 'published' && !trialStart) {
+  if (site?.status === 'subscribed' && !trialStart) {
     return {
       kind: 'ops',
       label: '운영중',

@@ -94,11 +94,6 @@ function BankTransferForm() {
         setSubmitting(false)
         return
       }
-      if (site.inquiry_id) {
-        await supabase.from('inquiries')
-          .update({ status: 'done', updated_at: new Date().toISOString() })
-          .eq('inquiry_id', site.inquiry_id)
-      }
       router.push(siteAdminPath(siteCode))
       return
     }

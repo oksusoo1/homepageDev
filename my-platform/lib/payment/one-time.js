@@ -1,21 +1,7 @@
 /**
  * 1회성 결제 (개발비 선금/잔금, 도메인 대행 등)
- * 구독(billing.js)과 분리 — 완료 후 inquiry / one_time_payments 갱신
+ * 구독(billing.js)과 분리 — 완료 후 inquiries(납부일) / one_time_payments / sites.status
  */
-
-/** 고객용 문의 진행 단계 라벨 */
-export const INQUIRY_CUSTOMER_STEPS = [
-  { key: 'received', label: '접수완료', desc: '문의가 접수되었습니다.' },
-  { key: 'reviewing', label: '검토/견적', desc: '담당자가 견적을 검토 중입니다.' },
-  { key: 'building', label: '제작중', desc: '사이트를 제작하고 있습니다.' },
-  { key: 'review', label: '미리보기·잔금', desc: '미리보기를 확인하신 후 잔금을 납부해 주세요.' },
-  { key: 'approved', label: '서비스 시작 준비', desc: '월 구독 결제 수단을 등록하고 서비스를 시작해 주세요.' },
-]
-
-export function getInquiryStepIndex(status) {
-  const idx = INQUIRY_CUSTOMER_STEPS.findIndex(s => s.key === status)
-  return idx === -1 ? 0 : idx
-}
 
 /**
  * 잔금 입금확인대기(one_time_payments.status=pending_confirm) 여부
@@ -58,10 +44,11 @@ export function getFinalPaymentAmount(inquiry) {
   return Math.floor(inquiry.dev_fee_total / 2)
 }
 
-/** 잔금 결제 화면 진입 가능 (입금확인 중이면 false) */
-export function canPayFinalBalance(inquiry, { finalPending = false } = {}) {
+/** 잔금 결제 화면 진입 — sites.status preview|balance, 잔금 미납 */
+export function canPayFinalBalance(inquiry, { finalPending = false, site = null } = {}) {
   if (finalPending) return false
-  return inquiry?.status === 'review' && !inquiry?.final_paid_at && !!inquiry?.dev_fee_total
+  if (!inquiry?.dev_fee_total || inquiry?.final_paid_at) return false
+  return site?.status === 'preview' || site?.status === 'balance'
 }
 
 /** 고객의 잔금 입금확인대기 행 조회 */
@@ -95,7 +82,7 @@ export async function loadInquiryForPayment(supabase, inquiryId, customerId) {
   const pendingOtps = await loadPendingFinalPayments(supabase, customerId)
   const { data: linkedSite } = await supabase
     .from('sites')
-    .select('site_id')
+    .select('site_id, status')
     .eq('inquiry_id', inquiryId)
     .eq('use_flag', 1)
     .maybeSingle()
@@ -104,10 +91,10 @@ export async function loadInquiryForPayment(supabase, inquiryId, customerId) {
   if (finalPending) {
     return { ok: false, error: '이미 잔금 입금 신청이 접수되었습니다. 본사 확인을 기다려 주세요.' }
   }
-  if (!canPayFinalBalance(inquiry)) {
+  if (!canPayFinalBalance(inquiry, { site: linkedSite })) {
     return { ok: false, error: '지금은 잔금을 납부할 수 없습니다.' }
   }
-  return { ok: true, inquiry }
+  return { ok: true, inquiry, site: linkedSite }
 }
 
 /** 계좌이체 — 입금 신청 (본사 확인 대기) */
@@ -146,6 +133,14 @@ export async function submitFinalPaymentBankTransfer(supabase, { inquiry, custom
     if (error) return { error: error.message }
   }
 
+  // 진도 → balance
+  if (siteId) {
+    await supabase.from('sites')
+      .update({ status: 'balance', updated_at: new Date().toISOString() })
+      .eq('site_id', siteId)
+      .eq('use_flag', 1)
+  }
+
   return { error: null, pending: true }
 }
 
@@ -157,10 +152,29 @@ export async function completeFinalPaymentCardMock(supabase, { inquiryId, custom
   const now = new Date().toISOString()
   const { error } = await supabase
     .from('inquiries')
-    .update({ final_paid_at: now, status: 'approved', updated_at: now })
+    .update({ final_paid_at: now, updated_at: now })
     .eq('inquiry_id', inquiryId)
 
   if (error) return { error: error.message }
+
+  if (siteId) {
+    await supabase.from('sites')
+      .update({ status: 'pay_method', updated_at: now })
+      .eq('site_id', siteId)
+      .eq('use_flag', 1)
+  } else {
+    const { data: site } = await supabase
+      .from('sites')
+      .select('site_id')
+      .eq('inquiry_id', inquiryId)
+      .eq('use_flag', 1)
+      .maybeSingle()
+    if (site?.site_id) {
+      await supabase.from('sites')
+        .update({ status: 'pay_method', updated_at: now })
+        .eq('site_id', site.site_id)
+    }
+  }
 
   if (customerId) {
     const { data: existing } = await supabase

@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation'
 
 /**
  * 방문자용 공개 범위 리본
- * published(공개) → 표시 없음
+ * public → 표시 없음
  */
 
 const RIBBON = {
@@ -24,31 +24,6 @@ const RIBBON = {
     label: '미공개',
     hint: '이용 중단',
     bg: '#dc2626',
-    fg: '#ffffff',
-  },
-  // status 호환 (구 호출)
-  draft: {
-    label: '제작 중',
-    hint: '제작자만',
-    bg: '#64748b',
-    fg: '#ffffff',
-  },
-  review: {
-    label: '부분공개',
-    hint: '본사·회원만',
-    bg: '#f59e0b',
-    fg: '#1c1917',
-  },
-  suspended: {
-    label: '미공개',
-    hint: '이용 중단',
-    bg: '#dc2626',
-    fg: '#ffffff',
-  },
-  cancelled: {
-    label: '해지됨',
-    hint: '서비스 종료',
-    bg: '#57534e',
     fg: '#ffffff',
   },
 }

@@ -15,6 +15,7 @@ import { getSitePeriodInfo } from '@/lib/site-period'
 import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
 import { matchesSearchQuery } from '@/lib/platform-list-search'
 import { onlyActive, softDelete } from '@/lib/use-flag'
+import { isBillableSubscription, subscriptionLifeLabel } from '@/lib/subscription-life'
 import {
   FLOW_STEPS,
   flowStepLabel,
@@ -138,7 +139,7 @@ export default function AdminConsole() {
   async function fetchAll() {
     const [s, sub, t, otp, tmpl, inq, cust] = await Promise.all([
       onlyActive(supabase.from('sites').select('*, customers(name, email, phone)')).order('created_at', { ascending: false }),
-      onlyActive(supabase.from('subscriptions').select('*, sites(site_name:name, subdomain), customers(name)')).order('created_at', { ascending: false }),
+      onlyActive(supabase.from('subscriptions').select('*, sites(site_name:name, subdomain, status), customers(name)')).order('created_at', { ascending: false }),
       onlyActive(supabase.from('support_tickets').select('*, sites(name), customers(name)')).order('created_at', { ascending: false }),
       onlyActive(supabase.from('one_time_payments').select('*, customers(name), sites(name)')).order('created_at', { ascending: false }),
       onlyActive(supabase.from('templates').select('*').eq('is_active', true)).order('sort_order'),
@@ -243,8 +244,7 @@ export default function AdminConsole() {
           email: form.email || customer.email || null,
           build_type: buildType,
           inquiry_id: form.inquiry_id || null,
-          status: 'draft',
-          deploy_status: 'pending',
+          status: buildType === 'managed' ? 'building' : 'building',
         }])
         .select('site_id, subdomain, name')
         .single()
@@ -265,62 +265,138 @@ export default function AdminConsole() {
     setLoading(false)
   }
 
-  async function updateSiteStatus(siteId, status) {
+  /** sites.status = FLOW_STEP 설정 */
+  async function updateSiteStatus(siteId, flowStep) {
     const now = new Date()
+    const { data: siteInfo } = await onlyActive(
+      supabase.from('sites').select('build_type, inquiry_id, trial_started_at').eq('site_id', siteId)
+    ).maybeSingle()
 
-    if (status === 'published' || status === 'review') {
-      const { data: siteInfo } = await onlyActive(
-        supabase.from('sites').select('build_type, inquiry_id').eq('site_id', siteId)
+    const next = flowStep
+
+    await supabase.from('sites')
+      .update({ status: next, updated_at: now.toISOString() })
+      .eq('site_id', siteId)
+      .eq('use_flag', 1)
+
+    if (next === 'trial' && siteInfo?.build_type === 'self' && !siteInfo.trial_started_at) {
+      const trialEnds = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
+      const nextBilling = new Date(trialEnds)
+      nextBilling.setMonth(nextBilling.getMonth() + 1)
+      const { data: sub } = await onlyActive(
+        supabase.from('subscriptions').select('subscription_id').eq('site_id', siteId)
       ).maybeSingle()
-
-      if (siteInfo?.build_type === 'managed') {
-        const targetStatus = status === 'review' ? 'review' : 'published'
-        await supabase.from('sites')
-          .update({ status: targetStatus, deploy_status: 'live', updated_at: now.toISOString() })
-          .eq('site_id', siteId)
-          .eq('use_flag', 1)
-        if (siteInfo.inquiry_id) {
-          await supabase.from('inquiries')
-            .update({ status: 'review', updated_at: now.toISOString() })
-            .eq('inquiry_id', siteInfo.inquiry_id)
-            .eq('use_flag', 1)
-        }
-      } else {
-        // 루트 A: self 사이트 — pending 구독이 있으면 trial 시작
-        await supabase.from('sites')
-          .update({ status: 'published', updated_at: now.toISOString() })
-          .eq('site_id', siteId)
-          .eq('use_flag', 1)
-        const { data: sub } = await onlyActive(
-          supabase.from('subscriptions').select('subscription_id, status').eq('site_id', siteId)
-        ).maybeSingle()
-        if (sub?.status === 'pending') {
-          const trialEnds = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
-          const nextBilling = new Date(trialEnds)
-          nextBilling.setMonth(nextBilling.getMonth() + 1)
-          await supabase.from('subscriptions').update({
-            status: 'trial',
-            next_billing_date: nextBilling.toISOString().split('T')[0],
-            updated_at: now.toISOString(),
-          }).eq('subscription_id', sub.subscription_id)
-          await supabase.from('sites').update({
-            trial_started_at: now.toISOString(),
-            trial_ends_at: trialEnds.toISOString(),
-          }).eq('site_id', siteId)
-        }
+      if (sub) {
+        await supabase.from('subscriptions').update({
+          next_billing_date: nextBilling.toISOString().split('T')[0],
+          updated_at: now.toISOString(),
+        }).eq('subscription_id', sub.subscription_id)
       }
-    } else {
-      await supabase.from('sites').update({ status, updated_at: now.toISOString() }).eq('site_id', siteId)
-
-      if (status === 'suspended') {
-        // 관리자 정지: 연결된 구독도 paused로 변경
-        await supabase.from('subscriptions')
-          .update({ status: 'paused', updated_at: now.toISOString() })
-          .eq('site_id', siteId)
-          .in('status', ['active', 'trial'])
-      }
+      await supabase.from('sites').update({
+        trial_started_at: now.toISOString(),
+        trial_ends_at: trialEnds.toISOString(),
+      }).eq('site_id', siteId)
     }
 
+    fetchAll()
+  }
+
+  // 문의 상태 select 제거됨 — FLOW는 sites.status
+  // (updateInquiryStatus 삭제)
+
+  // 견적 금액 저장 — 연결 사이트가 intake면 deposit으로
+  async function saveDevFee(inquiryId, amount) {
+    const num = parseInt(amount, 10)
+    if (isNaN(num) || num <= 0) { alert('올바른 금액을 입력해주세요.'); return }
+    await supabase.from('inquiries').update({
+      dev_fee_total: num,
+      updated_at: new Date().toISOString(),
+    }).eq('inquiry_id', inquiryId)
+    const site = sites.find(s => s.inquiry_id === inquiryId)
+    if (site && (site.status === 'intake' || site.status === 'deposit')) {
+      await supabase.from('sites').update({
+        status: 'deposit',
+        updated_at: new Date().toISOString(),
+      }).eq('site_id', site.site_id)
+    }
+    fetchAll()
+  }
+
+  // 선금 확인 → sites.status = building
+  async function confirmDownPayment(inquiryId) {
+    if (!window.confirm('선금 납부를 확인하셨나요?\n다음 단계: 제작')) return
+    const now = new Date().toISOString()
+    await supabase.from('inquiries')
+      .update({ down_paid_at: now, updated_at: now })
+      .eq('inquiry_id', inquiryId)
+    const site = sites.find(s => s.inquiry_id === inquiryId)
+    if (site) {
+      await supabase.from('sites')
+        .update({ status: 'building', updated_at: now })
+        .eq('site_id', site.site_id)
+    }
+    fetchAll()
+  }
+
+  // 접수 → 선금 단계
+  async function startDepositStep(inquiryId) {
+    const site = sites.find(s => s.inquiry_id === inquiryId)
+    if (site) {
+      await supabase.from('sites')
+        .update({ status: 'deposit', updated_at: new Date().toISOString() })
+        .eq('site_id', site.site_id)
+    }
+    fetchAll()
+  }
+
+  /** 대리 접수 취소 (선금 전) — 문의·사이트 soft delete */
+  async function handleCancelManagedIntake(inquiryId) {
+    if (!inquiryId) return
+    if (!window.confirm('대리 접수를 취소할까요?\n연결된 사이트·문의가 목록에서 삭제됩니다. (선금 확인 전만 가능)')) return
+    try {
+      await cancelManagedIntake(supabase, inquiryId)
+      setSelectedSiteId(null)
+      setMessage('✅ 대리 접수 취소됨')
+      await fetchAll()
+    } catch (err) {
+      setMessage('❌ ' + (err.message || err))
+    }
+  }
+
+  async function saveAdminNote(inquiryId) {
+    const note = inquiryNotes[inquiryId]
+    const text = note !== undefined
+      ? note
+      : (inquiries.find(i => i.inquiry_id === inquiryId)?.admin_note || '')
+    await supabase.from('inquiries')
+      .update({ admin_note: text, updated_at: new Date().toISOString() })
+      .eq('inquiry_id', inquiryId)
+    setMessage('메모 저장됨')
+    fetchAll()
+  }
+
+  // 잔금 확인 → sites.status = pay_method
+  async function confirmFinalPayment(inquiryId) {
+    if (!window.confirm('잔금 50% 납부를 확인하셨나요?\n다음: 카드/계좌 등록')) return
+    const now = new Date().toISOString()
+    const { data: inq } = await supabase
+      .from('inquiries').select('customer_id').eq('inquiry_id', inquiryId).maybeSingle()
+    await supabase.from('inquiries')
+      .update({ final_paid_at: now, updated_at: now })
+      .eq('inquiry_id', inquiryId)
+    if (inq?.customer_id) {
+      await supabase.from('one_time_payments')
+        .update({ status: 'paid', paid_at: now })
+        .eq('customer_id', inq.customer_id)
+        .eq('type', 'dev_fee')
+        .in('status', ['unpaid', 'pending_confirm'])
+    }
+    const site = sites.find(s => s.inquiry_id === inquiryId)
+    if (site) {
+      await supabase.from('sites')
+        .update({ status: 'pay_method', updated_at: now })
+        .eq('site_id', site.site_id)
+    }
     fetchAll()
   }
 
@@ -394,20 +470,25 @@ export default function AdminConsole() {
     fetchAll()
   }
 
-  // trial/active 구독 중 next_billing_date 도래한 것 결제 처리
+  // trial/subscribed 사이트 중 next_billing_date 도래한 것 결제 처리
   async function handleProcessBilling() {
     const today = new Date().toISOString().split('T')[0]
 
     const { data: due } = await supabase
       .from('subscriptions')
-      .select('subscription_id, site_id, customer_id, next_billing_date, status')
-      .in('status', ['trial', 'active'])
+      .select('subscription_id, site_id, customer_id, next_billing_date, cancelled_at, sites(status)')
+      .is('cancelled_at', null)
       .lte('next_billing_date', today)
       .eq('payment_method', 'card')
 
-    if (!due?.length) { setMessage('청구할 구독이 없습니다.'); return }
+    const targets = (due || []).filter(sub => {
+      const site = Array.isArray(sub.sites) ? sub.sites[0] : sub.sites
+      return isBillableSubscription(site, sub)
+    })
 
-    for (const sub of due) {
+    if (!targets.length) { setMessage('청구할 구독이 없습니다.'); return }
+
+    for (const sub of targets) {
       const period = sub.next_billing_date.slice(0, 7) // 'YYYY-MM'
       const nextDate = new Date(sub.next_billing_date)
       nextDate.setMonth(nextDate.getMonth() + 1)
@@ -424,15 +505,18 @@ export default function AdminConsole() {
         note: '[MOCK] 자동 카드 결제',
       }, { onConflict: 'subscription_id,period' })
 
-      // 구독 상태 → active, 다음 청구일 +1달
       await supabase.from('subscriptions').update({
-        status: 'active',
         next_billing_date: nextBillingDate,
         updated_at: new Date().toISOString(),
       }).eq('subscription_id', sub.subscription_id)
+
+      await supabase.from('sites').update({
+        status: 'subscribed',
+        updated_at: new Date().toISOString(),
+      }).eq('site_id', sub.site_id)
     }
 
-    setMessage(`✅ ${due.length}건 결제 처리 완료`)
+    setMessage(`✅ ${targets.length}건 결제 처리 완료`)
     fetchAll()
   }
 
@@ -443,12 +527,14 @@ export default function AdminConsole() {
 
     const { data: subs } = await supabase
       .from('subscriptions')
-      .select('subscription_id, site_id, next_billing_date')
+      .select('subscription_id, site_id, next_billing_date, cancelled_at, sites(status)')
       .eq('payment_method', 'manual')
-      .in('status', ['trial', 'active'])
+      .is('cancelled_at', null)
 
     let count = 0
     for (const sub of subs || []) {
+      const site = Array.isArray(sub.sites) ? sub.sites[0] : sub.sites
+      if (!isBillableSubscription(site, sub)) continue
       if (!sub.next_billing_date) continue
       const graceEnd = new Date(sub.next_billing_date)
       graceEnd.setDate(graceEnd.getDate() + 2)
@@ -482,29 +568,34 @@ export default function AdminConsole() {
     fetchAll()
   }
 
-  // 만료된 구독 일괄 처리: cancels_at 지났는데 아직 active인 구독 → cancelled
+  // 만료된 구독: cancels_at 경과 → sites.suspended
   async function handleProcessExpired() {
     const now = new Date().toISOString()
 
-    // 조건: 해지 예정일 경과 + 아직 cancelled 아님 + 해지 예약 있음
     const { data: expired } = await supabase
       .from('subscriptions')
-      .select('subscription_id, site_id')
+      .select('subscription_id, site_id, cancelled_at')
       .lt('cancels_at', now)
-      .neq('status', 'cancelled')
       .not('cancels_at', 'is', null)
 
-    if (!expired?.length) { setMessage('만료된 구독이 없습니다.'); return }
+    const targets = (expired || []).filter(sub => {
+      // 이미 사이트 정지된 건도 재실행 가능 — cancelled_at 없으면 찍음
+      return true
+    })
 
-    for (const sub of expired) {
-      await supabase.from('subscriptions')
-        .update({ status: 'cancelled' })
-        .eq('subscription_id', sub.subscription_id)
+    if (!targets.length) { setMessage('만료된 구독이 없습니다.'); return }
+
+    for (const sub of targets) {
+      if (!sub.cancelled_at) {
+        await supabase.from('subscriptions')
+          .update({ cancelled_at: now, updated_at: now })
+          .eq('subscription_id', sub.subscription_id)
+      }
       await supabase.from('sites')
-        .update({ status: 'cancelled', updated_at: now })
+        .update({ status: 'suspended', updated_at: now })
         .eq('site_id', sub.site_id)
     }
-    setMessage(`✅ ${expired.length}건 처리 완료`)
+    setMessage(`✅ ${targets.length}건 처리 완료`)
     fetchAll()
   }
 
@@ -557,13 +648,13 @@ export default function AdminConsole() {
         const next = new Date()
         next.setMonth(next.getMonth() + 1)
         await supabase.from('subscriptions')
-          .update({ next_billing_date: next.toISOString().split('T')[0], status: 'active' })
+          .update({ next_billing_date: next.toISOString().split('T')[0] })
           .eq('subscription_id', subId)
       }
 
       if (siteId) {
         await supabase.from('sites')
-          .update({ status: 'published', updated_at: now })
+          .update({ status: 'subscribed', updated_at: now })
           .eq('site_id', siteId)
       }
 
@@ -581,98 +672,17 @@ export default function AdminConsole() {
     }
   }
 
-  // 문의 상태 업데이트
-  async function updateInquiryStatus(inquiryId, status) {
-    await supabase.from('inquiries')
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq('inquiry_id', inquiryId)
-    fetchAll()
-  }
-
-  // 견적 금액 저장 — 접수(intake)면 선금(deposit) 단계로
-  async function saveDevFee(inquiryId, amount) {
-    const num = parseInt(amount, 10)
-    if (isNaN(num) || num <= 0) { alert('올바른 금액을 입력해주세요.'); return }
-    const inq = inquiries.find(i => i.inquiry_id === inquiryId)
-    const patch = { dev_fee_total: num, updated_at: new Date().toISOString() }
-    if (inq?.status === 'received') patch.status = 'reviewing'
-    await supabase.from('inquiries').update(patch).eq('inquiry_id', inquiryId)
-    fetchAll()
-  }
-
-  // 선금 확인 → 제작(building) · FLOW_STEP deposit → building
-  async function confirmDownPayment(inquiryId) {
-    if (!window.confirm('선금 납부를 확인하셨나요?\n다음 단계: 제작')) return
-    await supabase.from('inquiries')
-      .update({ down_paid_at: new Date().toISOString(), status: 'building', updated_at: new Date().toISOString() })
-      .eq('inquiry_id', inquiryId)
-    fetchAll()
-  }
-
-  // 접수 → 선금 단계만 이동 (견적 금액은 이후 저장)
-  async function startDepositStep(inquiryId) {
-    await supabase.from('inquiries')
-      .update({ status: 'reviewing', updated_at: new Date().toISOString() })
-      .eq('inquiry_id', inquiryId)
-    fetchAll()
-  }
-
-  /** 대리 접수 취소 (선금 전) — 문의·사이트 soft delete */
-  async function handleCancelManagedIntake(inquiryId) {
-    if (!inquiryId) return
-    if (!window.confirm('대리 접수를 취소할까요?\n연결된 사이트·문의가 목록에서 삭제됩니다. (선금 확인 전만 가능)')) return
-    try {
-      await cancelManagedIntake(supabase, inquiryId)
-      setSelectedSiteId(null)
-      setMessage('✅ 대리 접수 취소됨')
-      await fetchAll()
-    } catch (err) {
-      setMessage('❌ ' + (err.message || err))
-    }
-  }
-
-  async function saveAdminNote(inquiryId) {
-    const note = inquiryNotes[inquiryId]
-    const text = note !== undefined
-      ? note
-      : (inquiries.find(i => i.inquiry_id === inquiryId)?.admin_note || '')
-    await supabase.from('inquiries')
-      .update({ admin_note: text, updated_at: new Date().toISOString() })
-      .eq('inquiry_id', inquiryId)
-    setMessage('메모 저장됨')
-    fetchAll()
-  }
-
-  // 잔금 50% 확인 → approved로 전환
-  async function confirmFinalPayment(inquiryId) {
-    if (!window.confirm('잔금 50% 납부를 확인하셨나요?\n상태가 "고객승인완료"로 변경됩니다.')) return
-    const now = new Date().toISOString()
-    const { data: inq } = await supabase
-      .from('inquiries').select('customer_id').eq('inquiry_id', inquiryId).maybeSingle()
-    await supabase.from('inquiries')
-      .update({ final_paid_at: now, status: 'approved', updated_at: now })
-      .eq('inquiry_id', inquiryId)
-    if (inq?.customer_id) {
-      await supabase.from('one_time_payments')
-        .update({ status: 'paid', paid_at: now })
-        .eq('customer_id', inq.customer_id)
-        .eq('type', 'dev_fee')
-        .in('status', ['unpaid', 'pending_confirm'])
-    }
-    fetchAll()
-  }
-
   /**
    * 1회성결제 「납부확인」
    * - domain_setup / extra: OTP만 paid
-   * - dev_fee(잔금): OTP + inquiries(final_paid_at, approved) 동시 반영 → /my 가 5단계로 넘어감
+   * - dev_fee(잔금): OTP + final_paid_at + sites.status=pay_method
    */
   async function markOneTimePaid(paymentId) {
     const pay = oneTimePays.find(p => p.payment_id === paymentId)
     const now = new Date().toISOString()
 
     if (pay?.type === 'dev_fee') {
-      if (!window.confirm('개발비 잔금 납부를 확인할까요?\n문의가 「서비스 시작 준비」로 바뀌고 고객 /my 에도 반영됩니다.')) return
+      if (!window.confirm('개발비 잔금 납부를 확인할까요?\n다음: 카드/계좌 등록')) return
     }
 
     const { error } = await supabase.from('one_time_payments')
@@ -681,26 +691,27 @@ export default function AdminConsole() {
     if (error) { alert(error.message); return }
 
     if (pay?.type === 'dev_fee' && pay.customer_id) {
-      let inquiryId = null
-      if (pay.site_id) {
-        const site = sites.find(s => s.site_id === pay.site_id)
-        inquiryId = site?.inquiry_id || null
-      }
+      let site = pay.site_id ? sites.find(s => s.site_id === pay.site_id) : null
+      let inquiryId = site?.inquiry_id || null
       if (!inquiryId) {
         const candidate = inquiries.find(i =>
-          i.customer_id === pay.customer_id &&
-          !i.final_paid_at &&
-          ['building', 'review'].includes(i.status)
+          i.customer_id === pay.customer_id && !i.final_paid_at
         )
         inquiryId = candidate?.inquiry_id || null
+        if (!site && inquiryId) site = sites.find(s => s.inquiry_id === inquiryId) || null
       }
       if (inquiryId) {
         const { error: inqErr } = await supabase.from('inquiries')
-          .update({ final_paid_at: now, status: 'approved', updated_at: now })
+          .update({ final_paid_at: now, updated_at: now })
           .eq('inquiry_id', inquiryId)
         if (inqErr) { alert(inqErr.message); return }
-      } else {
-        alert('결제 행은 납부완료 처리됐지만, 연결 문의를 찾지 못했습니다. 제작 문의에서 「잔금 확인」을 눌러 주세요.')
+      }
+      if (site) {
+        await supabase.from('sites')
+          .update({ status: 'pay_method', updated_at: now })
+          .eq('site_id', site.site_id)
+      } else if (!inquiryId) {
+        alert('결제 행은 납부완료 처리됐지만, 연결 사이트/문의를 찾지 못했습니다. 제작 문의에서 「잔금 확인」을 눌러 주세요.')
       }
     }
 
@@ -708,7 +719,10 @@ export default function AdminConsole() {
   }
 
   const currentPeriod = new Date().toISOString().slice(0, 7)
-  const activeSubCount = subscriptions.filter(s => s.status === 'active').length
+  const activeSubCount = subscriptions.filter(s => {
+    const site = Array.isArray(s.sites) ? s.sites[0] : s.sites
+    return site?.status === 'subscribed' && !s.cancelled_at
+  }).length
   const pendingTickets = tickets.filter(t => t.status !== 'resolved').length
   const pendingConfirmOtp = oneTimePays.filter(p => p.status === 'pending_confirm')
 
@@ -1337,7 +1351,7 @@ export default function AdminConsole() {
                               </td>
                               <td style={css.td}>{periodBadge}</td>
                               <td style={css.td}>
-                                {badge(codeColor('SITE_STATUS', site.status), codeLabel('SITE_STATUS', site.status))}
+                                {badge(codeColor('FLOW_STEP', site.status), codeLabel('FLOW_STEP', site.status, flowStepLabel(site.status)))}
                                 {hasPendingDeposit(site.customer_id) && (
                                   <div style={{ marginTop: 4 }}>{badge('#f59e0b', '잔금신청')}</div>
                                 )}
@@ -1417,7 +1431,10 @@ export default function AdminConsole() {
               sub.sites?.site_name,
               sub.sites?.subdomain,
               codeLabel('PAYMENT_METHOD', sub.payment_method, sub.payment_method),
-              codeLabel('SUB_STATUS', sub.status, sub.status),
+              subscriptionLifeLabel(
+                Array.isArray(sub.sites) ? sub.sites[0] : sub.sites,
+                sub,
+              ),
             )
           )
           return (
@@ -1490,7 +1507,15 @@ export default function AdminConsole() {
                         </td>
                         <td style={css.td}>{sub.next_billing_date || '-'}</td>
                         <td style={css.td}>
-                          {badge(codeColor('SUB_STATUS', sub.status), codeLabel('SUB_STATUS', sub.status))}
+                          {(() => {
+                            const site = Array.isArray(sub.sites) ? sub.sites[0] : sub.sites
+                            const label = subscriptionLifeLabel(site, sub)
+                            const color = site?.status === 'subscribed' ? '#22c55e'
+                              : site?.status === 'trial' ? '#f59e0b'
+                              : sub.cancelled_at || site?.status === 'suspended' ? '#94a3b8'
+                              : '#64748b'
+                            return badge(color, label)
+                          })()}
                         </td>
                         {/* 해지 예약된 경우 cancels_at 표시, 아니면 - */}
                         <td style={{ ...css.td, color: sub.cancels_at ? '#ef4444' : '#475569' }}>
@@ -1730,7 +1755,7 @@ export default function AdminConsole() {
                     if (key === 'open_editor' && linkedSite) {
                       return window.open(siteAdminPath(linkedSite.subdomain, '/editor'), '_blank')
                     }
-                    if (key === 'open_preview' && linkedSite) return updateSiteStatus(linkedSite.site_id, 'review')
+                    if (key === 'open_preview' && linkedSite) return updateSiteStatus(linkedSite.site_id, 'preview')
                     if (key === 'confirm_balance') return confirmFinalPayment(inq.inquiry_id)
                     if (key === 'view_site') return openLinkedSite()
                   }
@@ -1874,25 +1899,12 @@ export default function AdminConsole() {
                           btn('#2563eb', '에디터', () => window.open(siteAdminPath(linkedSite.subdomain, '/editor'), '_blank'))
                         )}
                         {linkedSite && flowStep === 'building' && (
-                          btn('#334155', '검수용 공개', () => updateSiteStatus(linkedSite.site_id, 'review'))
+                          btn('#334155', '검수용 공개', () => updateSiteStatus(linkedSite.site_id, 'preview'))
                         )}
                         {linkedSite && hq.key !== 'view_site' && btn('#334155', `사이트 (${linkedSite.subdomain})`, openLinkedSite)}
-                        {canCancelManagedIntake(inq) && (
+                        {canCancelManagedIntake(inq, linkedSite) && (
                           btn('#7f1d1d', '접수 취소', () => handleCancelManagedIntake(inq.inquiry_id))
                         )}
-                        <select
-                          value={inq.status}
-                          onChange={e => updateInquiryStatus(inq.inquiry_id, e.target.value)}
-                          title="문의 DB 상태 (고급)"
-                          style={{ marginLeft: 'auto', padding: '5px 8px', background: '#0f172a', color: '#64748b', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}
-                        >
-                          <option value="received">DB: received</option>
-                          <option value="reviewing">DB: reviewing</option>
-                          <option value="building">DB: building</option>
-                          <option value="review">DB: review</option>
-                          <option value="approved">DB: approved</option>
-                          <option value="done">DB: done</option>
-                        </select>
                       </div>
                     </div>
                   )
@@ -1912,7 +1924,7 @@ export default function AdminConsole() {
         {nav === 'docs' && (
           <div style={css.card}>
             <h3 style={{ margin: '0 0 16px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
-              개발 문서 — docs/ (플로우 · DB)
+              개발 문서 — 플로우 · ERD · 테이블명세
             </h3>
             <DocsBrowser />
           </div>

@@ -1,7 +1,6 @@
 -- ================================================
 -- sample_data_v2.sql
--- schema_v2.1_2026-08-31.sql (또는 supabase_schema_mvp_v2.sql) 실행 후 실행
--- 경로: docs/db/sql/sample/
+-- schema_v2.2_2026-09-19.sql 실행 후 (또는 015·016 적용된 DB)
 -- ================================================
 
 
@@ -16,14 +15,14 @@ INSERT INTO customers (customer_id, email, name, phone, status) VALUES
 
 
 -- ================================================
--- 2. sites
+-- 2. sites  (status = FLOW_STEP)
 -- ================================================
 
 INSERT INTO sites (
   site_id, site_code, customer_id, template_id,
   name, subdomain, domain,
   description, address, phone, email,
-  build_type, status, deploy_status
+  build_type, status
 ) VALUES
   (
     'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
@@ -34,7 +33,7 @@ INSERT INTO sites (
     '강남구 최고의 스페셜티 커피 카페',
     '서울시 강남구 테헤란로 123, 1층',
     '02-1234-5678', 'hello@hongcafe.com',
-    'self', 'published', 'live'
+    'self', 'subscribed'
   ),
   (
     'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
@@ -45,7 +44,7 @@ INSERT INTO sites (
     '20년 경력의 헤어 디자이너가 직접 시술',
     '서울시 마포구 홍대입구역 2번 출구',
     '02-9999-8888', 'info@kimsalon.com',
-    'managed', 'published', 'live'
+    'managed', 'subscribed'
   ),
   (
     'cccccccc-cccc-cccc-cccc-cccccccccccc',
@@ -56,7 +55,7 @@ INSERT INTO sites (
     '지역 주민을 위한 따뜻한 내과 의원',
     '서울시 송파구 잠실동 456번지',
     '02-7777-6666', NULL,
-    'self', 'draft', 'pending'
+    'self', 'building'
   );
 
 
@@ -84,17 +83,17 @@ INSERT INTO customer_payment_methods (customer_id, pg_provider, pg_customer_id, 
 -- 5. subscriptions
 -- ================================================
 
-INSERT INTO subscriptions (customer_id, site_id, amount, billing_day, payment_method, status, started_at, next_billing_date) VALUES
+INSERT INTO subscriptions (customer_id, site_id, amount, billing_day, payment_method, started_at, next_billing_date) VALUES
   (
     '11111111-1111-1111-1111-111111111111',
     'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-    30000, 1, 'manual', 'active',
+    30000, 1, 'manual',
     NOW() - INTERVAL '60 days', '2026-04-01'
   ),
   (
     '22222222-2222-2222-2222-222222222222',
     'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-    30000, 5, 'card', 'active',
+    30000, 5, 'card',
     NOW() - INTERVAL '30 days', '2026-04-05'
   );
 

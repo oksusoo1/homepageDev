@@ -42,7 +42,7 @@ export function paymentMethodUrl(siteCode, redirect = 'deploy') {
  */
 export async function assertPaymentSetupAllowed(supabase, siteId) {
   const { data: site } = await onlyActive(
-    supabase.from('sites').select('build_type, inquiry_id').eq('site_id', siteId)
+    supabase.from('sites').select('build_type, inquiry_id, status').eq('site_id', siteId)
   ).single()
   if (!isManagedSite(site)) return { ok: true }
 
@@ -50,7 +50,7 @@ export async function assertPaymentSetupAllowed(supabase, siteId) {
     return { ok: false, error: '본사 제작 문의가 연결되지 않았습니다.' }
   }
   const { data: inquiry } = await onlyActive(
-    supabase.from('inquiries').select('status, final_paid_at').eq('inquiry_id', site.inquiry_id)
+    supabase.from('inquiries').select('final_paid_at').eq('inquiry_id', site.inquiry_id)
   ).single()
   if (!canAccessPaymentSetup(site, inquiry)) {
     return { ok: false, error: '잔금 확인 후 결제 수단을 등록할 수 있습니다.' }
@@ -71,7 +71,7 @@ export async function registerBankTransfer(supabase, { customerId, siteId, depos
   if (!name) return { error: '입금자명을 입력해 주세요.' }
 
   const { data: existing } = await onlyActive(
-    supabase.from('subscriptions').select('subscription_id, status').eq('site_id', siteId)
+    supabase.from('subscriptions').select('subscription_id').eq('site_id', siteId)
   ).maybeSingle()
 
   const draft = {

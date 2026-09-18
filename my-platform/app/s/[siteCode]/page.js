@@ -46,7 +46,9 @@ export default async function CustomerSitePage({ params }) {
   const { site, visibility } = bundle
 
   if (visibility === 'hidden') {
-    return <HiddenSitePage cancelled={site.status === 'cancelled'} />
+    const ended = !!bundle.subscription?.cancelled_at
+      && (!bundle.subscription.cancels_at || new Date(bundle.subscription.cancels_at) <= new Date())
+    return <HiddenSitePage cancelled={ended} />
   }
 
   const pageBody = await renderSiteBody(site, siteCode)

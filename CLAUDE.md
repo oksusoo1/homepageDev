@@ -17,7 +17,7 @@
 - 고객: `/login` 회원가입 → `auth.users` + `customers` → `/my`
 - 관리자: Supabase UI Create user + `staff` INSERT → `/platform` (`role=platform_admin`)
 - 코드: `lib/auth.js` — `isPlatformAdmin()`, `getPostLoginPath()`
-- 문서: `docs/db/스키마_v1.1_2026-08-31.html`, `docs/플로우_v1.2_2026-08-31.html`
+- 문서: `docs/플로우.md` · `docs/db/테이블명세.md` · `docs/db/ERD.md`
 
 ## 기술 스택
 - Frontend/Backend: Next.js 15 (App Router)
@@ -38,9 +38,9 @@
 - /lib/supabase.js → Supabase 클라이언트
 - middleware.js → 도메인 기반 라우팅
 
-## DB 스키마 (v2.1 SQL + 명세 v1.2)
-> 스키마 명세: @my-platform/docs/db/스키마_버전목록.html · @my-platform/docs/db/스키마_v1.2_2026-09-07.html
-> 최신 SQL: @my-platform/docs/db/sql/schema/schema_v2.1_2026-08-31.sql
+## DB 스키마 (현행)
+> 명세: @my-platform/docs/플로우.md · @my-platform/docs/db/테이블명세.md · @my-platform/docs/db/ERD.md
+> 최신 SQL: @my-platform/docs/db/sql/schema/schema_v2.2_2026-09-19.sql
 > 테스트 데이터: @my-platform/docs/db/sql/sample/sample_data_v2.sql
 > 마이그레이션: @my-platform/docs/db/sql/migrations/
 

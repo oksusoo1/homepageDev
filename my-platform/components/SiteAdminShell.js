@@ -239,10 +239,10 @@ export default function SiteAdminShell({
           </a>
           <span style={{
             fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 999,
-            background: site?.status === 'published' ? '#dcfce7' : '#fef3c7',
-            color: site?.status === 'published' ? '#16a34a' : '#d97706',
+            background: ['trial', 'subscribed', 'pay_method'].includes(site?.status) ? '#dcfce7' : '#fef3c7',
+            color: ['trial', 'subscribed', 'pay_method'].includes(site?.status) ? '#16a34a' : '#d97706',
           }}>
-            ● {codeLabel('SITE_STATUS', site?.status)}
+            ● {codeLabel('FLOW_STEP', site?.status)}
           </span>
         </div>
       </header>

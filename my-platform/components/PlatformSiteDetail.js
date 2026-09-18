@@ -16,9 +16,9 @@ import {
   canOpenHqEditor,
 } from '@/lib/flow-step'
 import { canCancelManagedIntake } from '@/lib/managed-flow'
+import { subscriptionLifeLabel } from '@/lib/subscription-life'
 
-const SITE_STATUS_OPTS = ['draft', 'review', 'published', 'suspended', 'cancelled']
-const DEPLOY_STATUS_OPTS = ['pending', 'building', 'live', 'failed']
+const FLOW_STATUS_OPTS = [...FLOW_STEPS]
 
 const inputStyle = {
   width: '100%', padding: '7px 10px', background: '#0f172a', color: '#e2e8f0',
@@ -150,8 +150,7 @@ function emptyEdit(site) {
     address: site.address || '',
     phone: site.phone || '',
     email: site.email || '',
-    status: site.status || 'draft',
-    deploy_status: site.deploy_status || 'pending',
+    status: site.status || 'building',
   }
 }
 
@@ -236,7 +235,7 @@ export default function PlatformSiteDetail({
     if (key === 'start_deposit' && inquiry) return onStartDeposit?.(inquiry.inquiry_id)
     if (key === 'confirm_deposit' && inquiry) return onConfirmDeposit?.(inquiry.inquiry_id)
     if (key === 'open_editor') return openEditor()
-    if (key === 'open_preview') return onStatusAction?.(site.site_id, 'review')
+    if (key === 'open_preview') return onStatusAction?.(site.site_id, 'preview')
     if (key === 'confirm_balance' && inquiry) return onConfirmFinal?.(inquiry.inquiry_id)
     if (key === 'view_site') return openEditor()
     if (key === 'need_fee' || key === 'wait_balance') return onGoInquiries?.()
@@ -251,8 +250,8 @@ export default function PlatformSiteDetail({
   const showEditorSecondary = canEditor && !!primaryLabel && !editorIsPrimary
 
   const nextActions = []
-  // 직접제작 배포는 사장님(에디터/admin)만 — 본사에서 status만 published로 바꾸면 사고 위험
-  if (site.status === 'published') {
+  // 직접제작 배포는 사장님(에디터/admin)만 — 본사에서 status만 바꾸면 사고 위험
+  if (['trial', 'subscribed', 'pay_method'].includes(site.status)) {
     nextActions.push({ label: '정지', color: '#dc2626', run: () => onStatusAction?.(site.site_id, 'suspended') })
   }
   if (site.status === 'suspended') {
@@ -261,7 +260,7 @@ export default function PlatformSiteDetail({
       color: '#2563eb',
       run: () => onStatusAction?.(
         site.site_id,
-        isManaged && !site.trial_started_at ? 'review' : 'published'
+        isManaged && !site.trial_started_at ? 'preview' : (site.trial_started_at ? 'trial' : 'pay_method')
       ),
     })
   }
@@ -275,7 +274,7 @@ export default function PlatformSiteDetail({
     nextActions.push({ label: '이 회원 보기', color: '#38bdf8', run: () => onGoCustomer(site.customer_id) })
   }
 
-  const showCancel = isManaged && inquiry && canCancelManagedIntake(inquiry) && onCancelManaged
+  const showCancel = isManaged && inquiry && canCancelManagedIntake(inquiry, site) && onCancelManaged
 
   async function handleSave(e) {
     e.preventDefault()
@@ -295,7 +294,6 @@ export default function PlatformSiteDetail({
         phone: form.phone.trim() || null,
         email: form.email.trim() || null,
         status: form.status,
-        deploy_status: form.deploy_status,
       })
       setMsg('✅ sites 저장됨')
       setEditing(false)
@@ -361,7 +359,6 @@ export default function PlatformSiteDetail({
           <h3 style={{ margin: 0, fontSize: 18, color: '#f1f5f9', fontWeight: 800 }}>{site.name}</h3>
           <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {badge(codeColor('FLOW_STEP', flowStep), codeLabel('FLOW_STEP', flowStep, flowStepLabel(flowStep)))}
-            {badge(codeColor('SITE_STATUS', site.status), codeLabel('SITE_STATUS', site.status))}
             {badge(codeColor('BUILD_TYPE', site.build_type), codeLabel('BUILD_TYPE', site.build_type))}
           </div>
         </div>
@@ -468,11 +465,11 @@ export default function PlatformSiteDetail({
         )}
         {isManaged && inquiry && (
           <div style={{ marginTop: 8 }}>
-            <Row label="inquiries.status">
-              {codeLabel('INQUIRY_STATUS', inquiry.status)} ({inquiry.status})
+            <Row label="sites.status (FLOW)">
+              {codeLabel('FLOW_STEP', site.status, flowStepLabel(site.status))} ({site.status})
             </Row>
-            <Row label="sites.status">
-              {codeLabel('SITE_STATUS', site.status)} ({site.status})
+            <Row label="inquiries.final_paid_at">
+              {inquiry.final_paid_at ? new Date(inquiry.final_paid_at).toLocaleString('ko-KR') : 'NULL'}
             </Row>
           </div>
         )}
@@ -513,8 +510,9 @@ export default function PlatformSiteDetail({
 
         {subscription ? (
           <>
-            <Row label="subscriptions.status">
-              {codeLabel('SUB_STATUS', subscription.status)} ({subscription.status})
+            <Row label="구독 생명">
+              {subscriptionLifeLabel(site, subscription)}
+              {subscription.cancelled_at ? ` · cancelled_at ${new Date(subscription.cancelled_at).toLocaleDateString('ko-KR')}` : ''}
             </Row>
             <Row label="subscriptions.amount">{subscription.amount?.toLocaleString()}원 / 월</Row>
             <Row label="subscriptions.payment_method">
@@ -539,7 +537,7 @@ export default function PlatformSiteDetail({
       </Section>
 
       <Section title="기타 액션">
-        {!isManaged && site.status === 'draft' && (
+        {!isManaged && site.status === 'building' && (
           <p style={{ margin: '0 0 10px', fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>
             직접제작 — 배포는 사장님이 사이트 관리/에디터에서 합니다. 본사에서 강제 배포하지 않습니다.
           </p>
@@ -601,8 +599,7 @@ export default function PlatformSiteDetail({
             {field('email', 'sites.email')}
             {field('address', 'sites.address')}
             {field('description', 'sites.description', { type: 'textarea' })}
-            {field('status', 'sites.status', { type: 'select', options: SITE_STATUS_OPTS, codeGroup: 'SITE_STATUS' })}
-            {field('deploy_status', 'sites.deploy_status', { type: 'select', options: DEPLOY_STATUS_OPTS, codeGroup: 'DEPLOY_STATUS' })}
+            {field('status', 'sites.status (FLOW_STEP)', { type: 'select', options: FLOW_STATUS_OPTS, codeGroup: 'FLOW_STEP' })}
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button
                 type="submit"

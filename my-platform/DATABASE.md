@@ -6,9 +6,10 @@ SQL 스크립트와 스키마 명세는 **`docs/db/`** 에서 관리합니다.
 
 | 용도 | 경로 |
 |------|------|
-| 스키마 명세 (HTML) | [docs/db/스키마_버전목록.html](docs/db/스키마_버전목록.html) · [v1.2](docs/db/스키마_v1.2_2026-09-07.html) |
-| ERD | [docs/db/ERD_v1.1_2026-09-07.html](docs/db/ERD_v1.1_2026-09-07.html) |
-| 최신 전체 스키마 | [docs/db/sql/schema/schema_v2.1_2026-08-31.sql](docs/db/sql/schema/schema_v2.1_2026-08-31.sql) |
+| 플로우 | [docs/플로우.md](docs/플로우.md) |
+| 테이블명세 | [docs/db/테이블명세.md](docs/db/테이블명세.md) |
+| ERD | [docs/db/ERD.md](docs/db/ERD.md) |
+| 최신 전체 스키마 | [docs/db/sql/schema/schema_v2.2_2026-09-19.sql](docs/db/sql/schema/schema_v2.2_2026-09-19.sql) |
 | 증분 마이그레이션 | [docs/db/sql/migrations/](docs/db/sql/migrations/) |
 | 테스트 데이터 | [docs/db/sql/sample/sample_data_v2.sql](docs/db/sql/sample/sample_data_v2.sql) |
 
@@ -34,13 +35,13 @@ SQL 스크립트와 스키마 명세는 **`docs/db/`** 에서 관리합니다.
 - `customers` — 고객 프로필
 - `staff` — 본사 직원 (`role=platform_admin` → `/platform`)
 
-관리자 등록: UI Create user + `staff` INSERT. 상세는 `docs/db/스키마_v1.2_2026-09-07.html`
+관리자 등록: UI Create user + `staff` INSERT. 상세는 `docs/db/테이블명세.md`
 
 ## 실행 순서
 
 ### 신규 DB (처음부터)
 
-1. `docs/db/sql/schema/schema_v2.1_2026-08-31.sql`
+1. `docs/db/sql/schema/schema_v2.2_2026-09-19.sql`
 2. (선택) `docs/db/sql/sample/sample_data_v2.sql`
 
 ### 기존 DB (mvp_v2 이미 적용됨)

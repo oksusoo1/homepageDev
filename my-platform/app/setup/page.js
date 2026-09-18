@@ -103,8 +103,7 @@ function SetupForm() {
           phone: form.phone.trim() || null,
           email: form.email.trim() || null,
           build_type: 'self',
-          status: 'draft',
-          deploy_status: 'pending',          
+          status: 'building',
         }])
         .select()
         .single()

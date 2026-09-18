@@ -265,7 +265,7 @@ export default function PlatformCustomerDetail({
                     </div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                    {badge(codeColor('SITE_STATUS', s.status), codeLabel('SITE_STATUS', s.status))}
+                    {badge(codeColor('FLOW_STEP', s.status), codeLabel('FLOW_STEP', s.status))}
                     {badge(codeColor('BUILD_TYPE', s.build_type),
                       codeLabel('BUILD_TYPE', s.build_type))}
                   </div>

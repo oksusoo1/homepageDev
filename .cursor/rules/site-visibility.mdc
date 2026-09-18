@@ -1,11 +1,11 @@
 ---
-description: 사이트 공개 범위 (FLOW_STEP 기준)
+description: 사이트 공개 범위 (FLOW_STEP = sites.status)
 alwaysApply: true
 ---
 
 # 사이트 공개 범위
 
-말 짧게. FLOW 단계별 공개 범위는 아래로 고정.
+말 짧게. **`sites.status` = FLOW_STEP** 이 SSOT. 공개 범위는 그 코드로만 결정.
 
 ## 공개 범위 정의
 
@@ -19,20 +19,18 @@ alwaysApply: true
 ## FLOW_STEP → 공개 범위
 
 ### 대리제작
-- 접수·견적·선금: 사이트 없음/해당 없음
-- **제작** → 제작하는 사람만
-- **완료·검토·잔금** → 부분공개
-- **카드/계좌·체험·구독** → 공개
-- **정지** → 미공개
+- **intake · deposit · building** → 제작하는 사람만
+- **preview · balance** → 부분공개
+- **pay_method · trial · subscribed** → 공개
+- **suspended** → 미공개
 
 ### 셀프제작
-- **제작** → 제작하는 사람만
-- **완료·검토** → 부분공개
-- **카드/계좌·체험·구독** → 공개
-- **정지** → 미공개
+- **building** → 제작하는 사람만
+- **preview** → 부분공개
+- **pay_method · trial · subscribed** → 공개
+- **suspended** → 미공개
 
 ## 구현 시
 
-- `sites.status`만 보지 말고 **FLOW_STEP과 맞춰** 게이트를 건다.
-- 공개 URL(`/s/...`), `/my` 보기 버튼, 에디터「실제 사이트」, 리본 문구가 위 표와 어긋나면 버그.
-- 고치기 전 AS-IS/TO-BE로 보고하고 승인받는다.
+- `lib/site-visibility.js` · `lib/site-flow.js` 기준
+- 공개 URL(`/s/...`), `/my` 보기 버튼, 에디터「실제 사이트」, 리본 문구가 위 표와 어긋나면 버그

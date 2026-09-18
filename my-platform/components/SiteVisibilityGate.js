@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { requireAuthUser } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
 import { sitePublicPath } from '@/lib/site-paths'
-import { canViewByVisibility } from '@/lib/site-visibility'
+import { canViewByVisibility, resolveSiteVisibility } from '@/lib/site-visibility'
 
 /**
  * /s/... 공개 범위 게이트
@@ -20,10 +20,8 @@ export default function SiteVisibilityGate({ site, siteCode, visibility: visibil
 
   const resolved = visibilityProp || (() => {
     if (!site) return 'hidden'
-    if (site.status === 'suspended' || site.status === 'cancelled') return 'hidden'
-    if (site.status === 'published') return 'public'
-    if (site.status === 'review') return 'partial'
-    return 'producer'
+    const { visibility } = resolveSiteVisibility(site)
+    return visibility
   })()
 
   useEffect(() => {

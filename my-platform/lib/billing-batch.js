@@ -3,12 +3,14 @@
  * - 자동 cron 없음 → DevTools/API 수동 실행
  * - asOfDate: 가상 "오늘" (YYYY-MM-DD)
  *
- * 카드: next_billing_date 다음날부터 결제 MOCK → billing_history paid, trial→active
- * 계좌: D-5~D-day 매일 리마인드 로그 / 미납 +2일 초과 시 사이트 suspended
+ * 카드: next_billing_date 다음날부터 결제 MOCK → billing_history paid, sites→subscribed
+ * 계좌: D-5~D-day 매일 리마인드 로그 / 미납 +2일 초과 시 sites→suspended
+ * 청구 대상: sites.status trial|subscribed + cancelled_at NULL
  */
 
 import { supabase } from '@/lib/supabase'
 import { onlyActive } from '@/lib/use-flag'
+import { isBillableSubscription } from '@/lib/subscription-life'
 
 function parseDate(ymd) {
   const [y, m, d] = ymd.split('-').map(Number)
@@ -72,7 +74,7 @@ export async function runBillingBatch({ asOfDate } = {}) {
     supabase
       .from('subscriptions')
       .select('*, sites(site_id, name, subdomain, status, customer_id)')
-      .in('status', ['trial', 'active'])
+      .is('cancelled_at', null)
       .not('next_billing_date', 'is', null)
   )
 
@@ -80,7 +82,7 @@ export async function runBillingBatch({ asOfDate } = {}) {
 
   for (const sub of subs || []) {
     const site = Array.isArray(sub.sites) ? sub.sites[0] : sub.sites
-    if (!site || site.status === 'cancelled') continue
+    if (!isBillableSubscription(site, sub)) continue
 
     const due = String(sub.next_billing_date).slice(0, 10)
     const method = sub.payment_method // card | manual
@@ -140,11 +142,18 @@ async function runCardTask({ sub, site, due, asOf, actions }) {
 
   const nextDue = addMonths(due, 1)
   const { error: subErr } = await supabase.from('subscriptions').update({
-    status: 'active',
     next_billing_date: nextDue,
     updated_at: now,
   }).eq('subscription_id', sub.subscription_id)
   if (subErr) throw subErr
+
+  if (site.status !== 'subscribed') {
+    const { error: siteErr } = await supabase.from('sites').update({
+      status: 'subscribed',
+      updated_at: now,
+    }).eq('site_id', site.site_id)
+    if (siteErr) throw siteErr
+  }
 
   const logged = await logNotification({
     type: 'card_charged',
@@ -214,12 +223,6 @@ async function runBankTasks({ sub, site, due, asOf, actions }) {
       }).eq('site_id', site.site_id)
       if (error) throw error
     }
-
-    const { error: subErr } = await supabase.from('subscriptions').update({
-      status: 'paused',
-      updated_at: new Date().toISOString(),
-    }).eq('subscription_id', sub.subscription_id)
-    if (subErr) throw subErr
 
     const logged = await logNotification({
       type: 'bank_suspend',

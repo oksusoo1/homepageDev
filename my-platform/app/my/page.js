@@ -113,7 +113,7 @@ export default function MySitesPage() {
       )
       if (custSites?.length) {
         const siteIds = custSites.map(s => s.site_id)
-        await supabase.from('sites').update({ status: 'cancelled' }).in('site_id', siteIds).eq('use_flag', 1)
+        await supabase.from('sites').update({ status: 'suspended' }).in('site_id', siteIds).eq('use_flag', 1)
       }
       await supabase.from('customers')
         .update({ status: 'withdrawn', withdraw_at: null })
@@ -129,7 +129,7 @@ export default function MySitesPage() {
     const { data: siteList } = await onlyActive(
       supabase
         .from('sites')
-        .select('*, subscriptions(status, amount, next_billing_date)')
+        .select('*, subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
         .eq('customer_id', cust.customer_id)
     ).order('created_at', { ascending: false })
     setSites(siteList || [])
@@ -145,7 +145,7 @@ export default function MySitesPage() {
       const { data: linkedSites } = await onlyActive(
         supabase
           .from('sites')
-          .select('site_id, subdomain, status, deploy_status, inquiry_id')
+          .select('site_id, subdomain, status, inquiry_id')
           .eq('customer_id', cust.customer_id)
           .not('inquiry_id', 'is', null)
       )
@@ -168,7 +168,7 @@ export default function MySitesPage() {
     router.push('/login')
   }
 
-  // 본사 제작 문의 제출 → 문의 + draft 사이트(템플릿) 동시 생성
+  // 본사 제작 문의 제출 → 문의 + 사이트(intake) 동시 생성
   async function handleInquirySubmit() {
     const siteName = (inquiryForm.site_name || '').trim()
     const subdomain = (inquiryForm.subdomain || '').trim().toLowerCase()
@@ -216,7 +216,6 @@ export default function MySitesPage() {
         business_type: inquiryForm.business_type,
         description,
         phone: inquiryForm.phone || customer.phone,
-        status: 'received',
       }).select('inquiry_id').single()
       if (inqErr) throw new Error(inqErr.message)
 
@@ -232,8 +231,7 @@ export default function MySitesPage() {
         email: customer.email || null,
         build_type: 'managed',
         inquiry_id: inq.inquiry_id,
-        status: 'draft',
-        deploy_status: 'pending',
+        status: 'intake',
       })
       if (sErr) throw new Error(sErr.message)
 
@@ -247,7 +245,7 @@ export default function MySitesPage() {
       const { data: siteList } = await onlyActive(
         supabase
           .from('sites')
-          .select('*, subscriptions(status, amount, next_billing_date)')
+          .select('*, subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
           .eq('customer_id', customer.customer_id)
       ).order('created_at', { ascending: false })
       setSites(siteList || [])
@@ -256,7 +254,7 @@ export default function MySitesPage() {
         const { data: linkedSites } = await onlyActive(
           supabase
             .from('sites')
-            .select('site_id, subdomain, status, deploy_status, inquiry_id')
+            .select('site_id, subdomain, status, inquiry_id')
             .eq('customer_id', customer.customer_id)
             .not('inquiry_id', 'is', null)
         )
@@ -281,7 +279,7 @@ export default function MySitesPage() {
     const { data: siteList } = await onlyActive(
       supabase
         .from('sites')
-        .select('*, subscriptions(status, amount, next_billing_date)')
+        .select('*, subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
         .eq('customer_id', customer.customer_id)
     ).order('created_at', { ascending: false })
     setSites(siteList || [])
@@ -291,7 +289,7 @@ export default function MySitesPage() {
       const { data: linkedSites } = await onlyActive(
         supabase
           .from('sites')
-          .select('site_id, subdomain, status, deploy_status, inquiry_id')
+          .select('site_id, subdomain, status, inquiry_id')
           .eq('customer_id', customer.customer_id)
           .not('inquiry_id', 'is', null)
       )
@@ -321,25 +319,33 @@ export default function MySitesPage() {
     // 사이트 목록 다시 로드
     const { data: siteList } = await supabase
       .from('sites')
-      .select('*, subscriptions(status, amount, next_billing_date)')
+      .select('*, subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
       .eq('customer_id', customer.customer_id)
       .order('created_at', { ascending: false })
     setSites(siteList || [])
   }
 
   const STATUS_COLOR = {
-    published: '#16a34a',
-    review:    '#7c3aed',
-    draft:     '#d97706',
+    intake: '#b45309',
+    deposit: '#b45309',
+    building: '#2563eb',
+    preview: '#b45309',
+    balance: '#b45309',
+    pay_method: '#2563eb',
+    trial: '#2563eb',
+    subscribed: '#16a34a',
     suspended: '#dc2626',
-    cancelled: '#6b7280',
   }
   const STATUS_BG = {
-    published: '#f0fdf4',
-    review:    '#f5f3ff',
-    draft:     '#fffbeb',
+    intake: '#fffbeb',
+    deposit: '#fffbeb',
+    building: '#eff6ff',
+    preview: '#fffbeb',
+    balance: '#fffbeb',
+    pay_method: '#eff6ff',
+    trial: '#eff6ff',
+    subscribed: '#f0fdf4',
     suspended: '#fef2f2',
-    cancelled: '#f9fafb',
   }
   const CATEGORY_ICON = {
     cafe:     '☕',
@@ -350,14 +356,20 @@ export default function MySitesPage() {
     default:  '🏪',
   }
 
-  // 카드 액션: 「사이트 보기」를 항상 왼쪽 고정, 나머지는 오른쪽 칸 안에서 이어짐
+  // 카드 액션: 좁은 화면에서는 아래 줄로 내려감 (고정 폭 금지)
   const cardActionsStyle = {
     display: 'flex',
     gap: 8,
     flexShrink: 0,
-    width: 300,
+    flexWrap: 'wrap',
     justifyContent: 'flex-start',
     alignItems: 'center',
+  }
+  const cardHeaderStyle = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
     flexWrap: 'wrap',
   }
   const btnView = (disabled) => ({
@@ -699,8 +711,8 @@ export default function MySitesPage() {
               padding: '20px 24px', marginBottom: 16,
               display: 'flex', flexDirection: 'column', gap: 12,
             }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+              <div style={cardHeaderStyle}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: '1 1 200px' }}>
                   <div style={{
                     width: 56, height: 56, borderRadius: 12,
                     background: '#fffbeb', border: '1px solid #fde68a',
@@ -746,7 +758,7 @@ export default function MySitesPage() {
                   >
                     사이트 관리
                   </button>
-                  {canCancelManagedIntake(inq) && (
+                  {canCancelManagedIntake(inq, linkedSiteMap[inq.inquiry_id] || null) && (
                     <button
                       type="button"
                       onClick={() => handleCancelManaged(inq.inquiry_id)}
@@ -765,11 +777,11 @@ export default function MySitesPage() {
                 {nextHint}
               </div>
 
-              {inq.dev_fee_total && inq.status === 'review' && !inq.final_paid_at && (
+              {inq.dev_fee_total && ['preview', 'balance'].includes(linkedSiteMap[inq.inquiry_id]?.status) && !inq.final_paid_at && (
                 <DevFeeSummary inquiry={inq} highlight="final" finalPending={finalPending} />
               )}
 
-              {inq.status === 'review' && canPayFinalBalance(inq, { finalPending }) && (
+              {canPayFinalBalance(inq, { finalPending, site: linkedSiteMap[inq.inquiry_id] }) && (
                 <button
                   onClick={() => router.push(oneTimePaymentMethodPath(inq.inquiry_id))}
                   style={{
@@ -827,12 +839,12 @@ export default function MySitesPage() {
               const icon = CATEGORY_ICON[site.category] || CATEGORY_ICON.default
               const statusColor = STATUS_COLOR[site.status] || '#6b7280'
               const statusBg = STATUS_BG[site.status] || '#f9fafb'
-              const statusLabel = codeLabel('SITE_STATUS', site.status)
+              const statusLabel = codeLabel('FLOW_STEP', site.status, flowStepLabel(site.status))
               const nextHint = siteNextHint(site)
               const buildLabel = codeLabel('BUILD_TYPE', site.build_type)
-              // 대리: 검수(공개) 전까지 보기/관리 비활성
+              // 대리: 부분공개(검토) 전까지 보기/관리 비활성
               const managedLocked = site.build_type === 'managed'
-                && !['review', 'published', 'suspended'].includes(site.status)
+                && !['preview', 'balance', 'pay_method', 'trial', 'subscribed', 'suspended'].includes(site.status)
 
               return (
                 <div key={site.site_id} style={{
@@ -849,10 +861,8 @@ export default function MySitesPage() {
                     e.currentTarget.style.boxShadow = 'none'
                   }}>
 
-                  <div style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16,
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+                  <div style={cardHeaderStyle}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: '1 1 200px' }}>
                       <div style={{
                         width: 56, height: 56, borderRadius: 12,
                         background: '#f3f4f6', border: '1px solid #e5e7eb',
@@ -914,7 +924,7 @@ export default function MySitesPage() {
                       )}
                       {site.build_type === 'managed' && site.inquiry_id && (() => {
                         const inq = myInquiries.find(i => i.inquiry_id === site.inquiry_id)
-                        if (!canCancelManagedIntake(inq)) return null
+                        if (!canCancelManagedIntake(inq, site)) return null
                         return (
                           <button
                             type="button"
@@ -941,14 +951,16 @@ export default function MySitesPage() {
                     const inq = site.inquiry_id
                       ? myInquiries.find(i => i.inquiry_id === site.inquiry_id)
                       : null
-                    if (!inq || inq.status === 'done') return null
+                    if (!inq) return null
                     const finalPending = isFinalPaymentPending(pendingOtps, site)
+                    const canPay = canPayFinalBalance(inq, { finalPending, site })
+                    if (!canPay && site.status !== 'pay_method') return null
                     return (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                        {inq.status === 'review' && !inq.final_paid_at && (
+                        {canPay && !inq.final_paid_at && (
                           <DevFeeSummary inquiry={inq} highlight="final" finalPending={finalPending} />
                         )}
-                        {inq.status === 'review' && canPayFinalBalance(inq, { finalPending }) && (
+                        {canPay && (
                           <button
                             type="button"
                             onClick={() => router.push(oneTimePaymentMethodPath(inq.inquiry_id))}
@@ -960,7 +972,7 @@ export default function MySitesPage() {
                             잔금 결제하기 →
                           </button>
                         )}
-                        {inq.status === 'approved' && (
+                        {site.status === 'pay_method' && (
                           <button
                             type="button"
                             onClick={() => router.push(paymentMethodPath(site.subdomain, 'deploy'))}
