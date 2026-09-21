@@ -101,8 +101,8 @@ export default function CustomerPortal({ params }) {
 
     const { data: pm } = await onlyActive(
       supabase.from('customer_payment_methods').select('*')
-        .eq('customer_id', cust.customer_id).eq('is_active', true).eq('is_default', true)
-    ).single()
+        .eq('customer_id', cust.customer_id)
+    ).maybeSingle()
     setPaymentMethod(pm)
 
     if (sub) {
@@ -162,7 +162,6 @@ export default function CustomerPortal({ params }) {
         .from('customer_payment_methods')
         .select('payment_method_id')
         .eq('customer_id', customer.customer_id)
-        .eq('is_active', true)
     ).maybeSingle()
 
     const { data: subNow } = await onlyActive(

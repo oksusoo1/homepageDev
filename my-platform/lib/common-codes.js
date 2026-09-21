@@ -1,13 +1,13 @@
 /**
  * 공통코드 조회/캐시
- * DB: code_groups + common_codes
+ * DB: common_codes (group_code + code)
  * 코드값(code)은 불변 · 표시명(label)만 관리화면에서 변경
  */
 
 import { supabase } from '@/lib/supabase'
 import { onlyActive } from '@/lib/use-flag'
 
-/** @type {{ groups: object[], byGroup: Record<string, object[]>, loadedAt: number } | null} */
+/** @type {{ groups: string[], byGroup: Record<string, object[]>, loadedAt: number } | null} */
 let cache = null
 
 export function clearCommonCodeCache() {
@@ -20,29 +20,25 @@ export function clearCommonCodeCache() {
 export async function loadCommonCodes({ force = false } = {}) {
   if (!force && cache) return cache
 
-  const { data: groups, error: gErr } = await onlyActive(
-    supabase.from('code_groups').select('*').order('group_code')
-  )
-  if (gErr) throw gErr
-
-  const { data: codes, error: cErr } = await onlyActive(
+  const { data: codes, error } = await onlyActive(
     supabase
       .from('common_codes')
-      .select('*, code_groups(group_code)')
+      .select('*')
+      .order('group_code')
       .order('sort_order')
   )
-  if (cErr) throw cErr
+  if (error) throw error
 
   const byGroup = {}
-  for (const g of groups || []) byGroup[g.group_code] = []
   for (const c of codes || []) {
-    const gc = c.code_groups?.group_code
+    const gc = c.group_code
     if (!gc) continue
     if (!byGroup[gc]) byGroup[gc] = []
     byGroup[gc].push(c)
   }
 
-  cache = { groups: groups || [], byGroup, loadedAt: Date.now() }
+  const groups = Object.keys(byGroup).sort()
+  cache = { groups, byGroup, loadedAt: Date.now() }
   return cache
 }
 

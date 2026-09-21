@@ -45,7 +45,7 @@ export default function TemplatesPage() {
 
     // 템플릿 목록 조회
     const { data } = await onlyActive(
-      supabase.from('templates').select('*').eq('is_active', true)
+      supabase.from('templates').select('*')
     ).order('sort_order')
     setTemplates(data || [])
     setLoading(false)

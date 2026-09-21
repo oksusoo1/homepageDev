@@ -74,9 +74,9 @@ INSERT INTO one_time_payments (customer_id, site_id, type, amount, status, note,
 -- 4. customer_payment_methods
 -- ================================================
 
-INSERT INTO customer_payment_methods (customer_id, pg_provider, pg_customer_id, card_last4, card_brand, card_name, is_default, is_active) VALUES
-  ('11111111-1111-1111-1111-111111111111', 'toss', 'BILLING_KEY_hong_abc123', '4242', 'kakao',   '카카오페이', true, true),
-  ('22222222-2222-2222-2222-222222222222', 'toss', 'BILLING_KEY_kim_xyz789',  '8888', 'shinhan', '신한카드',   true, true);
+INSERT INTO customer_payment_methods (customer_id, pg_provider, pg_customer_id, card_last4, card_brand, card_name) VALUES
+  ('11111111-1111-1111-1111-111111111111', 'toss', 'BILLING_KEY_hong_abc123', '4242', 'kakao',   '카카오페이'),
+  ('22222222-2222-2222-2222-222222222222', 'toss', 'BILLING_KEY_kim_xyz789',  '8888', 'shinhan', '신한카드');
 
 
 -- ================================================

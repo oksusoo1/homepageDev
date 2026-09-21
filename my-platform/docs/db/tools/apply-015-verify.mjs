@@ -58,10 +58,15 @@ async function main() {
   console.log(`sites use_flag=1: ${sites?.length || 0}, legacy status: ${legacy.length}`)
   for (const s of legacy) console.log('  -', s.subdomain, s.status, s.build_type)
 
-  const { data: groups } = await sb.from('code_groups')
-    .select('group_code, use_flag')
-    .in('group_code', ['FLOW_STEP', 'SITE_STATUS', 'DEPLOY_STATUS', 'SUB_STATUS', 'INQUIRY_STATUS'])
-  console.log('code_groups:', groups)
+  const { data: flowCodes } = await sb.from('common_codes')
+    .select('group_code, code, use_flag')
+    .eq('group_code', 'FLOW_STEP')
+    .order('sort_order')
+  console.log('common_codes FLOW_STEP:', flowCodes?.map(c => `${c.code}(f=${c.use_flag})`).join(', ') || '(none)')
+
+  const { error: cgErr } = await sb.from('code_groups').select('group_code').limit(1)
+  if (!cgErr) console.log('⚠ code_groups 아직 있음 — 017 미적용?')
+  else console.log('✅ code_groups 없음 (017 OK)')
 
   // 015 SQL의 UPDATE와 동일 로직을 JS로 (레거시 행만)
   for (const s of legacy) {

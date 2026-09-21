@@ -25,6 +25,12 @@ erDiagram
   customers ||--o{ support_tickets : opens
   sites ||--o{ user_posts : board
   sites ||--o{ user_messages : contact
+  common_codes {
+    uuid common_code_id PK
+    varchar group_code
+    varchar code
+    varchar label
+  }
 
   sites {
     uuid site_id PK
@@ -71,3 +77,4 @@ erDiagram
 - **customers** = 고객(사장님)
 - **staff** = 직원(본사)
 - **user_*** = 방문자(공개 사이트)
+- **common_codes** = 표시 라벨 (`group_code`+`code`, 별도 FK 없음)

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { USE_FLAG_OFF } from '@/lib/use-flag'
 
 // 서버사이드 Supabase (서비스 롤 키 사용)
 const supabase = createClient(
@@ -38,19 +39,22 @@ export async function POST(req) {
 
     const { billingKey, card } = tossData
 
-    // customer_payment_methods 저장
+    // 기존 카드 soft delete → 새 카드 insert
+    await supabase.from('customer_payment_methods')
+      .update({ use_flag: USE_FLAG_OFF })
+      .eq('customer_id', customerId)
+      .eq('use_flag', 1)
+
     const { error: pmError } = await supabase
       .from('customer_payment_methods')
-      .upsert({
+      .insert({
         customer_id:    customerId,
         pg_provider:    'toss',
         pg_customer_id: billingKey,
         card_last4:     card?.number?.slice(-4) || null,
         card_brand:     card?.company           || null,
         card_name:      card?.ownerType         || null,
-        is_default:     true,
-        is_active:      true,
-      }, { onConflict: 'customer_id' })   // 기존 카드 덮어쓰기
+      })
 
     if (pmError) throw new Error(pmError.message)
 

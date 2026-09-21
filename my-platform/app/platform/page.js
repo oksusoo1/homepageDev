@@ -142,7 +142,7 @@ export default function AdminConsole() {
       onlyActive(supabase.from('subscriptions').select('*, sites(site_name:name, subdomain, status), customers(name)')).order('created_at', { ascending: false }),
       onlyActive(supabase.from('support_tickets').select('*, sites(name), customers(name)')).order('created_at', { ascending: false }),
       onlyActive(supabase.from('one_time_payments').select('*, customers(name), sites(name)')).order('created_at', { ascending: false }),
-      onlyActive(supabase.from('templates').select('*').eq('is_active', true)).order('sort_order'),
+      onlyActive(supabase.from('templates').select('*')).order('sort_order'),
       onlyActive(supabase.from('inquiries').select('*, customers(name, email, phone)')).order('created_at', { ascending: false }),
       onlyActive(supabase.from('customers').select('*')).order('created_at', { ascending: false }),
     ])

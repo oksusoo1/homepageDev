@@ -18,7 +18,7 @@ alwaysApply: true
 ## 체크 목록
 
 1. **코드** — `lib/flow-step.js` · `lib/site-flow.js` · `lib/site-visibility.js` · `lib/managed-flow.js` · `lib/deploy.js`
-2. **공통코드 DB** — `FLOW_STEP` ON, `SITE_STATUS`/`DEPLOY_STATUS`/`SUB_STATUS`/`INQUIRY_STATUS` OFF
+2. **공통코드 DB** — `common_codes` (`group_code`+`code`). 구 `code_groups` 없음 (017)
 3. **쓰기** — 단계 이동은 `sites.status`만 (또는 `setSiteFlow`)
 4. **화면** — `/platform` · `/my` · `/s/...` (게이트·버튼·뱃지)
 5. **테스트 프리셋** — DevTools rewind가 정방향과 맞는지

@@ -201,12 +201,12 @@ export default function MySitesPage() {
     setInquirySubmitting(true)
     try {
       const { data: tmpls } = await onlyActive(
-        supabase.from('templates').select('template_id').eq('category', inquiryForm.business_type).eq('is_active', true)
+        supabase.from('templates').select('template_id').eq('category', inquiryForm.business_type)
       ).order('sort_order').limit(1)
       let templateId = tmpls?.[0]?.template_id || null
       if (!templateId) {
         const { data: anyTmpls } = await onlyActive(
-          supabase.from('templates').select('template_id').eq('is_active', true)
+          supabase.from('templates').select('template_id')
         ).order('sort_order').limit(1)
         templateId = anyTmpls?.[0]?.template_id || null
       }

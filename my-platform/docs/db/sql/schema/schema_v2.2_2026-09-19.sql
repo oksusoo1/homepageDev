@@ -6,7 +6,8 @@
 --       DROP: sites.deploy_status, inquiries.status, subscriptions.status (016)
 --       sync_site_status 트리거 제거
 --       OTP pending_confirm · subscriptions 계좌이체 컬럼
---       (공통코드 code_groups/common_codes 는 migrations 011~015 시드)
+--       공통코드: common_codes (group_code+code) — code_groups 는 017에서 DROP
+--       시드 이력: migrations 011~015 · flatten: 017
 --
 -- use_flag: 1=사용 · 0=삭제 — 조회 기본 use_flag = 1
 -- 주체: customers=고객 · staff=직원 · user=방문자
@@ -97,7 +98,6 @@ CREATE TABLE templates (
   category         VARCHAR(50) NOT NULL,
   thumbnail_url    VARCHAR(500),
   default_content  JSONB,
-  is_active        BOOLEAN NOT NULL DEFAULT true,  -- 템플릿 노출 여부 (업무)
   use_flag         SMALLINT NOT NULL DEFAULT 1     -- 1=사용 · 0=삭제
                    CHECK (use_flag IN (0, 1)),
   sort_order       INTEGER DEFAULT 0,
@@ -105,7 +105,6 @@ CREATE TABLE templates (
 );
 
 CREATE INDEX idx_templates_category ON templates(category);
-CREATE INDEX idx_templates_active   ON templates(is_active);
 CREATE INDEX idx_templates_use_flag ON templates(use_flag);
 
 INSERT INTO templates (name, category, sort_order) VALUES
@@ -202,8 +201,6 @@ CREATE TABLE customer_payment_methods (
   card_last4          VARCHAR(4),
   card_brand          VARCHAR(50),
   card_name           VARCHAR(100),
-  is_default          BOOLEAN NOT NULL DEFAULT true,
-  is_active           BOOLEAN NOT NULL DEFAULT true, -- 기본카드 활성 (업무)
   use_flag            SMALLINT NOT NULL DEFAULT 1    -- 1=사용 · 0=삭제
                       CHECK (use_flag IN (0, 1)),
   registered_at       TIMESTAMP DEFAULT NOW(),
@@ -211,7 +208,6 @@ CREATE TABLE customer_payment_methods (
 );
 
 CREATE INDEX idx_pay_methods_customer_id ON customer_payment_methods(customer_id);
-CREATE INDEX idx_pay_methods_active      ON customer_payment_methods(is_active);
 CREATE INDEX idx_pay_methods_use_flag    ON customer_payment_methods(use_flag);
 
 

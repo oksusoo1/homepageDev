@@ -300,7 +300,6 @@ export default function EditorPage({ params }) {
         .from('customer_payment_methods')
         .select('payment_method_id')
         .eq('customer_id', customer.customer_id)
-        .eq('is_active', true)
     ).maybeSingle()
 
     const { data: existingSub } = await onlyActive(

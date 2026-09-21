@@ -3,7 +3,7 @@ import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { requireAuthUser } from '@/lib/auth'
-import { onlyActive } from '@/lib/use-flag'
+import { onlyActive, USE_FLAG_OFF } from '@/lib/use-flag'
 import { deploySite } from '@/lib/deploy'
 import { assertPaymentSetupAllowed } from '@/lib/billing'
 import { paymentCardSuccessPath, siteAdminPath, sitePublicHostname } from '@/lib/site-paths'
@@ -87,12 +87,12 @@ function CardRegisterForm() {
     const last4 = cardNum.replace(/\s/g, '').slice(-4)
     const mockBillingKey = `MOCK_BILLING_${customer.customer_id}_${Date.now()}`
 
-    // 기존 카드 비활성화
+    // 기존 카드 soft delete → 새 카드 insert
     await supabase.from('customer_payment_methods')
-      .update({ is_default: false, is_active: false })
+      .update({ use_flag: USE_FLAG_OFF })
       .eq('customer_id', customer.customer_id)
+      .eq('use_flag', 1)
 
-    // 새 카드 insert
     await supabase.from('customer_payment_methods').insert({
       customer_id:    customer.customer_id,
       pg_provider:    'toss',
@@ -100,8 +100,6 @@ function CardRegisterForm() {
       card_last4:     last4,
       card_brand:     '테스트카드',
       card_name:      '개인',
-      is_default:     true,
-      is_active:      true,
     })
 
     // redirect=deploy: 카드 등록 완료 후 자동 배포 (trial 구독은 deploySite에서 생성)

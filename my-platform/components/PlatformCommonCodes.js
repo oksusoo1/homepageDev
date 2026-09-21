@@ -2,41 +2,36 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
-import { onlyActive, USE_FLAG_OFF, USE_FLAG_ON } from '@/lib/use-flag'
+import { USE_FLAG_OFF, USE_FLAG_ON } from '@/lib/use-flag'
 import { clearCommonCodeCache, loadCommonCodes } from '@/lib/common-codes'
 import { matchesSearchQuery } from '@/lib/platform-list-search'
 import PlatformListSearch from '@/components/PlatformListSearch'
 
-/** 전체 그룹·코드 검색 → 그룹별 매칭 목록 */
-function buildCodeSearchResults(query, groups, allCodes) {
+function buildCodeSearchResults(query, groupCodes, allCodes) {
   const q = String(query || '').trim()
   if (!q) return []
 
-  return groups.flatMap(g => {
-    const codesInGroup = allCodes.filter(c => c.code_group_id === g.code_group_id)
-    const groupMatch = matchesSearchQuery(q, g.group_code, g.name, g.description, g.ref_hint)
+  return groupCodes.flatMap(gc => {
+    const codesInGroup = allCodes.filter(c => c.group_code === gc)
+    const groupMatch = matchesSearchQuery(q, gc)
     const matchedCodes = codesInGroup.filter(c =>
       matchesSearchQuery(q, c.code, c.label, c.description)
     )
     if (!groupMatch && matchedCodes.length === 0) return []
-
     return [{
-      group: g,
+      group_code: gc,
       codes: groupMatch ? codesInGroup : matchedCodes,
     }]
   })
 }
 
 /**
- * AIFRONT식 공통코드 관리
- * - 코드(code) 불변
- * - 표시명/설명/순서/사용 편집
- * - 「코드 적용」= 클라이언트 캐시 갱신
+ * 공통코드 관리 — common_codes 단일 테이블 (group_code + code)
  */
 export default function PlatformCommonCodes() {
-  const [groups, setGroups] = useState([])
+  const [groupCodes, setGroupCodes] = useState([])
   const [allCodes, setAllCodes] = useState([])
-  const [groupId, setGroupId] = useState('')
+  const [groupCode, setGroupCode] = useState('')
   const [codes, setCodes] = useState([])
   const [codeSearchInput, setCodeSearchInput] = useState('')
   const [codeSearchQuery, setCodeSearchQuery] = useState('')
@@ -45,73 +40,45 @@ export default function PlatformCommonCodes() {
   const [busy, setBusy] = useState(false)
   const [drafts, setDrafts] = useState({})
   const [newCode, setNewCode] = useState({ code: '', label: '', description: '', sort_order: 99 })
-  const [newGroup, setNewGroup] = useState({ group_code: '', name: '', description: '', ref_hint: '' })
-  const [showAddGroup, setShowAddGroup] = useState(false)
 
-  const group = groups.find(g => g.code_group_id === groupId) || null
   const searchResults = useMemo(
-    () => buildCodeSearchResults(codeSearchQuery, groups, allCodes),
-    [codeSearchQuery, groups, allCodes]
+    () => buildCodeSearchResults(codeSearchQuery, groupCodes, allCodes),
+    [codeSearchQuery, groupCodes, allCodes]
   )
 
-  useEffect(() => { refreshGroups() }, [])
+  useEffect(() => { refreshAll() }, [])
 
   useEffect(() => {
-    if (groupId) refreshCodes(groupId)
-  }, [groupId])
+    if (groupCode) refreshCodes(groupCode)
+  }, [groupCode])
 
-  async function refreshGroups() {
+  async function refreshAll() {
     setLoading(true)
     setMsg('')
     try {
-      const { data, error } = await onlyActive(
-        supabase.from('code_groups').select('*').order('group_code')
-      )
+      const { data, error } = await supabase
+        .from('common_codes')
+        .select('*')
+        .order('group_code')
+        .order('sort_order')
       if (error) throw error
-      setGroups(data || [])
-      if (!groupId && data?.[0]) setGroupId(data[0].code_group_id)
-      else if (groupId && data && !data.find(g => g.code_group_id === groupId) && data[0]) {
-        setGroupId(data[0].code_group_id)
-      }
-      await refreshAllCodes(data || [])
+      const list = data || []
+      setAllCodes(list)
+      const groups = [...new Set(list.map(c => c.group_code).filter(Boolean))].sort()
+      setGroupCodes(groups)
+      if (!groupCode && groups[0]) setGroupCode(groups[0])
+      else if (groupCode && !groups.includes(groupCode) && groups[0]) setGroupCode(groups[0])
     } catch (e) {
       setMsg('❌ ' + (e.message || String(e)))
     }
     setLoading(false)
   }
 
-  /** 그룹별로 코드 로드 (전체 select가 비는 경우 대비 — 검색용) */
-  async function refreshAllCodes(groupList) {
-    const list = groupList || groups
-    if (!list.length) {
-      setAllCodes([])
-      return
-    }
-    const results = await Promise.all(
-      list.map(g =>
-        supabase
-          .from('common_codes')
-          .select('*')
-          .eq('code_group_id', g.code_group_id)
-          .order('sort_order')
-      )
-    )
-    const merged = []
-    for (const { data, error } of results) {
-      if (error) {
-        setMsg('❌ ' + error.message)
-        return
-      }
-      merged.push(...(data || []))
-    }
-    setAllCodes(merged)
-  }
-
-  async function refreshCodes(gid) {
+  async function refreshCodes(gc) {
     const { data, error } = await supabase
       .from('common_codes')
       .select('*')
-      .eq('code_group_id', gid)
+      .eq('group_code', gc)
       .order('sort_order')
     if (error) {
       setMsg('❌ ' + error.message)
@@ -119,7 +86,7 @@ export default function PlatformCommonCodes() {
     }
     setCodes(data || [])
     setAllCodes(prev => {
-      const others = prev.filter(c => c.code_group_id !== gid)
+      const others = prev.filter(c => c.group_code !== gc)
       return [...others, ...(data || [])]
     })
     const d = {}
@@ -150,12 +117,10 @@ export default function PlatformCommonCodes() {
     if (error) setMsg('❌ ' + error.message)
     else {
       setMsg('✅ 저장됨 — 「코드 적용」을 누르면 화면 표시에 반영')
-      await refreshCodes(groupId)
-      await refreshAllCodes(groups)
+      await refreshCodes(groupCode)
     }
   }
 
-  /** 현재 그룹 drafts 일괄 저장 */
   async function saveAllRows() {
     if (!codes.length) return
     setBusy(true)
@@ -186,13 +151,12 @@ export default function PlatformCommonCodes() {
     if (fail) setMsg('❌ ' + fail)
     else {
       setMsg(`✅ ${codes.length}건 일괄 저장됨 — 「코드 적용」을 누르면 화면 표시에 반영`)
-      await refreshCodes(groupId)
-      await refreshAllCodes(groups)
+      await refreshCodes(groupCode)
     }
   }
 
   async function softDeleteCode(id, code) {
-    if (!window.confirm(`코드 "${code}" 를 사용안함(use_flag=0) 처리할까요?\n(코드값 자체는 삭제하지 않는 것을 권장)`)) return
+    if (!window.confirm(`코드 "${code}" 를 사용안함(use_flag=0) 처리할까요?`)) return
     setBusy(true)
     const { error } = await supabase.from('common_codes').update({
       use_flag: USE_FLAG_OFF,
@@ -202,13 +166,12 @@ export default function PlatformCommonCodes() {
     if (error) setMsg('❌ ' + error.message)
     else {
       setMsg('✅ 사용안함 처리')
-      await refreshCodes(groupId)
-      await refreshAllCodes(groups)
+      await refreshCodes(groupCode)
     }
   }
 
   async function addCode() {
-    if (!group) return
+    if (!groupCode) return
     const code = newCode.code.trim()
     const label = newCode.label.trim()
     if (!code || !label) {
@@ -217,7 +180,7 @@ export default function PlatformCommonCodes() {
     }
     setBusy(true)
     const { error } = await supabase.from('common_codes').insert({
-      code_group_id: group.code_group_id,
+      group_code: groupCode,
       code,
       label,
       description: newCode.description.trim() || null,
@@ -228,40 +191,15 @@ export default function PlatformCommonCodes() {
     else {
       setNewCode({ code: '', label: '', description: '', sort_order: 99 })
       setMsg('✅ 코드 추가됨')
-      await refreshCodes(groupId)
-      await refreshAllCodes(groups)
+      await refreshAll()
+      await refreshCodes(groupCode)
     }
   }
 
-  function openGroupFromSearch(gid) {
-    setGroupId(gid)
+  function openGroupFromSearch(gc) {
+    setGroupCode(gc)
     setCodeSearchInput('')
     setCodeSearchQuery('')
-  }
-
-  async function addGroup() {
-    const group_code = newGroup.group_code.trim().toUpperCase()
-    const name = newGroup.name.trim()
-    if (!group_code || !name) {
-      setMsg('❌ 그룹코드·이름 필수')
-      return
-    }
-    setBusy(true)
-    const { data, error } = await supabase.from('code_groups').insert({
-      group_code,
-      name,
-      description: newGroup.description.trim() || null,
-      ref_hint: newGroup.ref_hint.trim() || null,
-    }).select().single()
-    setBusy(false)
-    if (error) setMsg('❌ ' + error.message)
-    else {
-      setShowAddGroup(false)
-      setNewGroup({ group_code: '', name: '', description: '', ref_hint: '' })
-      await refreshGroups()
-      if (data) setGroupId(data.code_group_id)
-      setMsg('✅ 그룹 추가됨')
-    }
   }
 
   async function applyCodes() {
@@ -326,7 +264,7 @@ export default function PlatformCommonCodes() {
         onChange={setCodeSearchInput}
         onSearch={() => setCodeSearchQuery(codeSearchInput.trim())}
         onReset={() => { setCodeSearchInput(''); setCodeSearchQuery('') }}
-        placeholder="그룹코드, 그룹명, 코드, 표시명, 설명"
+        placeholder="그룹코드, 코드, 표시명, 설명"
         applied={!!codeSearchQuery}
         resultLabel={`${searchResults.length}개 그룹`}
       />
@@ -340,22 +278,19 @@ export default function PlatformCommonCodes() {
             <p style={{ margin: 0, padding: '16px 14px', fontSize: 13, color: '#64748b' }}>
               검색 결과가 없습니다
             </p>
-          ) : searchResults.map(({ group: g, codes: matched }) => (
+          ) : searchResults.map(({ group_code: gc, codes: matched }) => (
             <button
-              key={g.code_group_id}
+              key={gc}
               type="button"
-              onClick={() => openGroupFromSearch(g.code_group_id)}
+              onClick={() => openGroupFromSearch(gc)}
               style={{
                 display: 'block', width: '100%', textAlign: 'left',
                 padding: '12px 14px', border: 'none', borderBottom: '1px solid #1e293b',
-                background: groupId === g.code_group_id ? '#1e293b' : 'transparent',
+                background: groupCode === gc ? '#1e293b' : 'transparent',
                 cursor: 'pointer', color: '#e2e8f0',
               }}
             >
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
-                {g.group_code}
-                <span style={{ fontWeight: 500, color: '#94a3b8', marginLeft: 8 }}>{g.name}</span>
-              </div>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{gc}</div>
               <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.5 }}>
                 {matched.map(c => (
                   <span key={c.common_code_id} style={{ marginRight: 12 }}>
@@ -370,31 +305,14 @@ export default function PlatformCommonCodes() {
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
         <select
-          value={groupId}
-          onChange={e => setGroupId(e.target.value)}
+          value={groupCode}
+          onChange={e => setGroupCode(e.target.value)}
           style={{ ...input, width: 'auto', minWidth: 280, cursor: 'pointer' }}
         >
-          {groups.map(g => (
-            <option key={g.code_group_id} value={g.code_group_id}>
-              {g.group_code} ({g.name})
-            </option>
+          {groupCodes.map(gc => (
+            <option key={gc} value={gc}>{gc}</option>
           ))}
         </select>
-        <button
-          type="button"
-          onClick={() => setShowAddGroup(v => !v)}
-          style={{
-            padding: '8px 14px', background: 'transparent', color: '#94a3b8',
-            border: '1px solid #334155', borderRadius: 7, cursor: 'pointer', fontSize: 12,
-          }}
-        >
-          + 그룹 추가
-        </button>
-        {group?.ref_hint && (
-          <span style={{ fontSize: 11, color: '#64748b', fontFamily: 'ui-monospace, Consolas, monospace' }}>
-            {group.ref_hint}
-          </span>
-        )}
         <button
           type="button"
           disabled={busy || codes.length === 0}
@@ -408,35 +326,6 @@ export default function PlatformCommonCodes() {
           일괄 저장
         </button>
       </div>
-
-      {showAddGroup && (
-        <div style={{
-          background: '#111827', border: '1px solid #1e293b', borderRadius: 12,
-          padding: 16, marginBottom: 16,
-        }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
-            <div>
-              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>그룹코드 *</div>
-              <input value={newGroup.group_code} onChange={e => setNewGroup({ ...newGroup, group_code: e.target.value })}
-                placeholder="BUILD_TYPE" style={input} />
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>이름 *</div>
-              <input value={newGroup.name} onChange={e => setNewGroup({ ...newGroup, name: e.target.value })}
-                placeholder="사이트 제작 유형" style={input} />
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>ref_hint</div>
-              <input value={newGroup.ref_hint} onChange={e => setNewGroup({ ...newGroup, ref_hint: e.target.value })}
-                placeholder="sites.build_type" style={input} />
-            </div>
-          </div>
-          <button type="button" disabled={busy} onClick={addGroup}
-            style={{ marginTop: 12, padding: '8px 16px', background: '#1e40af', color: 'white', border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 12 }}>
-            그룹 저장
-          </button>
-        </div>
-      )}
 
       <div className="overflow-x-auto">
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -453,7 +342,7 @@ export default function PlatformCommonCodes() {
               return (
                 <tr key={c.common_code_id} style={{ opacity: d.use_flag === 0 || d.use_flag === false ? 0.5 : 1 }}>
                   <td style={{ padding: '8px 10px', borderBottom: '1px solid #1e293b', color: '#94a3b8', whiteSpace: 'nowrap' }}>
-                    {group?.group_code}
+                    {c.group_code}
                   </td>
                   <td style={{ padding: '8px 10px', borderBottom: '1px solid #1e293b', fontFamily: 'ui-monospace, Consolas, monospace', color: '#e2e8f0' }}>
                     {c.code}
@@ -508,13 +397,13 @@ export default function PlatformCommonCodes() {
       </div>
 
       <p style={{ margin: '12px 0', fontSize: 11, color: '#64748b' }}>
-        ※ 코드 컬럼은 과거 데이터와 연결되므로 변경하지 않습니다. 쓰지 않는 코드는 「사용안함」처리하세요.
+        ※ 코드 컬럼은 바꾸지 마세요. 쓰지 않는 코드는 「사용안함」처리하세요.
       </p>
 
       <div style={{
         background: '#111827', border: '1px solid #1e293b', borderRadius: 12, padding: 16, marginTop: 8,
       }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 10 }}>+ 코드 추가</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 10 }}>+ 코드 추가 ({groupCode || '—'})</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
           <div>
             <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>코드 *</div>
@@ -537,7 +426,7 @@ export default function PlatformCommonCodes() {
               style={input} />
           </div>
         </div>
-        <button type="button" disabled={busy} onClick={addCode}
+        <button type="button" disabled={busy || !groupCode} onClick={addCode}
           style={{ marginTop: 12, padding: '8px 16px', background: '#334155', color: 'white', border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 12 }}>
           코드 추가
         </button>
