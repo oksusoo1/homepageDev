@@ -91,32 +91,3 @@ export async function getVisitorSiteBundle(siteCode) {
 
   return { site, inquiry, subscription: sub, flowStep, visibility }
 }
-
-export async function getVisitorSite(siteCode) {
-  const bundle = await getVisitorSiteBundle(siteCode)
-  return bundle?.site || null
-}
-
-/** @deprecated getVisitorSite 사용 */
-export async function getPublicSite(siteCode) {
-  return getVisitorSite(siteCode)
-}
-
-/**
- * 레거시 /preview/[domain] → siteCode 변환용
- */
-export async function resolveSiteCodeFromDomain(domain) {
-  const subdomain = domain.split('.')[0]
-
-  let { data } = await onlyActive(
-    supabase.from('sites').select('subdomain').eq('domain', domain)
-  ).maybeSingle()
-
-  if (!data) {
-    ;({ data } = await onlyActive(
-      supabase.from('sites').select('subdomain').eq('subdomain', subdomain)
-    ).maybeSingle())
-  }
-
-  return data?.subdomain || null
-}

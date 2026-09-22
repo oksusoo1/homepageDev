@@ -195,7 +195,6 @@ SELECT
   c.name          AS 고객명,
   c.email         AS 이메일,
   sub.amount      AS 월구독료,
-  sub.status      AS 구독상태,
   sub.payment_method  AS 결제방식,
   sub.next_billing_date AS 다음청구일
 FROM sites s

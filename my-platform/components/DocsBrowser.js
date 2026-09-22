@@ -13,6 +13,7 @@ const CATEGORY_STYLE = {
   ERD: { background: '#422006', color: '#fcd34d' },
   DB: { background: '#1e3a5f', color: '#93c5fd' },
   플로우: { background: '#3b2f4a', color: '#d8b4fe' },
+  작업이력: { background: '#14352a', color: '#86efac' },
   기타: { background: '#334155', color: '#94a3b8' },
 }
 

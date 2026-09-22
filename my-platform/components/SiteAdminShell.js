@@ -24,6 +24,7 @@ export const SITE_ADMIN_NAV = [
     label: '소통',
     icon: '💬',
     children: [
+      { key: 'comm.messages', label: '방문자 문의' },
       { key: 'comm.request', label: '수정 요청' },
       { key: 'comm.status', label: '요청 현황' },
     ],

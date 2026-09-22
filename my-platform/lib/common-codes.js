@@ -57,10 +57,6 @@ export function codesInGroup(groupCode) {
 /** 뱃지 색 (표시용 — DB 아님) */
 const COLORS = {
   BUILD_TYPE: { self: '#60a5fa', managed: '#f59e0b' },
-  SUB_STATUS: {
-    pending: '#64748b', trial: '#f59e0b', active: '#22c55e',
-    paused: '#f59e0b', cancelled: '#6b7280',
-  },
   PAYMENT_METHOD: { card: '#22c55e', manual: '#f59e0b' },
   OTP_TYPE: { domain_setup: '#8b5cf6', dev_fee: '#f59e0b', extra: '#6b7280' },
   OTP_STATUS: { unpaid: '#64748b', pending_confirm: '#f59e0b', paid: '#22c55e' },

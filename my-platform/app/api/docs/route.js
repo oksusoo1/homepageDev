@@ -46,6 +46,7 @@ function pickDate(name, mtime) {
 }
 
 function pickCategory(relPath) {
+  if (relPath.startsWith('작업이력/')) return '작업이력'
   if (relPath.startsWith('db/') && /ERD/i.test(relPath)) return 'ERD'
   if (relPath.startsWith('db/')) return 'DB'
   if (relPath.includes('플로우')) return '플로우'

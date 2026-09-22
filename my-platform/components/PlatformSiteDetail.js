@@ -192,7 +192,7 @@ export default function PlatformSiteDetail({
   const otpDevFees = oneTimePays.filter(p => p.type === 'dev_fee')
   const otpLatest = otpDevFees[0] || null
   const money = moneyLabel(inquiry, otpLatest)
-  const period = getSitePeriodInfo(site, subscription)
+  const period = getSitePeriodInfo(site)
   const trialEnds = site.trial_ends_at ? new Date(site.trial_ends_at) : null
   const daysLeft = period.daysLeft
 

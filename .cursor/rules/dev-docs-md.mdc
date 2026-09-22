@@ -1,5 +1,5 @@
 ---
-description: 개발 명세는 my-platform/docs 에 Markdown 3종만
+description: 개발 명세는 my-platform/docs 에 Markdown 3종만 + 작업이력
 alwaysApply: true
 ---
 
@@ -14,8 +14,16 @@ alwaysApply: true
 | **테이블명세** | `my-platform/docs/db/테이블명세.md` |
 
 - 신규는 Markdown만
-- `/platform` 개발문서 목록은 위 3개만 보이게 (`sql/` · `tools/` 제외)
+- `/platform` 개발문서 목록은 위 3개 + `작업이력/`만 보이게 (`sql/` · `tools/` 제외)
 - 버전 목록·구 HTML·도식 별도 파일 **추가하지 않음** — 내용이 바뀌면 **해당 파일만** 갱신
+
+## 작업이력 (작업메모)
+
+- 그날 작업 기록은 `my-platform/docs/작업이력/YYYY-MM-DD_작업.md` 에 남긴다 → `/platform` 개발문서에서 검색·열람
+- **`작업내역/` 폴더에는 새로 만들지 않는다** (기존 파일은 보존만)
+- 내용: 짧은 메모(무엇을·왜·영향 범위) + 관련 docs 링크. SSOT·스키마 본문은 위 명세 3종에
+- 같은 날 추가 작업은 같은 파일에 이어 쓴다
+- 새 작업 시작 전 최신 작업이력 파일을 먼저 읽는다
 
 ## 플로우·스키마가 바뀌면
 
@@ -29,4 +37,5 @@ alwaysApply: true
 - 같은 주제 문서를 버전 파일로 무한 증식
 - HTML로 새 명세 작성
 - docs 없이 코드만 바꾸고 “문서화는 나중에”
-- `작업내역/`에 SSOT·스키마 본문만 길게 쓰기
+- 작업이력에 SSOT·스키마 본문만 길게 쓰기
+- `작업내역/` 폴더에 새 메모 만들기

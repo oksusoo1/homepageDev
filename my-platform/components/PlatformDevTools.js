@@ -19,7 +19,6 @@ function opts(group, fallbackCodes) {
 
 const FALLBACK = {
   FLOW_STEP: ['intake', 'deposit', 'building', 'preview', 'balance', 'pay_method', 'trial', 'subscribed', 'suspended'],
-  SUB_STATUS: ['pending', 'trial', 'active', 'paused', 'cancelled'],
   OTP_STATUS: ['unpaid', 'pending_confirm', 'paid'],
 }
 const selectStyle = {

@@ -24,8 +24,7 @@ function daysBetweenCeil(from, to) {
 }
 
 /**
- * @param {object} site
- * @param {object|null} subscription
+ * @param {object} site  (sites.status = FLOW_STEP 기준)
  * @param {Date} [now]
  * @returns {{
  *   kind: 'trial'|'ops'|'expired'|'none',
@@ -39,10 +38,9 @@ function daysBetweenCeil(from, to) {
  *   detail: string,
  * }}
  */
-export function getSitePeriodInfo(site, subscription = null, now = new Date()) {
+export function getSitePeriodInfo(site, now = new Date()) {
   const trialStart = site?.trial_started_at ? new Date(site.trial_started_at) : null
   const trialEnds = site?.trial_ends_at ? new Date(site.trial_ends_at) : null
-  const subStatus = subscription?.status || null
 
   let trialTotal = null
   let trialDay = null
@@ -59,7 +57,7 @@ export function getSitePeriodInfo(site, subscription = null, now = new Date()) {
     trialEnds &&
     daysLeft != null &&
     daysLeft > 0 &&
-    (subStatus === 'trial' || site?.status === 'trial')
+    site?.status === 'trial'
 
   if (inTrial) {
     return {
@@ -76,7 +74,7 @@ export function getSitePeriodInfo(site, subscription = null, now = new Date()) {
   }
 
   const trialOver = trialEnds && daysLeft != null && daysLeft <= 0
-  if (trialOver && (site?.status === 'suspended' || subStatus === 'paused' || subStatus === 'trial' || site?.status === 'trial')) {
+  if (trialOver && (site?.status === 'suspended' || site?.status === 'trial')) {
     return {
       kind: 'expired',
       label: site?.status === 'suspended' ? '만료·정지' : '만료',
@@ -86,7 +84,7 @@ export function getSitePeriodInfo(site, subscription = null, now = new Date()) {
       trialTotal,
       daysLeft,
       opDay: null,
-      detail: `체험 종료 ${trialEnds.toLocaleDateString('ko-KR')} · 구독 ${subStatus || '—'} · 사이트 ${site?.status}`,
+      detail: `체험 종료 ${trialEnds.toLocaleDateString('ko-KR')} · 사이트 ${site?.status}`,
     }
   }
 
@@ -102,13 +100,13 @@ export function getSitePeriodInfo(site, subscription = null, now = new Date()) {
     return {
       kind: 'ops',
       label: `운영 ${opDay}일`,
-      subLabel: subStatus === 'active' || site?.status === 'subscribed' ? '유료' : (subStatus || null),
+      subLabel: '유료',
       color: '#22c55e',
       trialDay,
       trialTotal,
       daysLeft,
       opDay,
-      detail: `운영 ${opDay}일차 · 구독 ${subStatus || '—'} · 체험종료 ${trialEnds.toLocaleDateString('ko-KR')}`,
+      detail: `운영 ${opDay}일차 · 체험종료 ${trialEnds.toLocaleDateString('ko-KR')}`,
     }
   }
 
@@ -116,13 +114,13 @@ export function getSitePeriodInfo(site, subscription = null, now = new Date()) {
     return {
       kind: 'ops',
       label: '운영중',
-      subLabel: subStatus || null,
+      subLabel: '유료',
       color: '#22c55e',
       trialDay: null,
       trialTotal: null,
       daysLeft: null,
       opDay: null,
-      detail: `체험 기록 없음 · 구독 ${subStatus || '—'}`,
+      detail: '체험 기록 없음',
     }
   }
 

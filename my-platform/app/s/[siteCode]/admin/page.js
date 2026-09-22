@@ -20,6 +20,7 @@ import {
 } from '@/lib/site-paths'
 import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
 import SiteAdminShell, { parentKeyOf } from '@/components/SiteAdminShell'
+import UserMessagesInbox from '@/components/UserMessagesInbox'
 
 const CATEGORIES = [
   { value: 'text_change', icon: '✏️' },
@@ -512,6 +513,8 @@ export default function CustomerPortal({ params }) {
             ))}
           </div>
         )}
+
+        {menuKey === 'comm.messages' && <UserMessagesInbox siteId={site.site_id} />}
 
         {menuKey === 'comm.request' && (
           <div style={css.card}>

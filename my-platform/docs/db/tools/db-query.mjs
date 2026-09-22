@@ -175,8 +175,8 @@ function usage() {
 
   node docs/db/tools/db-query.mjs snapshot
   node docs/db/tools/db-query.mjs customers [--email x]
-  node docs/db/tools/db-query.mjs sites [--email x] [--subdomain x] [--status draft] [--build_type managed]
-  node docs/db/tools/db-query.mjs inquiries [--email x] [--status building]
+  node docs/db/tools/db-query.mjs sites [--email x] [--subdomain x] [--status trial] [--build_type managed]
+  node docs/db/tools/db-query.mjs inquiries [--email x]
   node docs/db/tools/db-query.mjs related --email test2@test.com
   node docs/db/tools/db-query.mjs one --table sites --id-col site_id --id <uuid>
 

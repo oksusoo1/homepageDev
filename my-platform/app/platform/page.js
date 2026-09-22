@@ -1317,7 +1317,7 @@ export default function AdminConsole() {
                           </tr>
                         ) : filteredSites.map(site => {
                           const sub = subscriptions.find(s => s.site_id === site.site_id) || null
-                          const period = getSitePeriodInfo(site, sub)
+                          const period = getSitePeriodInfo(site)
                           const periodBadge = (
                             <div>
                               {badge(period.color, period.label)}
