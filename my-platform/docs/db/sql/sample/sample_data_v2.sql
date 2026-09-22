@@ -1,6 +1,6 @@
 -- ================================================
 -- sample_data_v2.sql
--- schema_v2.2_2026-09-19.sql 실행 후 (또는 015·016 적용된 DB)
+-- schema_v2.3_2026-09-22.sql 실행 후 (또는 022 까지 적용된 DB)
 -- ================================================
 
 
@@ -162,24 +162,38 @@ INSERT INTO support_tickets (
 
 
 -- ================================================
--- 8. user_posts (구 posts)
+-- 8. user_posts — 게시판은 sites INSERT 트리거로 자동 생성 (notice · qna)
 -- ================================================
 
-INSERT INTO user_posts (site_id, title, content, author) VALUES
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '카페 오픈 안내',    '홍길동 카페가 새롭게 오픈했습니다!',               '관리자'),
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '봄 신메뉴 출시',    '딸기 라떼, 벚꽃 에이드를 새롭게 출시합니다.',     '관리자'),
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '주차 안내',         '지하 1층 주차장 이용 가능. 1시간 무료.',           '관리자'),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '3월 예약 오픈',     '3월 예약이 오픈되었습니다. 카카오톡으로 예약.',    '원장'),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '봄 염색 이벤트',    '3월 한 달간 염색 시술 20% 할인 이벤트.',          '원장');
+-- 공지사항 (사장님 작성)
+INSERT INTO user_posts (site_id, user_board_id, title, content, author, author_type)
+SELECT v.site_id::uuid, ub.user_board_id, v.title, v.content, v.author, 'owner'
+FROM (VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '카페 오픈 안내', '홍길동 카페가 새롭게 오픈했습니다!',            '관리자'),
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '봄 신메뉴 출시', '딸기 라떼, 벚꽃 에이드를 새롭게 출시합니다.',  '관리자'),
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '주차 안내',      '지하 1층 주차장 이용 가능. 1시간 무료.',        '관리자'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '3월 예약 오픈',  '3월 예약이 오픈되었습니다. 카카오톡으로 예약.', '원장'),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '봄 염색 이벤트', '3월 한 달간 염색 시술 20% 할인 이벤트.',       '원장')
+) AS v(site_id, title, content, author)
+JOIN user_boards ub ON ub.site_id = v.site_id::uuid AND ub.board_key = 'notice';
+
+-- 문의하기 (고객 작성)
+INSERT INTO user_posts (site_id, user_board_id, title, content, author, author_type, phone, email, is_private)
+SELECT v.site_id::uuid, ub.user_board_id, v.title, v.content, v.author, 'user', v.phone, v.email, v.is_private
+FROM (VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '주말 영업시간', '주말 영업시간 문의합니다.',   '김방문', '010-1111-2222', NULL,                false),
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '예약 문의',     '예약 가능한 날짜 알려주세요.', '이손님', NULL,            'guest@example.com', true)
+) AS v(site_id, title, content, author, phone, email, is_private)
+JOIN user_boards ub ON ub.site_id = v.site_id::uuid AND ub.board_key = 'qna';
 
 
 -- ================================================
--- 9. user_messages (사용자 → 고객 문의)
+-- 9. user_comments — 사장님 답변
 -- ================================================
 
-INSERT INTO user_messages (site_id, name, phone, email, content, status, is_private) VALUES
-  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '김방문', '010-1111-2222', NULL, '주말 영업시간 문의합니다.', 'new', false),
-  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '이손님', NULL, 'guest@example.com', '예약 가능한 날짜 알려주세요.', 'new', true);
+INSERT INTO user_comments (post_id, author_type, author, content)
+SELECT p.post_id, 'owner', '운영자', '주말은 10시~20시 영업합니다.'
+FROM user_posts p WHERE p.title = '주말 영업시간' AND p.site_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 
 
 -- ================================================

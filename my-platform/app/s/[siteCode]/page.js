@@ -1,18 +1,21 @@
 ﻿import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getVisitorSiteBundle } from '@/lib/site-public'
-import { sitePublicPath } from '@/lib/site-paths'
+import { sitePublicPath, boardPath } from '@/lib/site-paths'
+import { loadBoards } from '@/lib/user-board'
 import SiteVisibilityGate from '@/components/SiteVisibilityGate'
 import SiteHeader from '@/components/SiteHeader'
 import { onlyActive } from '@/lib/use-flag'
 
-async function getRecentPosts(siteId) {
-  const { supabase } = await import('@/lib/supabase')
+/** 최근 공지 — 공지(notice) 게시판 글만 */
+async function getRecentNotices(supabase, noticeBoard) {
+  if (!noticeBoard) return []
   const { data } = await onlyActive(
     supabase
       .from('user_posts')
-      .select('*')
-      .eq('site_id', siteId)
+      .select('post_id, title, author, created_at')
+      .eq('user_board_id', noticeBoard.user_board_id)
+      .eq('is_private', false)
       .order('created_at', { ascending: false })
       .limit(3)
   )
@@ -63,7 +66,11 @@ export default async function CustomerSitePage({ params }) {
 }
 
 async function renderSiteBody(site, siteCode) {
-  const posts = await getRecentPosts(site.site_id)
+  const { supabase } = await import('@/lib/supabase')
+  const boards = await loadBoards(supabase, site.site_id)
+  const noticeBoard = boards.find(b => b.board_type === 'notice')
+  const qnaBoard = boards.find(b => b.board_type === 'qna')
+  const posts = await getRecentNotices(supabase, noticeBoard)
 
   const c = site.content || {}
   const hero = { title: '', subtitle: '', ctaText: '문의하기', bgColor: '#1c1917', ...c.hero }
@@ -117,7 +124,7 @@ async function renderSiteBody(site, siteCode) {
               {heroSubtitle}
             </p>
           )}
-          <Link href={sitePublicPath(siteCode, '/contact')}
+          <Link href={qnaBoard ? boardPath(siteCode, qnaBoard.board_key) : sitePublicPath(siteCode)}
             className="inline-block px-7 sm:px-8 py-3 sm:py-3.5 bg-white text-stone-900 rounded-lg no-underline text-sm font-semibold">
             {ctaText}
           </Link>
@@ -185,14 +192,14 @@ async function renderSiteBody(site, siteCode) {
       {sections.showBoard && posts.length > 0 && (
         <section className="max-w-[800px] mx-auto mt-12 sm:mt-16 mb-16 sm:mb-20 px-5">
           <div className="flex justify-between items-center mb-5 sm:mb-6">
-            <h3 className="text-xl sm:text-2xl font-bold text-stone-900 m-0">최근 공지</h3>
-            <Link href={sitePublicPath(siteCode, '/board')} className="text-[13px] text-stone-500 no-underline">
+            <h3 className="text-xl sm:text-2xl font-bold text-stone-900 m-0">최근 {noticeBoard.name}</h3>
+            <Link href={boardPath(siteCode, noticeBoard.board_key)} className="text-[13px] text-stone-500 no-underline">
               전체보기 →
             </Link>
           </div>
           <div className="flex flex-col">
             {posts.map((post, i) => (
-              <Link key={post.post_id} href={sitePublicPath(siteCode, `/board/${post.post_id}`)}
+              <Link key={post.post_id} href={boardPath(siteCode, noticeBoard.board_key, post.post_id)}
                 className={`flex justify-between items-center px-5 sm:px-6 py-4 sm:py-5 bg-white no-underline text-stone-900 border border-stone-200 ${
                   i === 0 ? 'rounded-t-xl' : ''
                 } ${i === posts.length - 1 ? 'rounded-b-xl' : ''} ${i > 0 ? '-mt-px' : ''}`}>

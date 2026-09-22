@@ -35,19 +35,19 @@
 - /app/templates → 템플릿 선택 → /app/setup → 사이트 기본정보 생성
 - /app/my → 고객 내 사이트·제작의뢰 목록
 - /app/my/payment/one-time/[inquiryId] → 대리제작 잔금 결제 (method/card/bank-transfer)
-- /app/platform → 본사 관리자 콘솔 (대시보드/회원/사이트/구독/수정요청/1회성결제/제작문의/공통코드/개발문서/테스트)
+- /app/platform → 본사 관리자 콘솔 — **사이트 중심 5메뉴**: 대시보드(처리 필요 사이트) · 사이트(필터·처리필요 뱃지, 상세에서 견적·선금·잔금·1회성결제·구독청구·요청 처리) · 회원 · 고객 요청 · 개발(테스트·공통코드·개발문서)
 - /app/s/[siteCode] → 사용자(방문자) 사이트 (멀티테넌트, `siteCode` = subdomain 우선, 없으면 site_code)
-  - /board → 게시판 (`user_posts`) · /contact → 문의 (`user_messages`, 사용자→고객)
-  - /admin → **고객 포털** (내 사이트 / 소통: 방문자 문의·수정요청·요청현황 / 결제)
+  - /board/[boardKey] → 게시판 (사이트당 여러 개, `user_boards`·`user_posts`·`user_comments`). 문의도 `qna` 게시판 — `/board` 는 첫 게시판으로 이동
+  - /admin → **사장님 관리자** (아임웹식: 🔔알림 · 사이트 운영[대시보드·콘텐츠(게시물 관리·게시판 관리)] · 관리[결제·설정] · 도움[본사 요청]) — 메뉴 정의 `components/SiteAdminShell.js` `SITE_ADMIN_NAV`
   - /admin/editor → 심플 패널 에디터
   - /admin/payment/* → 구독 결제수단 등록 (method/card/bank-transfer)
 - /app/api → `cron/billing`(청구 배치 목업) · `payment/billing-auth`(토스 빌링키) · `docs`(개발문서)
-- /lib → 플로우·결제 로직 (`flow-step`, `site-flow`, `site-visibility`, `managed-flow`, `deploy`, `billing`, `billing-batch`, `subscription-life`, `payment/*`, `common-codes`, `use-flag`)
+- /lib → 플로우·결제 로직 (`flow-step`, `site-flow`, `site-visibility`, `managed-flow`, `deploy`, `billing`, `billing-batch`, `subscription-life`, `payment/*`, `common-codes`, `use-flag`) · 게시판 (`user-board`, `user-board-public`)
 - proxy.js → 서브도메인 라우팅 (`{sub}.myplatform.com` → `/s/{sub}`, Next 16 middleware)
 
 ## DB 스키마 (현행)
 > 명세: @my-platform/docs/플로우.md · @my-platform/docs/db/테이블명세.md · @my-platform/docs/db/ERD.md
-> 최신 SQL: @my-platform/docs/db/sql/schema/schema_v2.2_2026-09-19.sql
+> 최신 SQL: @my-platform/docs/db/sql/schema/schema_v2.3_2026-09-22.sql
 > 테스트 데이터: @my-platform/docs/db/sql/sample/sample_data_v2.sql
 > 마이그레이션: @my-platform/docs/db/sql/migrations/
 
@@ -65,8 +65,9 @@
 - customer_payment_methods: payment_method_id(PK), customer_id(FK), pg_customer_id(빌링키), card_last4
 - support_tickets: ticket_id(PK), site_id(FK), customer_id(FK), title, category, status — **고객→직원 수정요청**
 - inquiries: inquiry_id(PK), customer_id(FK), dev_fee_total, down_paid_at, final_paid_at — **고객→직원 제작의뢰** (status 없음)
-- user_posts: post_id(PK, URL호환), site_id(FK), title, content, author — **사용자 사이트 게시판**
-- user_messages: user_message_id(PK), site_id(FK), name, phone, email, content, status(new/replied/done), is_private, reply_content — **사용자→고객 문의**
+- user_boards: user_board_id(PK), site_id(FK), board_key(URL), name, board_type(notice/qna/general), sort_order — **고객 사이트 게시판 정의** (새 사이트 → 트리거로 공지사항·문의하기 자동 생성)
+- user_posts: post_id(PK, URL호환), site_id(FK), user_board_id(FK), title, content, author, author_type(owner/user), is_private, phone, email — **게시판 글** (고객 문의 = qna 게시판 글)
+- user_comments: user_comment_id(PK), post_id(FK), author_type(owner/user), author, content — **댓글** (사장님 답변 = owner 댓글). 답변 대기 = qna·user 글에 owner 댓글 없음 (`lib/user-board.js`)
 - notification_logs: 청구 배치·알림톡 목업 로그 · common_codes: 공통코드(group_code+code)
 
 ## DB 핵심 규칙

@@ -6,51 +6,96 @@ import { codeLabel } from '@/lib/common-codes'
 import AuthUserBar from '@/components/AuthUserBar'
 
 /**
- * 사장님 사이트 관리 — left 메뉴 셸 (아임웹보다 단순한 3그룹)
+ * 사장님 사이트 관리 — left 메뉴 셸 (아임웹식 섹션 > 대메뉴 > 소메뉴)
+ * - 대메뉴는 확장용 그룹: 새 기능은 children 에 한 줄 추가
+ * - 미구현 메뉴는 넣지 않는다 (빈 메뉴 금지)
+ * - badge: badges[badge] 값이 0보다 크면 표시
  */
 export const SITE_ADMIN_NAV = [
   {
-    key: 'site',
-    label: '내 사이트',
-    icon: '🏠',
-    children: [
-      { key: 'site.basics', label: '기본 정보' },
-      { key: 'site.deploy', label: '배포 · 운영' },
-      { key: 'site.info', label: '사이트 정보' },
+    section: '사이트 운영',
+    items: [
+      { key: 'dashboard', label: '대시보드', icon: '📊' },
+      {
+        key: 'content',
+        label: '콘텐츠',
+        icon: '📝',
+        children: [
+          { key: 'content.posts', label: '게시물 관리', badge: 'unanswered' },
+          { key: 'content.boards', label: '게시판 관리' },
+        ],
+      },
     ],
   },
   {
-    key: 'comm',
-    label: '소통',
-    icon: '💬',
-    children: [
-      { key: 'comm.messages', label: '방문자 문의' },
-      { key: 'comm.request', label: '수정 요청' },
-      { key: 'comm.status', label: '요청 현황' },
+    section: '관리',
+    items: [
+      {
+        key: 'billing',
+        label: '결제',
+        icon: '💳',
+        children: [
+          { key: 'billing.sub', label: '구독 · 결제수단' },
+          { key: 'billing.history', label: '결제 내역' },
+        ],
+      },
+      {
+        key: 'settings',
+        label: '설정',
+        icon: '⚙️',
+        children: [
+          { key: 'settings.site', label: '사이트 정보' },
+          { key: 'settings.account', label: '계정' },
+        ],
+      },
     ],
   },
   {
-    key: 'billing',
-    label: '결제',
-    icon: '💳',
-    children: [
-      { key: 'billing.sub', label: '구독 · 결제수단' },
-      { key: 'billing.history', label: '결제 내역' },
-      { key: 'billing.account', label: '회원 탈퇴' },
+    section: '도움',
+    items: [
+      {
+        key: 'support',
+        label: '본사 요청',
+        icon: '🛟',
+        children: [
+          { key: 'support.requests', label: '요청 · 처리현황' },
+        ],
+      },
     ],
   },
 ]
 
+const EXTRA_LABELS = { alerts: '알림' }
+
 export function findNavLabel(menuKey) {
-  for (const g of SITE_ADMIN_NAV) {
-    const hit = g.children.find(c => c.key === menuKey)
-    if (hit) return hit.label
+  if (EXTRA_LABELS[menuKey]) return EXTRA_LABELS[menuKey]
+  for (const sec of SITE_ADMIN_NAV) {
+    for (const item of sec.items) {
+      if (item.key === menuKey) return item.label
+      const hit = item.children?.find(c => c.key === menuKey)
+      if (hit) return hit.label
+    }
   }
   return ''
 }
 
 export function parentKeyOf(menuKey) {
-  return menuKey?.split('.')[0] || 'site'
+  return menuKey?.split('.')[0] || 'dashboard'
+}
+
+function CountBadge({ count, inverted = false }) {
+  if (!count) return null
+  return (
+    <span style={{
+      background: inverted ? '#fff' : '#ef4444',
+      color: inverted ? '#ef4444' : '#fff',
+      borderRadius: 999, fontSize: 10, fontWeight: 700,
+      minWidth: 16, height: 16, display: 'inline-flex',
+      alignItems: 'center', justifyContent: 'center', padding: '0 4px',
+    }}>
+      {count}
+    </span>
+  )
 }
 
 export default function SiteAdminShell({
@@ -61,7 +106,8 @@ export default function SiteAdminShell({
   onMenuChange,
   openGroups,
   onToggleGroup,
-  pendingTicketCount = 0,
+  badges = {},
+  alertCount = 0,
   mobileOpen,
   onMobileOpen,
   onLogout,
@@ -96,6 +142,19 @@ export default function SiteAdminShell({
         <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', letterSpacing: 0.5, marginBottom: 6, paddingLeft: 8 }}>
           바로가기
         </div>
+        <button
+          type="button"
+          onClick={() => { onMenuChange('alerts'); onMobileOpen?.(false) }}
+          style={{
+            ...quickLinkStyle, border: 'none', cursor: 'pointer', textAlign: 'left',
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: menuKey === 'alerts' ? '#111827' : 'transparent',
+            color: menuKey === 'alerts' ? '#fff' : '#374151',
+          }}
+        >
+          <span style={{ flex: 1 }}>🔔 알림</span>
+          <CountBadge count={alertCount} inverted={menuKey === 'alerts'} />
+        </button>
         <Link
           href={siteAdminPath(siteCode, '/editor')}
           style={quickLinkStyle}
@@ -113,71 +172,73 @@ export default function SiteAdminShell({
         </a>
       </div>
 
-      <nav style={{ flex: 1, overflowY: 'auto', padding: '12px 10px' }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', letterSpacing: 0.5, marginBottom: 6, paddingLeft: 8 }}>
-          사이트 관리
-        </div>
-        {SITE_ADMIN_NAV.map(group => {
-          const open = openGroups[group.key]
-          const childActive = group.children.some(c => c.key === menuKey)
-          return (
-            <div key={group.key} style={{ marginBottom: 4 }}>
-              <button
-                type="button"
-                onClick={() => onToggleGroup(group.key)}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '9px 10px', border: 'none', borderRadius: 8, cursor: 'pointer',
-                  background: childActive ? '#f3f4f6' : 'transparent',
-                  color: '#111827', fontSize: 13, fontWeight: 600, textAlign: 'left',
-                }}
-              >
-                <span style={{ fontSize: 14 }}>{group.icon}</span>
-                <span style={{ flex: 1 }}>{group.label}</span>
-                <span style={{ fontSize: 10, color: '#9ca3af' }}>{open ? '▾' : '▸'}</span>
-              </button>
-              {open && (
-                <div style={{ padding: '2px 0 6px 12px' }}>
-                  {group.children.map(child => {
-                    const active = menuKey === child.key
-                    const showBadge = child.key === 'comm.status' && pendingTicketCount > 0
-                    return (
-                      <button
-                        key={child.key}
-                        type="button"
-                        onClick={() => {
-                          onMenuChange(child.key)
-                          onMobileOpen?.(false)
-                        }}
-                        style={{
-                          width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                          padding: '8px 10px', border: 'none', borderRadius: 7, cursor: 'pointer',
-                          background: active ? '#111827' : 'transparent',
-                          color: active ? '#fff' : '#4b5563',
-                          fontSize: 12.5, fontWeight: active ? 600 : 500, textAlign: 'left',
-                          position: 'relative',
-                        }}
-                      >
-                        <span style={{ flex: 1 }}>{child.label}</span>
-                        {showBadge && (
-                          <span style={{
-                            background: active ? '#fff' : '#ef4444',
-                            color: active ? '#ef4444' : '#fff',
-                            borderRadius: 999, fontSize: 10, fontWeight: 700,
-                            minWidth: 16, height: 16, display: 'inline-flex',
-                            alignItems: 'center', justifyContent: 'center', padding: '0 4px',
-                          }}>
-                            {pendingTicketCount}
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
+      <nav style={{ flex: 1, overflowY: 'auto', padding: '4px 10px 12px' }}>
+        {SITE_ADMIN_NAV.map(sec => (
+          <div key={sec.section} style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', letterSpacing: 0.5, marginBottom: 6, paddingLeft: 8 }}>
+              {sec.section}
             </div>
-          )
-        })}
+            {sec.items.map(item => {
+              const hasChildren = !!item.children?.length
+              const open = hasChildren && openGroups[item.key]
+              const active = menuKey === item.key
+              const childActive = hasChildren && item.children.some(c => c.key === menuKey)
+              const groupCount = hasChildren
+                ? item.children.reduce((n, c) => n + (c.badge ? (badges[c.badge] || 0) : 0), 0)
+                : 0
+              return (
+                <div key={item.key} style={{ marginBottom: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (hasChildren) { onToggleGroup(item.key); return }
+                      onMenuChange(item.key)
+                      onMobileOpen?.(false)
+                    }}
+                    style={{
+                      width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '9px 10px', border: 'none', borderRadius: 8, cursor: 'pointer',
+                      background: active ? '#111827' : childActive ? '#f3f4f6' : 'transparent',
+                      color: active ? '#fff' : '#111827', fontSize: 13, fontWeight: 600, textAlign: 'left',
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{item.icon}</span>
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                    {hasChildren && !open && <CountBadge count={groupCount} />}
+                    {hasChildren && <span style={{ fontSize: 10, color: '#9ca3af' }}>{open ? '▾' : '▸'}</span>}
+                  </button>
+                  {open && (
+                    <div style={{ padding: '2px 0 6px 12px' }}>
+                      {item.children.map(child => {
+                        const childOn = menuKey === child.key
+                        return (
+                          <button
+                            key={child.key}
+                            type="button"
+                            onClick={() => {
+                              onMenuChange(child.key)
+                              onMobileOpen?.(false)
+                            }}
+                            style={{
+                              width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                              padding: '8px 10px', border: 'none', borderRadius: 7, cursor: 'pointer',
+                              background: childOn ? '#111827' : 'transparent',
+                              color: childOn ? '#fff' : '#4b5563',
+                              fontSize: 12.5, fontWeight: childOn ? 600 : 500, textAlign: 'left',
+                            }}
+                          >
+                            <span style={{ flex: 1 }}>{child.label}</span>
+                            <CountBadge count={child.badge ? badges[child.badge] : 0} inverted={childOn} />
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ))}
       </nav>
 
       {(customer?.name || customer?.email) && (

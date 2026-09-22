@@ -22,7 +22,7 @@ export function onlyActive(query) {
 export async function softDelete(supabase, table, idColumn, id) {
   const patch = { use_flag: USE_FLAG_OFF }
   // updated_at 있는 테이블은 갱신
-  if (['customers', 'staff', 'sites', 'inquiries', 'subscriptions', 'support_tickets'].includes(table)) {
+  if (['customers', 'staff', 'sites', 'inquiries', 'subscriptions', 'support_tickets', 'user_boards', 'user_posts', 'user_comments'].includes(table)) {
     patch.updated_at = new Date().toISOString()
   }
   const { error } = await supabase.from(table).update(patch).eq(idColumn, id)
@@ -32,7 +32,7 @@ export async function softDelete(supabase, table, idColumn, id) {
 /** Soft delete 복구 */
 export async function softRestore(supabase, table, idColumn, id) {
   const patch = { use_flag: USE_FLAG_ON }
-  if (['customers', 'staff', 'sites', 'inquiries', 'subscriptions', 'support_tickets'].includes(table)) {
+  if (['customers', 'staff', 'sites', 'inquiries', 'subscriptions', 'support_tickets', 'user_boards', 'user_posts', 'user_comments'].includes(table)) {
     patch.updated_at = new Date().toISOString()
   }
   const { error } = await supabase.from(table).update(patch).eq(idColumn, id)

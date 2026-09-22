@@ -155,13 +155,16 @@ function emptyEdit(site) {
 }
 
 /**
- * 관리자용 사이트 상세 — 흐름·돈·수정·삭제
+ * 본사 사이트 상세 = 사이트 한 곳의 모든 업무 화면
+ * 흐름 · 제작의뢰(견적·선금·잔금·메모) · 1회성 결제 · 구독·청구 · 고객 요청 · 수정·삭제
  */
 export default function PlatformSiteDetail({
   site,
   inquiry,
   subscription,
   oneTimePays = [],
+  billingHistory = [],
+  tickets = [],
   finalPending = false,
   onClose,
   onStatusAction,
@@ -169,8 +172,11 @@ export default function PlatformSiteDetail({
   onStartDeposit,
   onConfirmDeposit,
   onCancelManaged,
-  onGoInquiries,
-  onGoPayments,
+  onSaveDevFee,
+  onSaveNote,
+  onMarkOtpPaid,
+  onMarkBillingPaid,
+  onTicketStatus,
   onGoCustomer,
   onSave,
   onDelete,
@@ -179,6 +185,8 @@ export default function PlatformSiteDetail({
   const [form, setForm] = useState(() => emptyEdit(site))
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [fee, setFee] = useState('')
+  const [note, setNote] = useState('')
 
   useEffect(() => {
     setEditing(false)
@@ -186,11 +194,15 @@ export default function PlatformSiteDetail({
     setMsg('')
   }, [site.site_id])
 
+  useEffect(() => {
+    setFee(inquiry?.dev_fee_total ? String(inquiry.dev_fee_total) : '')
+    setNote(inquiry?.admin_note || '')
+  }, [inquiry?.inquiry_id, inquiry?.dev_fee_total, inquiry?.admin_note])
+
   if (!site) return null
 
   const isManaged = site.build_type === 'managed'
-  const otpDevFees = oneTimePays.filter(p => p.type === 'dev_fee')
-  const otpLatest = otpDevFees[0] || null
+  const otpLatest = oneTimePays.find(p => p.type === 'dev_fee') || null
   const money = moneyLabel(inquiry, otpLatest)
   const period = getSitePeriodInfo(site)
   const trialEnds = site.trial_ends_at ? new Date(site.trial_ends_at) : null
@@ -238,15 +250,13 @@ export default function PlatformSiteDetail({
     if (key === 'open_preview') return onStatusAction?.(site.site_id, 'preview')
     if (key === 'confirm_balance' && inquiry) return onConfirmFinal?.(inquiry.inquiry_id)
     if (key === 'view_site') return openEditor()
-    if (key === 'need_fee' || key === 'wait_balance') return onGoInquiries?.()
+    if (key === 'need_fee') document.getElementById('hq-dev-fee')?.focus()
   }
 
   // 대리: 선금 확인 전 에디터 숨김 · 라벨 없을 때 에디터로 대체하지 않음
   const canEditor = !!site.subdomain && canOpenHqEditor(site.build_type, flowStep)
   const editorIsPrimary = canEditor && (hq.key === 'open_editor' || hq.key === 'view_site')
-  const primaryLabel = hq.label
-    || (hq.key === 'need_fee' ? '제작 문의로 (견적 입력)' : null)
-    || (hq.key === 'wait_balance' ? '제작 문의로' : null)
+  const primaryLabel = hq.label || (hq.key === 'need_fee' ? '견적 입력' : null)
   const showEditorSecondary = canEditor && !!primaryLabel && !editorIsPrimary
 
   const nextActions = []
@@ -263,12 +273,6 @@ export default function PlatformSiteDetail({
         isManaged && !site.trial_started_at ? 'preview' : (site.trial_started_at ? 'trial' : 'pay_method')
       ),
     })
-  }
-  if (otpLatest?.status === 'pending_confirm') {
-    nextActions.push({ label: '1회성결제로', color: '#f59e0b', run: () => onGoPayments?.() })
-  }
-  if (inquiry) {
-    nextActions.push({ label: '제작 문의로', color: '#64748b', run: () => onGoInquiries?.() })
   }
   if (site.customer_id && onGoCustomer) {
     nextActions.push({ label: '이 회원 보기', color: '#38bdf8', run: () => onGoCustomer(site.customer_id) })
@@ -430,6 +434,143 @@ export default function PlatformSiteDetail({
         </div>
       </div>
 
+      <Section title={flowTitle}>
+        {stepIndex >= 0 && <Stepper steps={steps} currentIndex={stepIndex} />}
+        {flowHint && (
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>
+            {flowHint}
+          </p>
+        )}
+      </Section>
+
+      {isManaged && inquiry && (
+        <Section title="제작 의뢰">
+          {inquiry.description && (
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: '#cbd5e1', lineHeight: 1.6, borderLeft: '2px solid #334155', paddingLeft: 10 }}>
+              {inquiry.description}
+            </p>
+          )}
+          <Row label="업종 · 연락처">
+            {codeLabel('BUSINESS_TYPE', inquiry.business_type, inquiry.business_type || '—')} · {inquiry.phone || site.customers?.phone || '—'}
+          </Row>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #1e293b', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: '#64748b', flexShrink: 0 }}>총 개발비(견적)</span>
+            <input id="hq-dev-fee" type="number" value={fee} onChange={e => setFee(e.target.value)} placeholder="금액"
+              disabled={!!inquiry.down_paid_at}
+              style={{ ...inputStyle, width: 120, padding: '4px 8px', marginLeft: 'auto' }} />
+            <span style={{ fontSize: 12, color: '#64748b' }}>원</span>
+            {!inquiry.down_paid_at && (
+              <button type="button" onClick={() => onSaveDevFee?.(inquiry.inquiry_id, fee)}
+                style={{ ...{ padding: '5px 10px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer', border: 'none', color: 'white', background: '#16a34a' }, background: '#334155' }}>저장</button>
+            )}
+          </div>
+          {money && (
+            <>
+              <Row label="선금 50%">
+                {inquiry.down_paid_at
+                  ? `✓ ${new Date(inquiry.down_paid_at).toLocaleDateString('ko-KR')} · ${money.half.toLocaleString()}원`
+                  : `${money.half.toLocaleString()}원 · 미확인`}
+              </Row>
+              <Row label="잔금 50%">
+                {inquiry.final_paid_at
+                  ? `✓ ${new Date(inquiry.final_paid_at).toLocaleDateString('ko-KR')} · ${money.half.toLocaleString()}원`
+                  : `${money.half.toLocaleString()}원 · ${money.final}`}
+              </Row>
+            </>
+          )}
+          <div style={{ marginTop: 8 }}>
+            <textarea value={note} onChange={e => setNote(e.target.value)} rows={2} placeholder="직원 메모 — 상담·합의 내용"
+              style={{ ...inputStyle, resize: 'vertical' }} />
+            <button type="button" onClick={() => onSaveNote?.(inquiry.inquiry_id, note)}
+              style={{ ...{ padding: '5px 10px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer', border: 'none', color: 'white', background: '#16a34a' }, background: '#334155', marginTop: 6 }}>메모 저장</button>
+          </div>
+        </Section>
+      )}
+
+      <Section title="1회성 결제">
+        {oneTimePays.length === 0 ? (
+          <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>내역 없음</p>
+        ) : oneTimePays.map(p => (
+          <div key={p.payment_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #1e293b', fontSize: 12 }}>
+            {badge(codeColor('OTP_TYPE', p.type), codeLabel('OTP_TYPE', p.type))}
+            <span style={{ color: '#e2e8f0' }}>{p.amount?.toLocaleString()}원</span>
+            <span style={{ color: '#64748b', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.note || ''}</span>
+            {badge(codeColor('OTP_STATUS', p.status), codeLabel('OTP_STATUS', p.status))}
+            {p.status !== 'paid' && (
+              <button type="button" onClick={() => onMarkOtpPaid?.(p.payment_id)} style={{ padding: '5px 10px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer', border: 'none', color: 'white', background: '#16a34a' }}>납부확인</button>
+            )}
+          </div>
+        ))}
+      </Section>
+
+      <Section title="구독 · 청구">
+        {subscription ? (
+          <>
+            <Row label="상태">
+              {subscriptionLifeLabel(site, subscription)}
+              {subscription.cancels_at ? ` · 종료 ${new Date(subscription.cancels_at).toLocaleDateString('ko-KR')}` : ''}
+            </Row>
+            <Row label="요금 · 결제방식">
+              {subscription.amount?.toLocaleString()}원/월 · {codeLabel('PAYMENT_METHOD', subscription.payment_method, subscription.payment_method || '—')}
+            </Row>
+            <Row label="다음 청구일">{subscription.next_billing_date || '—'}</Row>
+            <Row label="기간">
+              <span style={{ color: period.color, fontWeight: 700 }}>{period.label}</span>
+              {period.subLabel ? ` · ${period.subLabel}` : ''}
+              {site.trial_started_at && trialEnds ? ` · 체험 종료 ${trialEnds.toLocaleDateString('ko-KR')} (D-${daysLeft ?? '?'})` : ''}
+            </Row>
+            <div style={{ marginTop: 8 }}>
+              {billingHistory.length === 0 && <p style={{ margin: '0 0 6px', fontSize: 12, color: '#64748b' }}>청구 이력 없음</p>}
+              {billingHistory.map(bh => (
+                <div key={bh.billing_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #1e293b', fontSize: 12 }}>
+                  <span style={{ fontFamily: 'ui-monospace, Consolas, monospace', color: '#e2e8f0' }}>{bh.period}</span>
+                  <span style={{ color: '#94a3b8' }}>{bh.amount?.toLocaleString()}원</span>
+                  <span style={{ color: '#64748b', flex: 1 }}>
+                    {codeLabel('PAYMENT_METHOD', bh.payment_method)}{bh.paid_at ? ` · ${new Date(bh.paid_at).toLocaleDateString('ko-KR')}` : ''}
+                  </span>
+                  {badge(codeColor('BILLING_STATUS', bh.status), codeLabel('BILLING_STATUS', bh.status))}
+                  {bh.status !== 'paid' && (
+                    <button type="button" onClick={() => onMarkBillingPaid?.(subscription, bh.amount, bh.period, bh.payment_method)} style={{ padding: '5px 10px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer', border: 'none', color: 'white', background: '#16a34a' }}>납부 확인</button>
+                  )}
+                </div>
+              ))}
+              {(() => {
+                const cur = new Date().toISOString().slice(0, 7)
+                if (billingHistory.some(bh => bh.period === cur)) return null
+                return (
+                  <button type="button" onClick={() => onMarkBillingPaid?.(subscription, subscription.amount, cur, subscription.payment_method)}
+                    style={{ ...{ padding: '5px 10px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer', border: 'none', color: 'white', background: '#16a34a' }, background: '#2563eb', marginTop: 8 }}>+ {cur} 납부 확인</button>
+                )
+              })()}
+            </div>
+          </>
+        ) : (
+          <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
+            구독 없음 — 서비스 시작(체험) 시 생성됩니다
+          </p>
+        )}
+      </Section>
+
+      <Section title={`고객 요청 ${tickets.filter(t => t.status !== 'resolved').length ? `(미처리 ${tickets.filter(t => t.status !== 'resolved').length})` : ''}`}>
+        {tickets.length === 0 ? (
+          <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>요청 없음</p>
+        ) : tickets.map(t => (
+          <div key={t.ticket_id} style={{ padding: '8px 0', borderBottom: '1px solid #1e293b', fontSize: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: '#e2e8f0', fontWeight: 600, flex: 1, minWidth: 0 }}>{t.title}</span>
+              {badge(codeColor('TICKET_STATUS', t.status), codeLabel('TICKET_STATUS', t.status))}
+              {t.status === 'open' && (
+                <button type="button" onClick={() => onTicketStatus?.(t.ticket_id, 'in_progress')} style={{ ...{ padding: '5px 10px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer', border: 'none', color: 'white', background: '#16a34a' }, background: '#2563eb' }}>처리시작</button>
+              )}
+              {t.status !== 'resolved' && (
+                <button type="button" onClick={() => onTicketStatus?.(t.ticket_id, 'resolved')} style={{ padding: '5px 10px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer', border: 'none', color: 'white', background: '#16a34a' }}>완료</button>
+              )}
+            </div>
+            {t.content && <div style={{ color: '#94a3b8', marginTop: 4, lineHeight: 1.5 }}>{t.content}</div>}
+          </div>
+        ))}
+      </Section>
+
       <Section title="식별 · 고객">
         <Row label="sites.site_id"><CopyValue value={site.site_id} /></Row>
         <Row label="sites.site_code"><CopyValue value={site.site_code} short={20} /></Row>
@@ -454,86 +595,6 @@ export default function PlatformSiteDetail({
           )}
         </Row>
         <Row label="sites.inquiry_id"><CopyValue value={site.inquiry_id} /></Row>
-      </Section>
-
-      <Section title={flowTitle}>
-        {stepIndex >= 0 && <Stepper steps={steps} currentIndex={stepIndex} />}
-        {flowHint && (
-          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#94a3b8', lineHeight: 1.5 }}>
-            {flowHint}
-          </p>
-        )}
-        {isManaged && inquiry && (
-          <div style={{ marginTop: 8 }}>
-            <Row label="sites.status (FLOW)">
-              {codeLabel('FLOW_STEP', site.status, flowStepLabel(site.status))} ({site.status})
-            </Row>
-            <Row label="inquiries.final_paid_at">
-              {inquiry.final_paid_at ? new Date(inquiry.final_paid_at).toLocaleString('ko-KR') : 'NULL'}
-            </Row>
-          </div>
-        )}
-      </Section>
-
-      <Section title="돈 · 결제">
-        {money ? (
-          <>
-            <Row label="inquiries.dev_fee_total">{money.total.toLocaleString()}원</Row>
-            <Row label="inquiries.down_paid_at">
-              {inquiry.down_paid_at
-                ? `✓ ${new Date(inquiry.down_paid_at).toLocaleDateString('ko-KR')} (${money.half.toLocaleString()}원 · ${money.down})`
-                : `NULL · 선금 ${money.half.toLocaleString()}원 ${money.down}`}
-            </Row>
-            <Row label="inquiries.final_paid_at">
-              {inquiry.final_paid_at
-                ? `✓ ${new Date(inquiry.final_paid_at).toLocaleDateString('ko-KR')}`
-                : `NULL · 잔금 ${money.half.toLocaleString()}원 · ${money.final}`}
-            </Row>
-          </>
-        ) : (
-          <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
-            {isManaged ? '연결된 문의에 개발비(dev_fee_total) 없음' : '직접 제작 — 개발비 잔금 없음 (월 구독만)'}
-          </p>
-        )}
-
-        {otpDevFees.length === 0 ? (
-          <Row label="one_time_payments">행 없음</Row>
-        ) : otpDevFees.map(p => (
-          <Row key={p.payment_id} label={<><span>OTP </span><CopyValue value={p.payment_id} short={6} /></>}>
-            type={codeLabel('OTP_TYPE', p.type)} · status=
-            <strong style={{ color: codeColor('OTP_STATUS', p.status) }}>
-              {codeLabel('OTP_STATUS', p.status)}
-            </strong>
-            {' · '}{p.amount?.toLocaleString()}원
-          </Row>
-        ))}
-
-        {subscription ? (
-          <>
-            <Row label="구독 생명">
-              {subscriptionLifeLabel(site, subscription)}
-              {subscription.cancelled_at ? ` · cancelled_at ${new Date(subscription.cancelled_at).toLocaleDateString('ko-KR')}` : ''}
-            </Row>
-            <Row label="subscriptions.amount">{subscription.amount?.toLocaleString()}원 / 월</Row>
-            <Row label="subscriptions.payment_method">
-              {codeLabel('PAYMENT_METHOD', subscription.payment_method, subscription.payment_method || 'NULL')}
-            </Row>
-            <Row label="subscriptions.next_billing_date">{subscription.next_billing_date || 'NULL'}</Row>
-          </>
-        ) : (
-          <Row label="subscriptions">행 없음</Row>
-        )}
-
-        <Row label="기간">
-          <span style={{ color: period.color, fontWeight: 700 }}>{period.label}</span>
-          {period.subLabel ? ` · ${period.subLabel}` : ''}
-        </Row>
-        <Row label="기간 상세">{period.detail}</Row>
-        <Row label="sites.trial_*">
-          {site.trial_started_at
-            ? `시작 ${new Date(site.trial_started_at).toLocaleDateString('ko-KR')} · 종료 ${trialEnds ? trialEnds.toLocaleDateString('ko-KR') : '—'} (D-${daysLeft ?? '?'})`
-            : 'NULL (체험 미시작)'}
-        </Row>
       </Section>
 
       <Section title="기타 액션">

@@ -19,8 +19,11 @@ import {
   sitePublicHostname,
 } from '@/lib/site-paths'
 import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
+import { customerNextLine } from '@/lib/flow-step'
 import SiteAdminShell, { parentKeyOf } from '@/components/SiteAdminShell'
-import UserMessagesInbox from '@/components/UserMessagesInbox'
+import UserPostsManager from '@/components/UserPostsManager'
+import UserBoardsManager from '@/components/UserBoardsManager'
+import { loadBoards, loadPostsWithComments, unansweredPosts } from '@/lib/user-board'
 
 const CATEGORIES = [
   { value: 'text_change', icon: '✏️' },
@@ -33,12 +36,16 @@ const CATEGORIES = [
 export default function CustomerPortal({ params }) {
   const { siteCode } = use(params)
   const router = useRouter()
-  const [menuKey, setMenuKey] = useState('site.basics')
-  const [openGroups, setOpenGroups] = useState({ site: true, comm: false, billing: false })
+  const [menuKey, setMenuKey] = useState('dashboard')
+  const [openGroups, setOpenGroups] = useState({ content: true, billing: true, settings: true, support: true })
   const [mobileOpen, setMobileOpen] = useState(false)
   const [site, setSite] = useState(null)
   const [customer, setCustomer] = useState(null)
   const [tickets, setTickets] = useState([])
+  const [boards, setBoards] = useState([])
+  const [posts, setPosts] = useState([])
+  const [focusPostId, setFocusPostId] = useState(null)
+  const [showTicketForm, setShowTicketForm] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [deploying, setDeploying] = useState(false)
@@ -56,6 +63,11 @@ export default function CustomerPortal({ params }) {
   const [ticketForm, setTicketForm] = useState({ title: '', content: '', category: 'etc' })
 
   useEffect(() => { checkAuthAndFetch() }, [siteCode])
+
+  useEffect(() => {
+    const m = new URLSearchParams(window.location.search).get('menu')
+    if (m) selectMenu(m)
+  }, [])
 
   async function checkAuthAndFetch() {
     const user = await requireAuthUser()
@@ -94,6 +106,7 @@ export default function CustomerPortal({ params }) {
       setInquiry(null)
     }
     fetchTickets(siteData.site_id)
+    fetchBoardData(siteData.site_id)
 
     const { data: sub } = await onlyActive(
       supabase.from('subscriptions').select('*').eq('site_id', siteData.site_id)
@@ -126,6 +139,12 @@ export default function CustomerPortal({ params }) {
     setTickets(data || [])
   }
 
+  async function fetchBoardData(siteId) {
+    const [b, p] = await Promise.all([loadBoards(supabase, siteId), loadPostsWithComments(supabase, siteId)])
+    setBoards(b)
+    setPosts(p)
+  }
+
   async function saveSiteInfo(e) {
     e.preventDefault(); setSaving(true); setSaveMsg('')
     const { error } = await supabase.from('sites')
@@ -147,8 +166,9 @@ export default function CustomerPortal({ params }) {
     else {
       setTicketMsg('✅ 접수되었습니다! 3영업일 이내 처리해드릴게요.')
       setTicketForm({ title: '', content: '', category: 'etc' })
+      setShowTicketForm(false)
       fetchTickets(site.site_id)
-      setTimeout(() => { selectMenu('comm.status'); setTicketMsg('') }, 1500)
+      setTimeout(() => setTicketMsg(''), 3000)
     }
   }
 
@@ -276,8 +296,9 @@ export default function CustomerPortal({ params }) {
     }
   }
 
-  function selectMenu(key) {
+  function selectMenu(key, postId = null) {
     setMenuKey(key)
+    setFocusPostId(postId)
     const parent = parentKeyOf(key)
     setOpenGroups(prev => ({ ...prev, [parent]: true }))
   }
@@ -286,7 +307,42 @@ export default function CustomerPortal({ params }) {
     setOpenGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))
   }
 
-  const pendingTicketCount = tickets.filter(t => t.status !== 'resolved').length
+  const DAY = 24 * 60 * 60 * 1000
+  const waitingPosts = unansweredPosts(posts, boards)
+  const boardName = (id) => boards.find(b => b.user_board_id === id)?.name || '게시판'
+  const recentResolved = tickets.filter(t =>
+    t.status === 'resolved' && t.resolved_at && Date.now() - new Date(t.resolved_at) < 7 * DAY)
+  const openTickets = tickets.filter(t => t.status !== 'resolved')
+  const trialDaysLeft = site?.status === 'trial' && site?.trial_ends_at
+    ? Math.ceil((new Date(site.trial_ends_at) - Date.now()) / DAY)
+    : null
+  const unpaidBills = billingHistory.filter(bh => bh.status === 'unpaid' || bh.status === 'overdue')
+
+  /** 알림 = 지금 처리할 일 (DB 없이 계산 · 처리하면 사라짐) */
+  const alerts = [
+    ...waitingPosts.map(p => ({
+      id: 'post-' + p.post_id, icon: '💬', menu: 'content.posts', postId: p.post_id,
+      text: `[${boardName(p.user_board_id)}] ${p.author} — 답변 대기`,
+      sub: (p.is_private ? '🔒 ' : '') + p.title, at: p.created_at,
+    })),
+    ...recentResolved.map(t => ({
+      id: 'tk-' + t.ticket_id, icon: '✅', menu: 'support.requests',
+      text: `본사 요청 처리 완료`, sub: t.title, at: t.resolved_at,
+    })),
+    ...(trialDaysLeft !== null && trialDaysLeft <= 3 ? [{
+      id: 'trial', icon: '⏳', menu: 'billing.sub',
+      text: trialDaysLeft <= 0
+        ? `무료 체험이 오늘 종료됩니다 — 결제 수단을 확인해 주세요`
+        : `무료 체험 종료 D-${trialDaysLeft} — 결제 수단을 확인해 주세요`,
+      at: site.trial_ends_at,
+    }] : []),
+    ...unpaidBills.map(bh => ({
+      id: 'bill-' + bh.billing_id, icon: '💳', menu: 'billing.history',
+      text: `${bh.period} 이용료 미납`, sub: `${bh.amount.toLocaleString()}원`, at: bh.due_at || bh.created_at,
+    })),
+  ]
+
+  const badges = { unanswered: waitingPosts.length }
 
   const css = {
     page: { minHeight: '100vh', background: '#f8f7f4', fontFamily: "'Pretendard', 'Apple SD Gothic Neo', -apple-system, sans-serif" },
@@ -455,13 +511,68 @@ export default function CustomerPortal({ params }) {
         onMenuChange={selectMenu}
         openGroups={openGroups}
         onToggleGroup={toggleGroup}
-        pendingTicketCount={pendingTicketCount}
+        badges={badges}
+        alertCount={alerts.length}
         mobileOpen={mobileOpen}
         onMobileOpen={setMobileOpen}
         onLogout={handleLogout}
       >
-        {/* 기본 정보 */}
-        {menuKey === 'site.basics' && (
+        {menuKey === 'dashboard' && (
+          <>
+            <div style={css.card}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#111827' }}>서비스 상태</h3>
+                {badge(codeColor('FLOW_STEP', site.status), codeLabel('FLOW_STEP', site.status))}
+                {trialDaysLeft !== null && badge('#f59e0b', `체험 D-${Math.max(trialDaysLeft, 0)}`)}
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: '#6b7280' }}>{customerNextLine(site.status, site.build_type)}</p>
+            </div>
+            {deployPanel}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                { label: '답변 대기 글', value: `${waitingPosts.length}건`, menu: 'content.posts', hot: waitingPosts.length > 0 },
+                { label: '진행 중 본사 요청', value: `${openTickets.length}건`, menu: 'support.requests' },
+                {
+                  label: '다음 결제일',
+                  value: subscription?.next_billing_date ? new Date(subscription.next_billing_date).toLocaleDateString('ko-KR') : '—',
+                  menu: 'billing.sub',
+                },
+              ].map(t => (
+                <button key={t.label} type="button" onClick={() => selectMenu(t.menu)}
+                  style={{ ...css.card, marginBottom: 0, padding: 18, textAlign: 'left', cursor: 'pointer', border: t.hot ? '1px solid #fecaca' : css.card.border }}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>{t.label}</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: t.hot ? '#ef4444' : '#111827' }}>{t.value}</div>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {menuKey === 'alerts' && (
+          <div style={css.card}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: '#111827' }}>{site.name} 알림</h3>
+            {alerts.length === 0 ? (
+              <p style={{ margin: 0, padding: '24px 0', textAlign: 'center', fontSize: 13, color: '#9ca3af' }}>새 알림이 없습니다</p>
+            ) : alerts.map((a, i) => (
+              <button key={a.id} type="button" onClick={() => selectMenu(a.menu, a.postId)}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 4px',
+                  background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
+                  borderBottom: i < alerts.length - 1 ? '1px solid #f3f4f6' : 'none',
+                }}>
+                <span style={{ fontSize: 16 }}>{a.icon}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 13, color: '#111827' }}>{a.text}</span>
+                  {a.sub && <span style={{ display: 'block', fontSize: 12, color: '#6b7280', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.sub}</span>}
+                </span>
+                {a.at && <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>{new Date(a.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}
+                <span style={{ fontSize: 12, color: '#9ca3af' }}>›</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {menuKey === 'settings.site' && (
           <>
             <div style={css.card}>
               <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: '#111827' }}>기본 정보 수정</h3>
@@ -489,14 +600,8 @@ export default function CustomerPortal({ params }) {
                 </div>
               </form>
             </div>
-          </>
-        )}
-
-        {menuKey === 'site.deploy' && deployPanel}
-
-        {menuKey === 'site.info' && (
           <div style={css.card}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: '#111827' }}>사이트 정보</h3>
+            <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: '#111827' }}>주소 · 서비스</h3>
             {[
               { label: '플랫폼 주소', value: sitePublicHostname(site.subdomain) },
               { label: '커스텀 도메인', value: site.domain || '미연결' },
@@ -512,56 +617,77 @@ export default function CustomerPortal({ params }) {
               </div>
             ))}
           </div>
+          </>
         )}
 
-        {menuKey === 'comm.messages' && <UserMessagesInbox siteId={site.site_id} />}
+        {menuKey === 'content.posts' && (
+          <UserPostsManager
+            site={site}
+            ownerName={customer?.name}
+            boards={boards}
+            posts={posts}
+            focusPostId={focusPostId}
+            onReload={() => fetchBoardData(site.site_id)}
+          />
+        )}
 
-        {menuKey === 'comm.request' && (
+        {menuKey === 'content.boards' && (
+          <UserBoardsManager site={site} boards={boards} posts={posts} onReload={() => fetchBoardData(site.site_id)} />
+        )}
+
+        {menuKey === 'support.requests' && (
           <div style={css.card}>
-            <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 700, color: '#111827' }}>수정 요청 접수</h3>
-            <p style={{ margin: '0 0 24px', fontSize: 13, color: '#9ca3af' }}>수정이 어려운 부분은 본사에 요청하세요. 3영업일 이내 처리해드립니다.</p>
-            <div style={{ marginBottom: 20 }}>
-              <label style={css.label}>요청 유형</label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {CATEGORIES.map(c => (
-                  <button key={c.value} onClick={() => setTicketForm({ ...ticketForm, category: c.value })} style={{
-                    padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
-                    border: ticketForm.category === c.value ? '2px solid #111827' : '1px solid #e5e7eb',
-                    background: ticketForm.category === c.value ? '#111827' : 'white',
-                    color: ticketForm.category === c.value ? 'white' : '#374151', fontWeight: 500,
-                  }}>{c.icon} {codeLabel('TICKET_CATEGORY', c.value)}</button>
-                ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 20 }}>
+              <div>
+                <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 700, color: '#111827' }}>본사 요청</h3>
+                <p style={{ margin: 0, fontSize: 13, color: '#9ca3af' }}>직접 수정이 어려운 부분은 본사에 요청하세요. 3영업일 이내 처리해드립니다.</p>
               </div>
-            </div>
-            <form onSubmit={submitTicket}>
-              <div style={{ marginBottom: 16 }}>
-                <label style={css.label}>제목 *</label>
-                <input value={ticketForm.title} onChange={e => setTicketForm({ ...ticketForm, title: e.target.value })} placeholder="예: 메인 페이지 전화번호 수정 요청" required style={css.input} />
-              </div>
-              <div style={{ marginBottom: 20 }}>
-                <label style={css.label}>상세 내용 *</label>
-                <textarea value={ticketForm.content} onChange={e => setTicketForm({ ...ticketForm, content: e.target.value })} placeholder="어떤 부분을 어떻게 수정해주셨으면 하는지 구체적으로 작성해주세요." required rows={5} style={{ ...css.input, resize: 'vertical' }} />
-              </div>
-              {ticketMsg && (
-                <div style={{ padding: '12px 16px', borderRadius: 8, marginBottom: 16, background: ticketMsg.startsWith('✅') ? '#f0fdf4' : '#fef2f2', color: ticketMsg.startsWith('✅') ? '#16a34a' : '#ef4444', fontSize: 13 }}>
-                  {ticketMsg}
-                </div>
+              {!(showTicketForm || tickets.length === 0) && (
+                <button type="button" onClick={() => setShowTicketForm(true)} style={{ ...css.btn, whiteSpace: 'nowrap' }}>+ 새 요청</button>
               )}
-              <button type="submit" style={css.btn}>요청 접수하기</button>
-            </form>
-          </div>
-        )}
-
-        {menuKey === 'comm.status' && (
-          <div style={css.card}>
-            <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: '#111827' }}>요청 처리 현황</h3>
-            {tickets.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af' }}>
-                <div style={{ fontSize: 36, marginBottom: 12 }}>📭</div>
-                <div style={{ fontSize: 14, marginBottom: 16 }}>접수된 요청이 없습니다</div>
-                <button onClick={() => selectMenu('comm.request')} style={css.btn}>수정 요청하기</button>
+            </div>
+            {ticketMsg && (
+              <div style={{ padding: '12px 16px', borderRadius: 8, marginBottom: 16, background: ticketMsg.startsWith('✅') ? '#f0fdf4' : '#fef2f2', color: ticketMsg.startsWith('✅') ? '#16a34a' : '#ef4444', fontSize: 13 }}>
+                {ticketMsg}
               </div>
-            ) : (
+            )}
+            {(showTicketForm || tickets.length === 0) && (
+              <div style={{ padding: 20, borderRadius: 10, background: '#f9fafb', marginBottom: tickets.length ? 20 : 0 }}>
+              <div style={{ marginBottom: 20 }}>
+                <label style={css.label}>요청 유형</label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {CATEGORIES.map(c => (
+                    <button key={c.value} onClick={() => setTicketForm({ ...ticketForm, category: c.value })} style={{
+                      padding: '8px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 13,
+                      border: ticketForm.category === c.value ? '2px solid #111827' : '1px solid #e5e7eb',
+                      background: ticketForm.category === c.value ? '#111827' : 'white',
+                      color: ticketForm.category === c.value ? 'white' : '#374151', fontWeight: 500,
+                    }}>{c.icon} {codeLabel('TICKET_CATEGORY', c.value)}</button>
+                  ))}
+                </div>
+              </div>
+              <form onSubmit={submitTicket}>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={css.label}>제목 *</label>
+                  <input value={ticketForm.title} onChange={e => setTicketForm({ ...ticketForm, title: e.target.value })} placeholder="예: 메인 페이지 전화번호 수정 요청" required style={css.input} />
+                </div>
+                <div style={{ marginBottom: 20 }}>
+                  <label style={css.label}>상세 내용 *</label>
+                  <textarea value={ticketForm.content} onChange={e => setTicketForm({ ...ticketForm, content: e.target.value })} placeholder="어떤 부분을 어떻게 수정해주셨으면 하는지 구체적으로 작성해주세요." required rows={5} style={{ ...css.input, resize: 'vertical' }} />
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button type="submit" style={css.btn}>요청 접수하기</button>
+                  {tickets.length > 0 && (
+                    <button type="button" onClick={() => setShowTicketForm(false)}
+                      style={{ ...css.btn, background: 'white', color: '#6b7280', border: '1px solid #e5e7eb' }}>
+                      취소
+                    </button>
+                  )}
+                </div>
+              </form>
+              </div>
+            )}
+            {tickets.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {tickets.map(ticket => {
                   const overdue = new Date(ticket.deadline_at) < new Date() && ticket.status !== 'resolved'
@@ -748,7 +874,7 @@ export default function CustomerPortal({ params }) {
           </div>
         )}
 
-        {menuKey === 'billing.account' && (() => {
+        {menuKey === 'settings.account' && (() => {
           const isPendingCancel = getSubscriptionUiFlags(site, subscription).isPendingCancel
           if (isPendingCancel) {
             return (

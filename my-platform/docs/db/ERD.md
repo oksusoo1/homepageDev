@@ -23,8 +23,9 @@ erDiagram
   customers ||--o{ customer_payment_methods : cards
   sites ||--o{ support_tickets : 수정요청
   customers ||--o{ support_tickets : opens
-  sites ||--o{ user_posts : board
-  sites ||--o{ user_messages : contact
+  sites ||--o{ user_boards : boards
+  user_boards ||--o{ user_posts : posts
+  user_posts ||--o{ user_comments : comments
   common_codes {
     uuid common_code_id PK
     varchar group_code
@@ -68,7 +69,9 @@ erDiagram
 | customers | inquiries | inquiries.customer_id |
 | sites | subscriptions | subscriptions.site_id (UNIQUE) |
 | subscriptions | billing_history | billing_history.subscription_id |
-| sites | user_posts / user_messages / support_tickets | site_id |
+| sites | user_boards / user_posts / support_tickets | site_id |
+| user_boards | user_posts | user_posts.user_board_id |
+| user_posts | user_comments | user_comments.post_id |
 
 ---
 

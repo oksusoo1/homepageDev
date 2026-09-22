@@ -80,8 +80,9 @@ async function cmdSnapshot(sb) {
     'one_time_payments',
     'support_tickets',
     'templates',
+    'user_boards',
     'user_posts',
-    'user_messages',
+    'user_comments',
   ]
   const out = {}
   for (const t of tables) {

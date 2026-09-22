@@ -98,7 +98,7 @@ function BankTransferForm() {
       return
     }
 
-    router.push(`${siteAdminPath(siteCode)}?tab=payment`)
+    router.push(`${siteAdminPath(siteCode)}?menu=billing.sub`)
   }
 
   if (loading) {

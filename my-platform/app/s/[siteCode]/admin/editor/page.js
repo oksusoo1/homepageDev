@@ -743,7 +743,7 @@ export default function EditorPage({ params }) {
                 <div style={{ marginTop: 24, padding: 14, background: '#1f2937', borderRadius: 8 }}>
                   <p style={{ margin: 0, fontSize: 12, color: '#6b7280', lineHeight: 1.7 }}>
                     💡 연락처 정보(주소, 전화, 이메일)는<br />
-                    <Link href={siteAdminPath(siteCode)} style={{ color: '#3b82f6', textDecoration: 'none' }}>포털 → 기본 정보 수정</Link>에서 변경할 수 있어요.
+                    <Link href={`${siteAdminPath(siteCode)}?menu=settings.site`} style={{ color: '#3b82f6', textDecoration: 'none' }}>관리자 → 설정 → 사이트 정보</Link>에서 변경할 수 있어요.
                   </p>
                 </div>
               </>

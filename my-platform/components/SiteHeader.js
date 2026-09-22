@@ -1,27 +1,39 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { sitePublicPath } from '@/lib/site-paths'
+import { supabase } from '@/lib/supabase'
+import { sitePublicPath, boardPath } from '@/lib/site-paths'
 import AuthUserBar from '@/components/AuthUserBar'
 
 /**
- * 방문자 사이트 공통 헤더
- * - 네비: 홈 / 게시판 / 문의
+ * 고객(방문자) 사이트 공통 헤더
+ * - 네비: 홈 + 사이트 게시판(user_boards 정렬순)
+ * - activePage: 'home' | 게시판 board_key
  * - 우측: AuthUserBar (이름+이메일)
  */
 export default function SiteHeader({
   siteName,
   siteCode,
-  domain,
   bgColor = '#1c1917',
   activePage = '',
 }) {
-  const code = siteCode || (domain ? String(domain).split('.')[0] : '')
+  const [boards, setBoards] = useState([])
+
+  useEffect(() => {
+    if (!siteCode) return
+    supabase
+      .from('user_boards')
+      .select('board_key, name, sort_order, sites!inner(subdomain)')
+      .eq('sites.subdomain', siteCode)
+      .eq('use_flag', 1)
+      .order('sort_order')
+      .then(({ data }) => setBoards(data || []))
+  }, [siteCode])
 
   const navItems = [
-    { label: '홈', href: code ? sitePublicPath(code) : '#', key: 'home' },
-    { label: '게시판', href: code ? sitePublicPath(code, '/board') : '#', key: 'board' },
-    { label: '문의', href: code ? sitePublicPath(code, '/contact') : '#', key: 'contact' },
+    { label: '홈', href: sitePublicPath(siteCode), key: 'home' },
+    ...boards.map(b => ({ label: b.name, href: boardPath(siteCode, b.board_key), key: b.board_key })),
   ]
 
   return (
@@ -30,7 +42,7 @@ export default function SiteHeader({
       padding: '0 20px', height: 64,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
     }}>
-      <Link href={code ? sitePublicPath(code) : '#'} style={{
+      <Link href={sitePublicPath(siteCode)} style={{
         color: 'white', textDecoration: 'none',
         fontSize: 18, fontWeight: 600, letterSpacing: '-0.5px', flexShrink: 0,
       }}>

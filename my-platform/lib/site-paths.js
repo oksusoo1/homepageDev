@@ -13,6 +13,12 @@ export function sitePublicPath(siteCode, subPath = '') {
   return `${base}${subPath.startsWith('/') ? subPath : `/${subPath}`}`
 }
 
+/** 게시판 경로 /s/{siteCode}/board/{boardKey}[/sub] */
+export function boardPath(siteCode, boardKey, subPath = '') {
+  const sub = subPath ? (subPath.startsWith('/') ? subPath : `/${subPath}`) : ''
+  return sitePublicPath(siteCode, `/board/${boardKey}${sub}`)
+}
+
 /** 사이트 관리(고객 콘솔) 경로 */
 export function siteAdminPath(siteCode, subPath = '') {
   const base = `/s/${siteCode}/admin`

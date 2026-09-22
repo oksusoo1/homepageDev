@@ -22,11 +22,13 @@ import DevFeeSummary from '@/components/DevFeeSummary'
 import { onlyActive } from '@/lib/use-flag'
 import { loadCommonCodes, codeLabel } from '@/lib/common-codes'
 import AuthUserBar from '@/components/AuthUserBar'
+import { countUnansweredBySite } from '@/lib/user-board'
 
 export default function MySitesPage() {
   const router = useRouter()
   const [customer, setCustomer] = useState(null)
   const [sites, setSites] = useState([])
+  const [waitingBySite, setWaitingBySite] = useState({}) // { site_id: 답변 대기 글 수 }
   const [loading, setLoading] = useState(true)
   const [isWithdrawn, setIsWithdrawn] = useState(false)
   const [reactivating, setReactivating] = useState(false)
@@ -133,6 +135,7 @@ export default function MySitesPage() {
         .eq('customer_id', cust.customer_id)
     ).order('created_at', { ascending: false })
     setSites(siteList || [])
+    setWaitingBySite(await countUnansweredBySite(supabase, (siteList || []).map(x => x.site_id)))
 
     // 내 제작 문의 조회
     const { data: inqList } = await onlyActive(
@@ -249,6 +252,7 @@ export default function MySitesPage() {
           .eq('customer_id', customer.customer_id)
       ).order('created_at', { ascending: false })
       setSites(siteList || [])
+    setWaitingBySite(await countUnansweredBySite(supabase, (siteList || []).map(x => x.site_id)))
 
       if (inqList?.length) {
         const { data: linkedSites } = await onlyActive(
@@ -283,6 +287,7 @@ export default function MySitesPage() {
         .eq('customer_id', customer.customer_id)
     ).order('created_at', { ascending: false })
     setSites(siteList || [])
+    setWaitingBySite(await countUnansweredBySite(supabase, (siteList || []).map(x => x.site_id)))
 
     const map = {}
     if (inqList?.length) {
@@ -323,6 +328,7 @@ export default function MySitesPage() {
       .eq('customer_id', customer.customer_id)
       .order('created_at', { ascending: false })
     setSites(siteList || [])
+    setWaitingBySite(await countUnansweredBySite(supabase, (siteList || []).map(x => x.site_id)))
   }
 
   const STATUS_COLOR = {
@@ -879,6 +885,12 @@ export default function MySitesPage() {
                             fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
                             background: statusBg, color: statusColor,
                           }}>{statusLabel}</span>
+                          {waitingBySite[site.site_id] > 0 && (
+                            <span style={{
+                              fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                              background: '#fee2e2', color: '#b91c1c',
+                            }}>답변 대기 {waitingBySite[site.site_id]}</span>
+                          )}
                           {site.build_type && (
                             <span style={{
                               fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
