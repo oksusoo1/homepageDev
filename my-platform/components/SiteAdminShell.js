@@ -58,7 +58,7 @@ export const SITE_ADMIN_NAV = [
         label: '본사 요청',
         icon: '🛟',
         children: [
-          { key: 'support.requests', label: '요청 · 처리현황' },
+          { key: 'support.requests', label: '요청 · 처리현황', badge: 'staffReplies' },
         ],
       },
     ],

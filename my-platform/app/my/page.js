@@ -7,9 +7,11 @@ import Link from 'next/link'
 import { siteAdminPath, sitePublicPath, sitePublicHostname } from '@/lib/site-paths'
 import { paymentMethodPath, oneTimePaymentMethodPath } from '@/lib/payment/paths'
 import {
-  canPayFinalBalance,
-  loadPendingFinalPayments,
+  payableStage,
+  pendingOtpOf,
+  loadDevFeePayments,
   isFinalPaymentPending,
+  stageMeta,
 } from '@/lib/payment/one-time'
 import {
   flowStepLabel,
@@ -160,8 +162,7 @@ export default function MySitesPage() {
     }
 
     // 잔금 입금확인대기 (계좌이체 신청 후 /my 표시용)
-    const pending = await loadPendingFinalPayments(supabase, cust.customer_id)
-    setPendingOtps(pending)
+    setPendingOtps(await loadDevFeePayments(supabase, cust.customer_id))
 
     setLoading(false)
   }
@@ -705,11 +706,16 @@ export default function MySitesPage() {
           .filter(i => i.status !== 'done' && !linkedSiteMap[i.inquiry_id])
           .map(inq => {
           const finalPending = isFinalPaymentPending(pendingOtps, null)
+          const downPending = !!pendingOtpOf(pendingOtps, 'down', linkedSiteMap[inq.inquiry_id]?.site_id)
           const flowStep = resolveManagedFlowStep(inq, { site: null, finalPending })
           const stepLabel = codeLabel('FLOW_STEP', flowStep, flowStepLabel(flowStep))
-          const nextHint = finalPending
-            ? '다음: 잔금 입금 확인 중입니다.'
-            : customerNextLine(flowStep, 'managed')
+          const nextHint = downPending
+            ? '다음: 선금 입금 확인을 기다리는 중입니다.'
+            : finalPending
+              ? '다음: 잔금 입금 확인을 기다리는 중입니다.'
+              : customerNextLine(flowStep, 'managed')
+          const payStage = payableStage(linkedSiteMap[inq.inquiry_id] || null, inq)
+          const payBlocked = payStage === 'down' ? downPending : finalPending
 
           return (
             <div key={inq.inquiry_id} style={{
@@ -783,20 +789,21 @@ export default function MySitesPage() {
                 {nextHint}
               </div>
 
-              {inq.dev_fee_total && ['preview', 'balance'].includes(linkedSiteMap[inq.inquiry_id]?.status) && !inq.final_paid_at && (
-                <DevFeeSummary inquiry={inq} highlight="final" finalPending={finalPending} />
+              {inq.dev_fee_total && (payStage || downPending || finalPending) && (
+                <DevFeeSummary inquiry={inq} highlight={payStage || 'none'}
+                  finalPending={finalPending} downPending={downPending} />
               )}
 
-              {canPayFinalBalance(inq, { finalPending, site: linkedSiteMap[inq.inquiry_id] }) && (
+              {payStage && !payBlocked && (
                 <button
-                  onClick={() => router.push(oneTimePaymentMethodPath(inq.inquiry_id))}
+                  onClick={() => router.push(oneTimePaymentMethodPath(inq.inquiry_id, payStage))}
                   style={{
                     alignSelf: 'flex-start',
                     padding: '11px 20px', background: '#111827', color: 'white',
                     borderRadius: 8, fontSize: 14, fontWeight: 700, border: 'none', cursor: 'pointer',
                   }}
                 >
-                  잔금 결제하기 →
+                  {stageMeta(payStage).label} 결제하기 →
                 </button>
               )}
             </div>
@@ -965,23 +972,26 @@ export default function MySitesPage() {
                       : null
                     if (!inq) return null
                     const finalPending = isFinalPaymentPending(pendingOtps, site)
-                    const canPay = canPayFinalBalance(inq, { finalPending, site })
-                    if (!canPay && site.status !== 'pay_method') return null
+                    const downPending = !!pendingOtpOf(pendingOtps, 'down', site.site_id)
+                    const payStage = payableStage(site, inq)
+                    const payBlocked = payStage === 'down' ? downPending : finalPending
+                    if (!payStage && !downPending && !finalPending && site.status !== 'pay_method') return null
                     return (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                        {canPay && !inq.final_paid_at && (
-                          <DevFeeSummary inquiry={inq} highlight="final" finalPending={finalPending} />
+                        {(payStage || downPending || finalPending) && (
+                          <DevFeeSummary inquiry={inq} highlight={payStage || 'none'}
+                            finalPending={finalPending} downPending={downPending} />
                         )}
-                        {canPay && (
+                        {payStage && !payBlocked && (
                           <button
                             type="button"
-                            onClick={() => router.push(oneTimePaymentMethodPath(inq.inquiry_id))}
+                            onClick={() => router.push(oneTimePaymentMethodPath(inq.inquiry_id, payStage))}
                             style={{
                               padding: '10px 16px', background: '#111827', color: 'white',
                               borderRadius: 8, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer',
                             }}
                           >
-                            잔금 결제하기 →
+                            {stageMeta(payStage).label} 결제하기 →
                           </button>
                         )}
                         {site.status === 'pay_method' && (

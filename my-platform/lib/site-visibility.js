@@ -36,12 +36,16 @@ export function resolveSiteVisibility(site, ctx = {}) {
   return { flowStep, visibility: visibilityFromFlowStep(flowStep) }
 }
 
+/**
+ * 본사(staff)는 모든 단계 열람 가능 — 고객 요청 응대·검수 때문
+ * producer(제작 중): 대리=본사만 · 셀프=본사+사장님(고객이 만드는 중이므로 사장님도)
+ */
 export function canViewByVisibility(visibility, buildType, who) {
   if (visibility === 'public') return true
   if (visibility === 'hidden') return false
-  if (visibility === 'partial') return !!(who.isStaff || who.isOwner)
-  if (buildType === 'managed') return !!who.isStaff
-  return !!who.isOwner
+  if (who.isStaff) return true
+  if (visibility === 'partial') return !!who.isOwner
+  return buildType === 'self' && !!who.isOwner
 }
 
 export { visibilityFromSite }

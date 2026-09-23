@@ -20,6 +20,11 @@ import {
 } from '@/lib/site-paths'
 import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
 import { customerNextLine } from '@/lib/flow-step'
+import {
+  loadCustomerTicketMessages, addTicketMessage, canCustomerEditTicket,
+  markTicketMessagesRead, unreadFrom,
+} from '@/lib/support-ticket'
+import { softDelete } from '@/lib/use-flag'
 import SiteAdminShell, { parentKeyOf } from '@/components/SiteAdminShell'
 import UserPostsManager from '@/components/UserPostsManager'
 import UserBoardsManager from '@/components/UserBoardsManager'
@@ -45,7 +50,12 @@ export default function CustomerPortal({ params }) {
   const [boards, setBoards] = useState([])
   const [posts, setPosts] = useState([])
   const [focusPostId, setFocusPostId] = useState(null)
+  const [alertsShown, setAlertsShown] = useState(null)   // 알림 화면 진입 시점 목록 (읽음 처리돼도 유지)
   const [showTicketForm, setShowTicketForm] = useState(false)
+  const [ticketMsgs, setTicketMsgs] = useState({})     // { ticket_id: [메시지] } — 내부 메모 제외
+  const [ticketReply, setTicketReply] = useState({})   // { ticket_id: 입력중 }
+  const [editTicketId, setEditTicketId] = useState(null)
+  const [editTicketForm, setEditTicketForm] = useState({ title: '', content: '' })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [deploying, setDeploying] = useState(false)
@@ -68,6 +78,16 @@ export default function CustomerPortal({ params }) {
     const m = new URLSearchParams(window.location.search).get('menu')
     if (m) selectMenu(m)
   }, [])
+
+  // 알림 · 본사 요청 화면을 열면 본사 메시지 읽음 처리 → 알림·뱃지에서 빠짐
+  useEffect(() => {
+    if (!['support.requests', 'alerts'].includes(menuKey) || !tickets.length || !site) return
+    const ids = tickets.filter(t => unreadFrom(ticketMsgs[t.ticket_id], 'staff').length).map(t => t.ticket_id)
+    if (!ids.length) return
+    markTicketMessagesRead(supabase, ids, 'customer').then(changed => {
+      if (changed) fetchTickets(site.site_id)
+    })
+  }, [menuKey, tickets, ticketMsgs, site])
 
   async function checkAuthAndFetch() {
     const user = await requireAuthUser()
@@ -137,6 +157,48 @@ export default function CustomerPortal({ params }) {
         .eq('site_id', siteId).order('created_at', { ascending: false })
     )
     setTickets(data || [])
+    setTicketMsgs(await loadCustomerTicketMessages(supabase, (data || []).map(t => t.ticket_id)))
+  }
+
+  /** 사장님 → 본사 추가 메시지 */
+  async function sendTicketMessage(ticketId) {
+    const content = ticketReply[ticketId] || ''
+    if (!content.trim()) return
+    try {
+      await addTicketMessage(supabase, {
+        ticketId, authorType: 'customer', author: customer?.name || '사장님', content,
+      })
+      setTicketReply(prev => ({ ...prev, [ticketId]: '' }))
+      await fetchTickets(site.site_id)
+    } catch (e) {
+      setTicketMsg('❌ ' + e.message)
+    }
+  }
+
+  /** 접수 상태에서만 수정 */
+  async function saveTicketEdit(ticketId) {
+    if (!editTicketForm.title.trim() || !editTicketForm.content.trim()) return
+    const { error } = await supabase.from('support_tickets')
+      .update({
+        title: editTicketForm.title.trim(),
+        content: editTicketForm.content.trim(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('ticket_id', ticketId)
+    if (error) { setTicketMsg('❌ ' + error.message); return }
+    setEditTicketId(null)
+    await fetchTickets(site.site_id)
+  }
+
+  /** 접수 상태에서만 취소 (soft delete) */
+  async function cancelTicket(ticketId) {
+    if (!window.confirm('이 요청을 취소할까요?\n본사가 처리를 시작하기 전에만 취소할 수 있습니다.')) return
+    try {
+      await softDelete(supabase, 'support_tickets', 'ticket_id', ticketId)
+      await fetchTickets(site.site_id)
+    } catch (e) {
+      setTicketMsg('❌ ' + e.message)
+    }
   }
 
   async function fetchBoardData(siteId) {
@@ -297,6 +359,8 @@ export default function CustomerPortal({ params }) {
   }
 
   function selectMenu(key, postId = null) {
+    // 알림 화면: 들어간 순간의 목록을 고정 (읽음 처리로 눈앞에서 사라지지 않게)
+    setAlertsShown(key === 'alerts' ? alerts : null)
     setMenuKey(key)
     setFocusPostId(postId)
     const parent = parentKeyOf(key)
@@ -310,8 +374,9 @@ export default function CustomerPortal({ params }) {
   const DAY = 24 * 60 * 60 * 1000
   const waitingPosts = unansweredPosts(posts, boards)
   const boardName = (id) => boards.find(b => b.user_board_id === id)?.name || '게시판'
-  const recentResolved = tickets.filter(t =>
-    t.status === 'resolved' && t.resolved_at && Date.now() - new Date(t.resolved_at) < 7 * DAY)
+  /** 안 읽은 본사 메시지 — 본사 요청 화면을 열면 읽음 처리되어 사라짐 */
+  const recentStaffMsgs = tickets.flatMap(t =>
+    unreadFrom(ticketMsgs[t.ticket_id], 'staff').map(m => ({ ticket: t, msg: m })))
   const openTickets = tickets.filter(t => t.status !== 'resolved')
   const trialDaysLeft = site?.status === 'trial' && site?.trial_ends_at
     ? Math.ceil((new Date(site.trial_ends_at) - Date.now()) / DAY)
@@ -325,9 +390,10 @@ export default function CustomerPortal({ params }) {
       text: `[${boardName(p.user_board_id)}] ${p.author} — 답변 대기`,
       sub: (p.is_private ? '🔒 ' : '') + p.title, at: p.created_at,
     })),
-    ...recentResolved.map(t => ({
-      id: 'tk-' + t.ticket_id, icon: '✅', menu: 'support.requests',
-      text: `본사 요청 처리 완료`, sub: t.title, at: t.resolved_at,
+    ...recentStaffMsgs.map(({ ticket, msg }) => ({
+      id: 'tkm-' + msg.ticket_message_id, icon: '💌', menu: 'support.requests',
+      text: `본사 답변 — ${ticket.title}`,
+      sub: msg.content, at: msg.created_at,
     })),
     ...(trialDaysLeft !== null && trialDaysLeft <= 3 ? [{
       id: 'trial', icon: '⏳', menu: 'billing.sub',
@@ -342,7 +408,7 @@ export default function CustomerPortal({ params }) {
     })),
   ]
 
-  const badges = { unanswered: waitingPosts.length }
+  const badges = { unanswered: waitingPosts.length, staffReplies: recentStaffMsgs.length }
 
   const css = {
     page: { minHeight: '100vh', background: '#f8f7f4', fontFamily: "'Pretendard', 'Apple SD Gothic Neo', -apple-system, sans-serif" },
@@ -551,14 +617,14 @@ export default function CustomerPortal({ params }) {
         {menuKey === 'alerts' && (
           <div style={css.card}>
             <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: '#111827' }}>{site.name} 알림</h3>
-            {alerts.length === 0 ? (
+            {(alertsShown || alerts).length === 0 ? (
               <p style={{ margin: 0, padding: '24px 0', textAlign: 'center', fontSize: 13, color: '#9ca3af' }}>새 알림이 없습니다</p>
-            ) : alerts.map((a, i) => (
+            ) : (alertsShown || alerts).map((a, i) => (
               <button key={a.id} type="button" onClick={() => selectMenu(a.menu, a.postId)}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 4px',
                   background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
-                  borderBottom: i < alerts.length - 1 ? '1px solid #f3f4f6' : 'none',
+                  borderBottom: i < (alertsShown || alerts).length - 1 ? '1px solid #f3f4f6' : 'none',
                 }}>
                 <span style={{ fontSize: 16 }}>{a.icon}</span>
                 <span style={{ flex: 1, minWidth: 0 }}>
@@ -704,7 +770,63 @@ export default function CustomerPortal({ params }) {
                           codeLabel('TICKET_STATUS', ticket.status)
                         )}
                       </div>
-                      <p style={{ margin: '0 0 10px', fontSize: 13, color: '#6b7280', lineHeight: 1.6 }}>{ticket.content}</p>
+                      {editTicketId === ticket.ticket_id ? (
+                        <div style={{ marginBottom: 12 }}>
+                          <input value={editTicketForm.title}
+                            onChange={e => setEditTicketForm(f => ({ ...f, title: e.target.value }))}
+                            style={{ ...css.input, marginBottom: 8 }} />
+                          <textarea value={editTicketForm.content}
+                            onChange={e => setEditTicketForm(f => ({ ...f, content: e.target.value }))}
+                            rows={4} style={{ ...css.input, resize: 'vertical' }} />
+                          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                            <button onClick={() => saveTicketEdit(ticket.ticket_id)} style={{ ...css.btn, padding: '7px 14px', fontSize: 13 }}>저장</button>
+                            <button onClick={() => setEditTicketId(null)}
+                              style={{ ...css.btn, padding: '7px 14px', fontSize: 13, background: 'white', color: '#6b7280', border: '1px solid #e5e7eb' }}>취소</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p style={{ margin: '0 0 10px', fontSize: 13, color: '#6b7280', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ticket.content}</p>
+                      )}
+
+                      {(ticketMsgs[ticket.ticket_id] || []).map(m => (
+                        <div key={m.ticket_message_id} style={{
+                          margin: '0 0 8px', padding: '12px 14px', borderRadius: 8,
+                          background: m.author_type === 'staff' ? '#f9fafb' : '#eff6ff',
+                          borderLeft: `3px solid ${m.author_type === 'staff' ? '#111827' : '#93c5fd'}`,
+                        }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', marginBottom: 4 }}>
+                            {m.author_type === 'staff' ? '본사' : '내 메시지'}
+                            <span style={{ fontWeight: 500, marginLeft: 8 }}>{new Date(m.created_at).toLocaleString('ko-KR')}</span>
+                          </div>
+                          <p style={{ margin: 0, fontSize: 13, color: '#111827', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{m.content}</p>
+                        </div>
+                      ))}
+
+                      {ticket.status !== 'resolved' && editTicketId !== ticket.ticket_id && (
+                        <div style={{ marginBottom: 10 }}>
+                          <textarea
+                            value={ticketReply[ticket.ticket_id] || ''}
+                            onChange={e => setTicketReply(prev => ({ ...prev, [ticket.ticket_id]: e.target.value }))}
+                            rows={2} placeholder="내용을 덧붙이거나 본사에 답장하세요"
+                            style={{ ...css.input, resize: 'vertical' }} />
+                          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                            <button onClick={() => sendTicketMessage(ticket.ticket_id)}
+                              style={{ ...css.btn, padding: '7px 14px', fontSize: 13 }}>보내기</button>
+                            {canCustomerEditTicket(ticket) && (
+                              <>
+                                <button onClick={() => { setEditTicketId(ticket.ticket_id); setEditTicketForm({ title: ticket.title, content: ticket.content }) }}
+                                  style={{ ...css.btn, padding: '7px 14px', fontSize: 13, background: 'white', color: '#6b7280', border: '1px solid #e5e7eb' }}>
+                                  요청 수정
+                                </button>
+                                <button onClick={() => cancelTicket(ticket.ticket_id)}
+                                  style={{ ...css.btn, padding: '7px 14px', fontSize: 13, background: 'white', color: '#ef4444', border: '1px solid #fecaca' }}>
+                                  요청 취소
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
                       <div style={{ display: 'flex', gap: 16, fontSize: 11, color: '#9ca3af' }}>
                         <span>접수: {new Date(ticket.created_at).toLocaleDateString('ko-KR')}</span>
                         <span style={{ color: overdue ? '#ef4444' : '#9ca3af' }}>

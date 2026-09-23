@@ -2,13 +2,15 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { isPlatformAdmin } from '@/lib/auth'
+import { getAuthStaff } from '@/lib/auth'
 import DocsBrowser from '@/components/DocsBrowser'
 import PlatformDevTools from '@/components/PlatformDevTools'
 import PlatformSiteDetail from '@/components/PlatformSiteDetail'
 import PlatformCustomerDetail from '@/components/PlatformCustomerDetail'
 import PlatformCommonCodes from '@/components/PlatformCommonCodes'
 import PlatformListSearch from '@/components/PlatformListSearch'
+import PlatformTicketCard from '@/components/PlatformTicketCard'
+import { loadTicketMessages, addTicketMessage, markTicketMessagesRead, unreadFrom } from '@/lib/support-ticket'
 import AuthUserBar from '@/components/AuthUserBar'
 import { sitePublicPath, siteAdminPath } from '@/lib/site-paths'
 import { getSitePeriodInfo } from '@/lib/site-period'
@@ -71,6 +73,11 @@ export default function AdminConsole() {
   const [templates, setTemplates] = useState([])
   const [customers, setCustomers] = useState([])
   const [codesTick, setCodesTick] = useState(0)
+  const [staff, setStaff] = useState(null)
+  const [searching, setSearching] = useState(false)
+  const [loadedAt, setLoadedAt] = useState(null)
+  const [ticketOnlyOpen, setTicketOnlyOpen] = useState(true)
+  const [ticketMsgs, setTicketMsgs] = useState({})   // { ticket_id: [메시지] }
 
   const [billings, setBillings] = useState([])                  // billing_history 전체
   const [siteFilter, setSiteFilter] = useState('all')
@@ -113,11 +120,18 @@ export default function AdminConsole() {
 
   useEffect(() => { checkAdminAuth() }, [])
 
+  useEffect(() => {
+    const siteId = new URLSearchParams(window.location.search).get('site')
+    if (siteId) { setSelectedSiteId(siteId); setNav('sites') }
+  }, [])
+
   async function checkAdminAuth() {
-    if (!(await isPlatformAdmin())) {
+    const auth = await getAuthStaff()
+    if (auth?.staff?.role !== 'platform_admin') {
       router.push('/login')
       return
     }
+    setStaff(auth.staff)
     setAuthChecked(true)
     fetchAll()
   }
@@ -126,7 +140,7 @@ export default function AdminConsole() {
     const [s, sub, t, otp, tmpl, inq, cust, bh] = await Promise.all([
       onlyActive(supabase.from('sites').select('*, customers(name, email, phone)')).order('created_at', { ascending: false }),
       onlyActive(supabase.from('subscriptions').select('*, sites(site_name:name, subdomain, status), customers(name)')).order('created_at', { ascending: false }),
-      onlyActive(supabase.from('support_tickets').select('*, sites(name), customers(name)')).order('created_at', { ascending: false }),
+      onlyActive(supabase.from('support_tickets').select('*, sites(name), customers(name, email, phone)')).order('created_at', { ascending: false }),
       onlyActive(supabase.from('one_time_payments').select('*, customers(name), sites(name)')).order('created_at', { ascending: false }),
       onlyActive(supabase.from('templates').select('*')).order('sort_order'),
       onlyActive(supabase.from('inquiries').select('*, customers(name, email, phone)')).order('created_at', { ascending: false }),
@@ -141,6 +155,8 @@ export default function AdminConsole() {
     setInquiries(inq.data || [])
     setCustomers(cust.data || [])
     setBillings(bh.data || [])
+    setLoadedAt(Date.now())
+    setTicketMsgs(await loadTicketMessages(supabase, (t.data || []).map(x => x.ticket_id)))
     try {
       await loadCommonCodes({ force: true })
       setCodesTick(t => t + 1)
@@ -154,6 +170,14 @@ export default function AdminConsole() {
     window.addEventListener('common-codes-applied', onApplied)
     return () => window.removeEventListener('common-codes-applied', onApplied)
   }, [])
+
+  /** 「조회」 = DB에서 다시 읽고 검색어 적용 */
+  async function runSearch(apply) {
+    setSearching(true)
+    apply()
+    await fetchAll()
+    setSearching(false)
+  }
 
   async function createSite(e) {
     e.preventDefault()
@@ -269,32 +293,66 @@ export default function AdminConsole() {
   // 문의 상태 select 제거됨 — FLOW는 sites.status
   // (updateInquiryStatus 삭제)
 
-  // 견적 금액 저장 — 연결 사이트가 intake면 deposit으로
+  /**
+   * 견적 저장 — 개발비 선금·잔금 결제 행(미납)까지 함께 만든다
+   * 고객은 /my 에서 단계에 맞는 결제 화면으로 진입
+   */
   async function saveDevFee(inquiryId, amount) {
     const num = parseInt(amount, 10)
-    if (isNaN(num) || num <= 0) { alert('올바른 금액을 입력해주세요.'); return }
-    await supabase.from('inquiries').update({
-      dev_fee_total: num,
-      updated_at: new Date().toISOString(),
-    }).eq('inquiry_id', inquiryId)
+    if (isNaN(num) || num <= 0) { setMessage('❌ 올바른 금액을 입력해 주세요.'); return }
+    const now = new Date().toISOString()
+    const inq = inquiries.find(i => i.inquiry_id === inquiryId)
     const site = sites.find(s => s.inquiry_id === inquiryId)
-    if (site && (site.status === 'intake' || site.status === 'deposit')) {
-      await supabase.from('sites').update({
-        status: 'deposit',
-        updated_at: new Date().toISOString(),
-      }).eq('site_id', site.site_id)
+    const half = Math.floor(num / 2)
+
+    await supabase.from('inquiries').update({ dev_fee_total: num, updated_at: now }).eq('inquiry_id', inquiryId)
+
+    // 단계별 결제 행 — 이미 납부·신청된 행은 금액만 맞춘다
+    for (const stage of ['down', 'final']) {
+      const paidAt = stage === 'down' ? inq?.down_paid_at : inq?.final_paid_at
+      const existing = oneTimePays.find(p =>
+        p.type === 'dev_fee' && p.stage === stage && p.customer_id === inq?.customer_id
+        && (site ? p.site_id === site.site_id : !p.site_id))
+      const payload = {
+        amount: half,
+        note: `개발비 ${stage === 'down' ? '선금' : '잔금'} 50%`,
+        status: paidAt ? 'paid' : (existing?.status === 'pending_confirm' ? 'pending_confirm' : 'unpaid'),
+      }
+      if (existing) {
+        await supabase.from('one_time_payments').update(payload).eq('payment_id', existing.payment_id)
+      } else if (inq?.customer_id) {
+        await supabase.from('one_time_payments').insert({
+          customer_id: inq.customer_id, site_id: site?.site_id || null,
+          type: 'dev_fee', stage, use_flag: 1, ...payload,
+        })
+      }
     }
+
+    if (site && (site.status === 'intake' || site.status === 'deposit')) {
+      await supabase.from('sites').update({ status: 'deposit', updated_at: now }).eq('site_id', site.site_id)
+    }
+    setMessage(`✅ 견적 ${num.toLocaleString()}원 저장 · 선금/잔금 각 ${half.toLocaleString()}원 청구`)
     fetchAll()
   }
 
-  // 선금 확인 → sites.status = building
+  // 선금 확인 → 결제 행 paid + sites.status = building
   async function confirmDownPayment(inquiryId) {
     if (!window.confirm('선금 납부를 확인하셨나요?\n다음 단계: 제작')) return
     const now = new Date().toISOString()
+    const inq = inquiries.find(i => i.inquiry_id === inquiryId)
     await supabase.from('inquiries')
       .update({ down_paid_at: now, updated_at: now })
       .eq('inquiry_id', inquiryId)
     const site = sites.find(s => s.inquiry_id === inquiryId)
+    if (inq?.customer_id) {
+      let q = supabase.from('one_time_payments')
+        .update({ status: 'paid', paid_at: now })
+        .eq('customer_id', inq.customer_id)
+        .eq('type', 'dev_fee')
+        .eq('stage', 'down')
+        .in('status', ['unpaid', 'pending_confirm'])
+      await (site ? q.eq('site_id', site.site_id) : q)
+    }
     if (site) {
       await supabase.from('sites')
         .update({ status: 'building', updated_at: now })
@@ -345,14 +403,16 @@ export default function AdminConsole() {
     await supabase.from('inquiries')
       .update({ final_paid_at: now, updated_at: now })
       .eq('inquiry_id', inquiryId)
+    const site = sites.find(s => s.inquiry_id === inquiryId)
     if (inq?.customer_id) {
-      await supabase.from('one_time_payments')
+      let q = supabase.from('one_time_payments')
         .update({ status: 'paid', paid_at: now })
         .eq('customer_id', inq.customer_id)
         .eq('type', 'dev_fee')
+        .eq('stage', 'final')
         .in('status', ['unpaid', 'pending_confirm'])
+      await (site ? q.eq('site_id', site.site_id) : q)
     }
-    const site = sites.find(s => s.inquiry_id === inquiryId)
     if (site) {
       await supabase.from('sites')
         .update({ status: 'pay_method', updated_at: now })
@@ -424,11 +484,27 @@ export default function AdminConsole() {
     setNav('sites')
   }
 
-  async function updateTicketStatus(ticketId, status) {
-    const update = { status }
-    if (status === 'resolved') update.resolved_at = new Date().toISOString()
-    await supabase.from('support_tickets').update(update).eq('ticket_id', ticketId)
-    fetchAll()
+  /** 요청 카드를 펼치면 사장님 메시지 읽음 처리 */
+  async function readTicketMsgs(ticketId) {
+    const changed = await markTicketMessagesRead(supabase, [ticketId], 'staff')
+    if (changed) fetchAll()
+  }
+
+  /** 고객 요청 대화 — 고객에게 보내기 / 내부 메모 */
+  async function addTicketMsg(ticketId, { content, isInternal }) {
+    await addTicketMessage(supabase, {
+      ticketId, authorType: 'staff', author: staff?.name || '본사', content, isInternal,
+    })
+    await fetchAll()
+  }
+
+  /** 고객 요청 저장 — 상태·답변·담당자 (PlatformTicketCard 공용) */
+  async function updateTicket(ticketId, patch) {
+    const { error } = await supabase.from('support_tickets')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('ticket_id', ticketId)
+    if (error) throw new Error(error.message)
+    await fetchAll()
   }
 
   // 납부 확인: billing_history upsert + next_billing_date +1달 (수동결제)
@@ -491,13 +567,33 @@ export default function AdminConsole() {
     const now = new Date().toISOString()
 
     if (pay?.type === 'dev_fee') {
-      if (!window.confirm('개발비 잔금 납부를 확인할까요?\n다음: 카드/계좌 등록')) return
+      const isDown = pay.stage === 'down'
+      const msg = isDown
+        ? '개발비 선금 납부를 확인할까요?\n다음: 제작 시작'
+        : '개발비 잔금 납부를 확인할까요?\n다음: 카드/계좌 등록'
+      if (!window.confirm(msg)) return
     }
 
     const { error } = await supabase.from('one_time_payments')
       .update({ status: 'paid', paid_at: now })
       .eq('payment_id', paymentId)
     if (error) { alert(error.message); return }
+
+    if (pay?.type === 'dev_fee' && pay.stage === 'down' && pay.customer_id) {
+      const site = pay.site_id ? sites.find(s => s.site_id === pay.site_id) : null
+      const inquiryId = site?.inquiry_id
+        || inquiries.find(i => i.customer_id === pay.customer_id && !i.down_paid_at)?.inquiry_id
+        || null
+      if (inquiryId) {
+        await supabase.from('inquiries').update({ down_paid_at: now, updated_at: now }).eq('inquiry_id', inquiryId)
+      }
+      const target = site || sites.find(s => s.inquiry_id === inquiryId) || null
+      if (target && ['intake', 'deposit'].includes(target.status)) {
+        await supabase.from('sites').update({ status: 'building', updated_at: now }).eq('site_id', target.site_id)
+      }
+      fetchAll()
+      return
+    }
 
     if (pay?.type === 'dev_fee' && pay.customer_id) {
       let site = pay.site_id ? sites.find(s => s.site_id === pay.site_id) : null
@@ -532,6 +628,7 @@ export default function AdminConsole() {
     return site?.status === 'subscribed' && !s.cancelled_at
   }).length
   const pendingTickets = tickets.filter(t => t.status !== 'resolved').length
+  const ticketsNeedReply = (t) => unreadFrom(ticketMsgs[t.ticket_id], 'customer').length > 0
   const pendingConfirmOtp = oneTimePays.filter(p => p.status === 'pending_confirm')
 
   function hasPendingDeposit(customerId) {
@@ -559,7 +656,8 @@ export default function AdminConsole() {
       const hq = resolveHqInquiryAction(step, inq, { linkedSite: site, finalPending })
       if (HQ_TODO_LABEL[hq.key]) todos.push({ label: HQ_TODO_LABEL[hq.key], color: '#f59e0b' })
     }
-    const otpWaiting = otpsOf(site).filter(p => p.status === 'pending_confirm' && p.type !== 'dev_fee').length
+    const otpWaiting = otpsOf(site).filter(p =>
+      p.status === 'pending_confirm' && !(p.type === 'dev_fee' && p.stage === 'final')).length
     if (otpWaiting) todos.push({ label: `입금확인 ${otpWaiting}`, color: '#f59e0b' })
     const unpaid = billingsOf(site).filter(bh => bh.status !== 'paid').length
     if (unpaid) todos.push({ label: `미납 ${unpaid}`, color: '#ef4444' })
@@ -814,7 +912,7 @@ export default function AdminConsole() {
             const active = nav === item.key
             let badgeCount = 0
             if (item.key === 'sites') badgeCount = todoSites.length
-            if (item.key === 'tickets') badgeCount = pendingTickets
+            if (item.key === 'tickets') badgeCount = tickets.filter(t => t.status !== 'resolved' || ticketsNeedReply(t)).length
             return (
               <button
                 key={item.key}
@@ -947,11 +1045,14 @@ export default function AdminConsole() {
               <PlatformListSearch
                 value={customerSearchInput}
                 onChange={setCustomerSearchInput}
-                onSearch={() => setCustomerSearchQuery(customerSearchInput.trim())}
+                onSearch={() => runSearch(() => setCustomerSearchQuery(customerSearchInput.trim()))}
                 onReset={() => { setCustomerSearchInput(''); setCustomerSearchQuery('') }}
                 placeholder="이름, 이메일, 연락처, 상태"
                 applied={!!customerSearchQuery}
-                resultLabel={`검색 결과 ${filteredCustomers.length}건`}
+                appliedQuery={customerSearchQuery}
+                resultLabel={`${filteredCustomers.length}명`}
+                busy={searching}
+                loadedAt={loadedAt}
               />
               <div style={{
                 display: 'grid',
@@ -1091,11 +1192,14 @@ export default function AdminConsole() {
               <PlatformListSearch
                 value={siteSearchInput}
                 onChange={setSiteSearchInput}
-                onSearch={() => setSiteSearchQuery(siteSearchInput.trim())}
+                onSearch={() => runSearch(() => setSiteSearchQuery(siteSearchInput.trim()))}
                 onReset={() => { setSiteSearchInput(''); setSiteSearchQuery('') }}
                 placeholder="사이트명, 주소명, 고객명, 이메일"
                 applied={!!siteSearchQuery}
-                resultLabel={`검색 결과 ${filteredSites.length}건`}
+                appliedQuery={siteSearchQuery}
+                resultLabel={`${filteredSites.length}건`}
+                busy={searching}
+                loadedAt={loadedAt}
               />
 
               <div style={{
@@ -1230,7 +1334,11 @@ export default function AdminConsole() {
                     onSaveNote={saveAdminNote}
                     onMarkOtpPaid={markOneTimePaid}
                     onMarkBillingPaid={markBillingPaid}
-                    onTicketStatus={updateTicketStatus}
+                    onTicketUpdate={updateTicket}
+                    onTicketAddMessage={addTicketMsg}
+                    onTicketRead={readTicketMsgs}
+                    ticketMessages={ticketMsgs}
+                    staff={staff}
                     onGoCustomer={openCustomerDetail}
                     onSave={saveSiteFields}
                     onDelete={deleteSite}
@@ -1241,92 +1349,72 @@ export default function AdminConsole() {
           )
         })()}
 
-        {/* ── 고객 요청 (사장님 → 본사 수정요청) ── */}
+        {/* ── 고객 요청 (사장님 → 본사) — 읽고·고치고·답변하고 완료 ── */}
         {nav === 'tickets' && (() => {
-          const filteredTickets = tickets.filter(t =>
+          const searched = tickets.filter(t =>
             matchesSearchQuery(
               ticketSearchQuery,
               t.sites?.name,
               t.customers?.name,
               t.title,
+              t.content,
               codeLabel('TICKET_CATEGORY', t.category, t.category),
               codeLabel('TICKET_PRIORITY', t.priority, t.priority),
               codeLabel('TICKET_STATUS', t.status, t.status),
             )
           )
-          const filteredPending = filteredTickets.filter(t => t.status !== 'resolved').length
+          const pendingCount = searched.filter(t => t.status !== 'resolved').length
+          const list = (ticketOnlyOpen ? searched.filter(t => t.status !== 'resolved') : searched)
+            .slice()
+            .sort((x, y) => {
+              const done = (t) => t.status === 'resolved' ? 1 : 0
+              if (done(x) !== done(y)) return done(x) - done(y)
+              return new Date(x.deadline_at || x.created_at) - new Date(y.deadline_at || y.created_at)
+            })
+          const siteOf = (t) => sites.find(st => st.site_id === t.site_id)
+
           return (
-          <div style={css.card}>
-            <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
-              고객 요청 — {filteredPending}건 미처리
-              {ticketSearchQuery && (
-                <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: '#64748b' }}>
-                  ({filteredTickets.length} / {tickets.length}건)
+            <div style={css.card}>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#f1f5f9', fontWeight: 700 }}>
+                고객 요청 — {pendingCount}건 미처리
+                <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 500, color: '#64748b' }}>
+                  기한 임박 순 · 펼쳐서 내용 확인 → 에디터 수정 → 답변 보내고 완료
                 </span>
-              )}
-            </h3>
-            <PlatformListSearch
-              value={ticketSearchInput}
-              onChange={setTicketSearchInput}
-              onSearch={() => setTicketSearchQuery(ticketSearchInput.trim())}
-              onReset={() => { setTicketSearchInput(''); setTicketSearchQuery('') }}
-              placeholder="사이트, 고객, 제목, 유형, 상태"
-              applied={!!ticketSearchQuery}
-              resultLabel={`검색 결과 ${filteredTickets.length}건`}
-            />
-            <div className="overflow-x-auto -mx-6 px-6">
-            <table style={css.table}>
-              <thead>
-                <tr>{['사이트', '고객', '제목', '유형', '우선순위', '상태', '기한', '처리'].map(h =>
-                  <th key={h} style={{ ...css.th, whiteSpace: 'nowrap' }}>{h}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTickets.map(t => {
-                  const overdue = new Date(t.deadline_at) < new Date() && t.status !== 'resolved'
-                  return (
-                    <tr key={t.ticket_id}>
-                      <td style={css.td}>
-                        <button type="button" onClick={() => openSiteDetail(t.site_id)}
-                          style={{ background: 'none', border: 'none', padding: 0, color: '#93c5fd', cursor: 'pointer', fontSize: 13 }}>
-                          {t.sites?.name}
-                        </button>
-                      </td>
-                      <td style={css.td}>{t.customers?.name}</td>
-                      <td style={css.td}>{t.title}</td>
-                      <td style={css.td}>{codeLabel('TICKET_CATEGORY', t.category, t.category || '-')}</td>
-                      <td style={css.td}>
-                        {badge(
-                          codeColor('TICKET_PRIORITY', t.priority),
-                          codeLabel('TICKET_PRIORITY', t.priority)
-                        )}
-                      </td>
-                      <td style={css.td}>
-                        {badge(codeColor('TICKET_STATUS', t.status), codeLabel('TICKET_STATUS', t.status))}
-                      </td>
-                      <td style={{ ...css.td, color: overdue ? '#ef4444' : '#94a3b8', fontSize: 12 }}>
-                        {overdue ? '⚠️ ' : ''}{new Date(t.deadline_at).toLocaleDateString('ko-KR')}
-                      </td>
-                      <td style={css.td}>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          {t.status === 'open' && btn('#2563eb', '처리시작', () => updateTicketStatus(t.ticket_id, 'in_progress'))}
-                          {t.status !== 'resolved' && btn('#16a34a', '완료', () => updateTicketStatus(t.ticket_id, 'resolved'))}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-                {filteredTickets.length === 0 && (
-                  <tr>
-                    <td colSpan={8} style={{ ...css.td, textAlign: 'center', color: '#475569' }}>
-                      {ticketSearchQuery ? '검색 결과가 없습니다' : '요청이 없습니다'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+              </h3>
+              <PlatformListSearch
+                value={ticketSearchInput}
+                onChange={setTicketSearchInput}
+                onSearch={() => runSearch(() => setTicketSearchQuery(ticketSearchInput.trim()))}
+                onReset={() => { setTicketSearchInput(''); setTicketSearchQuery('') }}
+                placeholder="사이트, 고객, 제목, 내용, 유형, 상태"
+                applied={!!ticketSearchQuery}
+                appliedQuery={ticketSearchQuery}
+                resultLabel={`${searched.length}건`}
+                busy={searching}
+                loadedAt={loadedAt}
+              />
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 12, fontSize: 12, color: '#94a3b8', cursor: 'pointer' }}>
+                <input type="checkbox" checked={ticketOnlyOpen} onChange={e => setTicketOnlyOpen(e.target.checked)} />
+                미처리만 보기
+              </label>
+
+              {list.length === 0 ? (
+                <p style={{ margin: 0, padding: '24px 0', textAlign: 'center', fontSize: 13, color: '#475569' }}>
+                  {ticketSearchQuery ? '검색 결과가 없습니다' : ticketOnlyOpen ? '미처리 요청이 없습니다' : '요청이 없습니다'}
+                </p>
+              ) : list.map(t => (
+                <PlatformTicketCard
+                  key={t.ticket_id}
+                  ticket={t}
+                  messages={ticketMsgs[t.ticket_id] || []}
+                  staff={staff}
+                  subdomain={siteOf(t)?.subdomain}
+                  onUpdate={updateTicket}
+                  onAddMessage={addTicketMsg}
+                  onRead={readTicketMsgs}
+                />
+              ))}
             </div>
-          </div>
           )
         })()}
 

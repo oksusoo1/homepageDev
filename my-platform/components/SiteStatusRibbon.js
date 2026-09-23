@@ -3,8 +3,8 @@
 import { usePathname } from 'next/navigation'
 
 /**
- * 방문자용 공개 범위 리본
- * public → 표시 없음
+ * 방문자용 공개 범위 표시 — 우측 하단 작은 배지
+ * public → 표시 없음 (일반 공개 사이트에는 아무것도 안 보임)
  */
 
 const RIBBON = {
@@ -28,75 +28,40 @@ const RIBBON = {
   },
 }
 
-export default function SiteStatusRibbon({ status, visibility, position = 'top-right' }) {
+export default function SiteStatusRibbon({ status, visibility }) {
   const key = visibility || status
   const cfg = RIBBON[key]
   if (!cfg) return null
 
-  const isLeft = position === 'top-left'
-
+  // 화면 우측 하단 작은 표시 — 헤더(로그인·메뉴)를 가리지 않는다
   return (
     <div
       role="status"
       aria-label={`${cfg.label}. ${cfg.hint}`}
       style={{
         position: 'fixed',
-        top: 0,
-        ...(isLeft ? { left: 0 } : { right: 0 }),
-        width: 140,
-        height: 140,
-        overflow: 'hidden',
+        right: 14,
+        bottom: 14,
         zIndex: 9999,
         pointerEvents: 'none',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 14px',
+        borderRadius: 999,
+        background: cfg.bg,
+        color: cfg.fg,
+        boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
+        fontFamily: '-apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: '0.02em',
+        maxWidth: 'calc(100vw - 28px)',
       }}
     >
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          ...(isLeft ? { left: 0 } : { right: 0 }),
-          width: 12,
-          height: 12,
-          background: 'rgba(0,0,0,0.18)',
-        }}
-      />
-      <div
-        style={{
-          position: 'absolute',
-          top: 32,
-          ...(isLeft
-            ? { left: -48, transform: 'rotate(-45deg)' }
-            : { right: -48, transform: 'rotate(45deg)' }),
-          width: 220,
-          padding: '10px 0 8px',
-          background: cfg.bg,
-          color: cfg.fg,
-          textAlign: 'center',
-          boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
-          fontFamily: '-apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
-          borderTop: '1px solid rgba(255,255,255,0.35)',
-          borderBottom: '1px solid rgba(0,0,0,0.15)',
-        }}
-      >
-        <div style={{
-          fontSize: 14,
-          fontWeight: 900,
-          letterSpacing: '0.08em',
-          lineHeight: 1.15,
-        }}>
-          {cfg.label}
-        </div>
-        <div style={{
-          marginTop: 2,
-          fontSize: 10,
-          fontWeight: 600,
-          letterSpacing: '0.02em',
-          opacity: 0.9,
-          lineHeight: 1.2,
-        }}>
-          {cfg.hint}
-        </div>
-      </div>
+      <span>{cfg.label}</span>
+      <span style={{ width: 1, height: 11, background: cfg.fg, opacity: 0.35 }} aria-hidden />
+      <span style={{ fontWeight: 600, opacity: 0.9 }}>{cfg.hint}</span>
     </div>
   )
 }
@@ -109,7 +74,7 @@ export function SiteStatusRibbonHost({ status, visibility }) {
   if (pathname.includes('/admin')) return null
   const key = visibility || status
   if (!key || !RIBBON[key]) return null
-  return <SiteStatusRibbon status={status} visibility={visibility} position="top-right" />
+  return <SiteStatusRibbon status={status} visibility={visibility} />
 }
 
 /** status/visibility에 리본이 필요한지 */

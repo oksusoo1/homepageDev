@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { requireAuthUser } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
+import { siteAdminPath } from '@/lib/site-paths'
 
 /**
  * 로그인 사용자 표시 (공통)
@@ -13,11 +14,14 @@ import { onlyActive } from '@/lib/use-flag'
  * - customer: 이름님 + email · 내 사이트 · 로그아웃
  * - staff: 이름님 + email · 콘솔 · 로그아웃
  *
- * @param {{ variant?: 'dark'|'light', showLogout?: boolean, className?: string }} props
+ * siteCode: 공개 사이트 헤더에서 전달 — **그 사이트 주인에게만** 「관리자」 링크 표시
+ *
+ * @param {{ variant?: 'dark'|'light', showLogout?: boolean, className?: string, siteCode?: string }} props
  */
-export default function AuthUserBar({ variant = 'dark', showLogout = true, className = '' }) {
+export default function AuthUserBar({ variant = 'dark', showLogout = true, className = '', siteCode = '' }) {
   const pathname = usePathname()
   const [auth, setAuth] = useState({ status: 'loading', kind: null, name: '', email: '' })
+  const [isOwner, setIsOwner] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -48,10 +52,17 @@ export default function AuthUserBar({ variant = 'dark', showLogout = true, class
       }
 
       const { data: customer } = await onlyActive(
-        supabase.from('customers').select('name, email').eq('auth_id', user.id)
+        supabase.from('customers').select('customer_id, name, email').eq('auth_id', user.id)
       ).maybeSingle()
       if (cancelled) return
       if (customer) {
+        if (siteCode) {
+          const { data: site } = await onlyActive(
+            supabase.from('sites').select('customer_id').eq('subdomain', siteCode)
+          ).maybeSingle()
+          if (cancelled) return
+          setIsOwner(site?.customer_id === customer.customer_id)
+        }
         setAuth({
           status: 'ok',
           kind: 'customer',
@@ -64,7 +75,7 @@ export default function AuthUserBar({ variant = 'dark', showLogout = true, class
       setAuth({ status: 'guest', kind: null, name: '', email: '' })
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [siteCode])
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -128,7 +139,10 @@ export default function AuthUserBar({ variant = 'dark', showLogout = true, class
               </div>
             )}
           </div>
-          {auth.kind === 'customer' && !onMy && (
+          {auth.kind === 'customer' && siteCode && isOwner && (
+            <Link href={siteAdminPath(siteCode)} style={{ ...linkStyle, fontWeight: 700, color: strong }}>관리자</Link>
+          )}
+          {auth.kind === 'customer' && !siteCode && !onMy && (
             <Link href="/my" style={linkStyle}>내 사이트</Link>
           )}
           {auth.kind === 'staff' && !onPlatform && (

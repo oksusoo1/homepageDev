@@ -160,7 +160,7 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
         const { error } = await supabase.from('one_time_payments').update({
           status: 'pending_confirm',
           paid_at: null,
-          note: existing.note || `잔금 입금 신청 · 입금자: ${site.customers?.name || ''}`,
+          note: existing.note || `잔금 입금 확인 요청 · 입금자: ${site.customers?.name || ''}`,
         }).eq('payment_id', existing.payment_id)
         if (error) throw error
       } else if (inquiry) {
@@ -170,7 +170,7 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
           type: 'dev_fee',
           amount: Math.floor((inquiry.dev_fee_total || 200000) / 2),
           status: 'pending_confirm',
-          note: `잔금 입금 신청 · 입금자: ${site.customers?.name || ''}`,
+          note: `잔금 입금 확인 요청 · 입금자: ${site.customers?.name || ''}`,
         })
         if (error) throw error
       }
@@ -234,7 +234,7 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
     {
       key: 'deposit_pending',
       title: '잔금(입금확인대기)',
-      desc: '고객이 잔금 입금 신청한 직후',
+      desc: '고객이 잔금 입금 확인을 요청한 직후',
       db: [
         '[sites] status=balance, trial_started_at=NULL, trial_ends_at=NULL',
         '[inquiries] final_paid_at=NULL',

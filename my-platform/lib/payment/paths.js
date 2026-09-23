@@ -13,17 +13,25 @@ export {
   paymentCardFailPath,
 } from '@/lib/site-paths'
 
-/** managed 개발비 — 문의(inquiry) 기준 */
-export function oneTimePaymentMethodPath(inquiryId) {
-  return `/my/payment/one-time/${inquiryId}/method`
+/**
+ * managed 개발비 — 문의(inquiry) 기준
+ * @param {'down'|'final'} stage 선금 | 잔금
+ */
+function oneTimePath(inquiryId, page, stage) {
+  const q = stage === 'down' ? '?stage=down' : ''
+  return `/my/payment/one-time/${inquiryId}/${page}${q}`
 }
 
-export function oneTimePaymentCardPath(inquiryId) {
-  return `/my/payment/one-time/${inquiryId}/card`
+export function oneTimePaymentMethodPath(inquiryId, stage = 'final') {
+  return oneTimePath(inquiryId, 'method', stage)
 }
 
-export function oneTimePaymentBankTransferPath(inquiryId) {
-  return `/my/payment/one-time/${inquiryId}/bank-transfer`
+export function oneTimePaymentCardPath(inquiryId, stage = 'final') {
+  return oneTimePath(inquiryId, 'card', stage)
+}
+
+export function oneTimePaymentBankTransferPath(inquiryId, stage = 'final') {
+  return oneTimePath(inquiryId, 'bank-transfer', stage)
 }
 
 /** self 도메인 대행 등 — 사이트 기준 (추후 연동) */

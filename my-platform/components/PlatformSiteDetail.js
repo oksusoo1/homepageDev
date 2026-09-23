@@ -17,6 +17,7 @@ import {
 } from '@/lib/flow-step'
 import { canCancelManagedIntake } from '@/lib/managed-flow'
 import { subscriptionLifeLabel } from '@/lib/subscription-life'
+import PlatformTicketCard from '@/components/PlatformTicketCard'
 
 const FLOW_STATUS_OPTS = [...FLOW_STEPS]
 
@@ -96,31 +97,32 @@ function CopyValue({ value, short = 8 }) {
 }
 
 function Stepper({ steps, currentIndex }) {
+  // 단계가 9개까지 — 좁은 패널에서 글자가 겹치지 않도록 가로 스크롤 + 최소 폭
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 8, flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 0, marginBottom: 8, overflowX: 'auto', paddingBottom: 4 }}>
       {steps.map((step, i) => (
-        <div key={step.key} style={{ display: 'flex', alignItems: 'center', flex: i < steps.length - 1 ? 1 : 'none', minWidth: 0 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+        <div key={step.key} style={{ display: 'flex', alignItems: 'center', flex: '0 0 auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, width: 58 }}>
             <div style={{
-              width: 24, height: 24, borderRadius: '50%', fontSize: 11, fontWeight: 700,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 22, height: 22, borderRadius: '50%', fontSize: 10, fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
               background: i <= currentIndex ? '#e2e8f0' : '#1e293b',
               color: i <= currentIndex ? '#0f172a' : '#64748b',
             }}>
               {i < currentIndex ? '✓' : i + 1}
             </div>
             <span style={{
-              fontSize: 9, color: i === currentIndex ? '#f1f5f9' : '#64748b',
-              fontWeight: i === currentIndex ? 700 : 400, whiteSpace: 'nowrap',
+              fontSize: 9.5, lineHeight: 1.25, textAlign: 'center', wordBreak: 'keep-all',
+              color: i === currentIndex ? '#f1f5f9' : '#64748b',
+              fontWeight: i === currentIndex ? 700 : 400,
             }}>
               {step.label}
             </span>
           </div>
           {i < steps.length - 1 && (
             <div style={{
-              flex: 1, height: 2, minWidth: 12,
+              width: 10, height: 2, flexShrink: 0, marginBottom: 18,
               background: i < currentIndex ? '#e2e8f0' : '#1e293b',
-              margin: '0 4px', marginBottom: 14,
             }} />
           )}
         </div>
@@ -176,7 +178,11 @@ export default function PlatformSiteDetail({
   onSaveNote,
   onMarkOtpPaid,
   onMarkBillingPaid,
-  onTicketStatus,
+  onTicketUpdate,
+  onTicketAddMessage,
+  onTicketRead,
+  ticketMessages = {},
+  staff,
   onGoCustomer,
   onSave,
   onDelete,
@@ -555,19 +561,16 @@ export default function PlatformSiteDetail({
         {tickets.length === 0 ? (
           <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>요청 없음</p>
         ) : tickets.map(t => (
-          <div key={t.ticket_id} style={{ padding: '8px 0', borderBottom: '1px solid #1e293b', fontSize: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: '#e2e8f0', fontWeight: 600, flex: 1, minWidth: 0 }}>{t.title}</span>
-              {badge(codeColor('TICKET_STATUS', t.status), codeLabel('TICKET_STATUS', t.status))}
-              {t.status === 'open' && (
-                <button type="button" onClick={() => onTicketStatus?.(t.ticket_id, 'in_progress')} style={{ ...{ padding: '5px 10px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer', border: 'none', color: 'white', background: '#16a34a' }, background: '#2563eb' }}>처리시작</button>
-              )}
-              {t.status !== 'resolved' && (
-                <button type="button" onClick={() => onTicketStatus?.(t.ticket_id, 'resolved')} style={{ padding: '5px 10px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer', border: 'none', color: 'white', background: '#16a34a' }}>완료</button>
-              )}
-            </div>
-            {t.content && <div style={{ color: '#94a3b8', marginTop: 4, lineHeight: 1.5 }}>{t.content}</div>}
-          </div>
+          <PlatformTicketCard
+            key={t.ticket_id}
+            ticket={t}
+            messages={ticketMessages[t.ticket_id] || []}
+            staff={staff}
+            subdomain={site.subdomain}
+            onUpdate={onTicketUpdate}
+            onAddMessage={onTicketAddMessage}
+            onRead={onTicketRead}
+          />
         ))}
       </Section>
 

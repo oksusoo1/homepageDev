@@ -8,7 +8,7 @@
 --       OTP pending_confirm · subscriptions 계좌이체 컬럼
 --       공통코드: common_codes (group_code+code) — code_groups 는 017에서 DROP
 --       시드 이력: migrations 011~015 · flatten: 017
--- v2.3: 게시판 통합 (022) — user_boards · user_comments 신설, user_posts 확장,
+-- v2.3: 게시판 통합 (022) · 고객 요청 답변 (023) — user_boards · user_comments 신설, user_posts 확장,
 --       user_messages 삭제(문의하기 게시판으로 이관), 새 사이트 기본 게시판 트리거
 --
 -- use_flag: 1=사용 · 0=삭제 — 조회 기본 use_flag = 1
@@ -305,6 +305,9 @@ CREATE TABLE support_tickets (
   deadline_days   INTEGER NOT NULL DEFAULT 3,
   deadline_at     TIMESTAMP NOT NULL,
   resolved_at     TIMESTAMP,
+  reply_content   TEXT,                            -- 본사 답변 (완료 시 필수) — 023
+  replied_at      TIMESTAMP,
+  handled_by      UUID,                            -- 담당 직원 → staff (FK는 아래에서 추가)
   use_flag        SMALLINT NOT NULL DEFAULT 1      -- 1=사용 · 0=삭제
                   CHECK (use_flag IN (0, 1)),
   created_at      TIMESTAMP DEFAULT NOW(),
@@ -316,6 +319,10 @@ CREATE INDEX idx_tickets_customer_id ON support_tickets(customer_id);
 CREATE INDEX idx_tickets_status      ON support_tickets(status);
 CREATE INDEX idx_tickets_deadline    ON support_tickets(deadline_at);
 CREATE INDEX idx_tickets_use_flag    ON support_tickets(use_flag);
+CREATE INDEX idx_tickets_handled_by  ON support_tickets(handled_by);
+
+ALTER TABLE support_tickets ADD CONSTRAINT fk_tickets_staff
+  FOREIGN KEY (handled_by) REFERENCES staff(staff_id);
 
 
 -- ================================================

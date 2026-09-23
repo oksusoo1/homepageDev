@@ -4,30 +4,31 @@ import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { softDelete } from '@/lib/use-flag'
 import { boardPath } from '@/lib/site-paths'
-import { BOARD_TYPE_META, normalizeBoardKey } from '@/lib/user-board'
+import { BOARD_TYPE_META, makeBoardKey } from '@/lib/user-board'
 
 /**
- * 사장님 관리자 — 게시판 관리 (추가 · 이름 변경 · 순서 · 삭제)
- * 게시판 = 사이트 상단 메뉴에 순서대로 노출
+ * 사장님 관리자 — 게시판 관리
+ * 사장님은 **이름과 종류만** 고른다. 주소(board_key)는 자동 생성 (개발자 용어 비노출)
  */
 export default function UserBoardsManager({ site, boards, posts, onReload }) {
-  const [form, setForm] = useState({ name: '', board_key: '', board_type: 'general' })
+  const [name, setName] = useState('')
+  const [type, setType] = useState('general')
   const [editId, setEditId] = useState(null)
   const [editName, setEditName] = useState('')
   const [busy, setBusy] = useState(false)
+  const [addError, setAddError] = useState('')
   const [msg, setMsg] = useState('')
 
   const countOf = (id) => posts.filter(p => p.user_board_id === id).length
 
-  async function run(fn, okMsg) {
-    setBusy(true); setMsg('')
+  async function run(fn, okMsg, setError = setMsg) {
+    setBusy(true); setMsg(''); setAddError('')
     try {
       await fn()
       await onReload()
       if (okMsg) setMsg(okMsg)
     } catch (e) {
-      const text = String(e.message || e)
-      setMsg('❌ ' + (text.includes('uq_user_boards_site_key') ? '이미 쓰고 있는 주소입니다' : text))
+      setError(String(e.message || e))
     }
     setBusy(false)
   }
@@ -35,20 +36,22 @@ export default function UserBoardsManager({ site, boards, posts, onReload }) {
   const addBoard = (e) => {
     e.preventDefault()
     run(async () => {
-      const key = normalizeBoardKey(form.board_key)
-      if (!form.name.trim()) throw new Error('게시판 이름을 입력해 주세요')
-      if (!key) throw new Error('주소는 영문 소문자·숫자·- 로 입력해 주세요')
-      const sort = Math.max(0, ...boards.map(b => b.sort_order || 0)) + 1
+      if (!name.trim()) throw new Error('게시판 이름을 적어 주세요')
       const { error } = await supabase.from('user_boards').insert({
-        site_id: site.site_id, name: form.name.trim(), board_key: key, board_type: form.board_type, sort_order: sort,
+        site_id: site.site_id,
+        name: name.trim(),
+        board_key: makeBoardKey(type, boards),
+        board_type: type,
+        sort_order: Math.max(0, ...boards.map(b => b.sort_order || 0)) + 1,
       })
       if (error) throw error
-      setForm({ name: '', board_key: '', board_type: 'general' })
-    }, '✅ 게시판을 추가했습니다')
+      setName('')
+      setType('general')
+    }, `✅ 「${name.trim()}」 게시판을 만들었습니다`, setAddError)
   }
 
   const saveName = (b) => run(async () => {
-    if (!editName.trim()) throw new Error('이름을 입력해 주세요')
+    if (!editName.trim()) throw new Error('이름을 적어 주세요')
     const { error } = await supabase.from('user_boards')
       .update({ name: editName.trim(), updated_at: new Date().toISOString() })
       .eq('user_board_id', b.user_board_id)
@@ -57,15 +60,13 @@ export default function UserBoardsManager({ site, boards, posts, onReload }) {
   }, '이름을 바꿨습니다')
 
   const move = (idx, dir) => {
-    const other = boards[idx + dir]
     const cur = boards[idx]
+    const other = boards[idx + dir]
     if (!other) return
     run(async () => {
       const now = new Date().toISOString()
-      // 순서값이 같을 수 있어 인덱스 기준으로 재부여
-      const a = idx + 1, b = idx + dir + 1
-      const r1 = await supabase.from('user_boards').update({ sort_order: b, updated_at: now }).eq('user_board_id', cur.user_board_id)
-      const r2 = await supabase.from('user_boards').update({ sort_order: a, updated_at: now }).eq('user_board_id', other.user_board_id)
+      const r1 = await supabase.from('user_boards').update({ sort_order: idx + dir + 1, updated_at: now }).eq('user_board_id', cur.user_board_id)
+      const r2 = await supabase.from('user_boards').update({ sort_order: idx + 1, updated_at: now }).eq('user_board_id', other.user_board_id)
       if (r1.error || r2.error) throw (r1.error || r2.error)
     })
   }
@@ -77,66 +78,118 @@ export default function UserBoardsManager({ site, boards, posts, onReload }) {
   }
 
   const card = { background: 'white', borderRadius: 14, border: '1px solid #e5e7eb' }
-  const input = { padding: '9px 12px', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 13, outline: 'none', boxSizing: 'border-box', background: 'white' }
-  const small = { background: 'none', border: '1px solid #e5e7eb', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer', color: '#374151' }
+  const small = {
+    background: 'white', border: '1px solid #e5e7eb', borderRadius: 7, padding: '6px 12px',
+    fontSize: 12, cursor: 'pointer', color: '#374151', whiteSpace: 'nowrap',
+  }
+  const arrow = (dis) => ({
+    ...small, padding: '0 7px', lineHeight: '18px', opacity: dis ? 0.25 : 1,
+    cursor: dis ? 'default' : 'pointer',
+  })
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 800, color: '#111827' }}>게시판 관리</h2>
-      <p style={{ margin: '0 0 16px', fontSize: 13, color: '#6b7280' }}>게시판은 사이트 상단 메뉴에 이 순서대로 보입니다.</p>
+      <h2 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 800, color: '#111827' }}>게시판</h2>
+      <p style={{ margin: '0 0 16px', fontSize: 13, color: '#6b7280' }}>내 사이트 맨 위 메뉴에 이 순서로 보입니다.</p>
 
-      {msg && <p style={{ fontSize: 13, color: msg.startsWith('❌') ? '#ef4444' : '#15803d', margin: '0 0 12px' }}>{msg}</p>}
+      {msg && <p style={{ fontSize: 13, color: msg.startsWith('✅') ? '#15803d' : '#ef4444', margin: '0 0 12px' }}>{msg}</p>}
 
-      <div style={{ ...card, overflow: 'hidden', marginBottom: 16 }}>
-        {boards.length === 0 && <p style={{ margin: 0, padding: 24, fontSize: 13, color: '#9ca3af', textAlign: 'center' }}>게시판이 없습니다</p>}
-        {boards.map((b, i) => (
-          <div key={b.user_board_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderBottom: i < boards.length - 1 ? '1px solid #f3f4f6' : 'none', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <button type="button" disabled={busy || i === 0} onClick={() => move(i, -1)} style={{ ...small, padding: '0 6px', opacity: i === 0 ? 0.3 : 1 }}>▲</button>
-              <button type="button" disabled={busy || i === boards.length - 1} onClick={() => move(i, 1)} style={{ ...small, padding: '0 6px', opacity: i === boards.length - 1 ? 0.3 : 1 }}>▼</button>
-            </div>
-            {editId === b.user_board_id ? (
-              <input value={editName} onChange={e => setEditName(e.target.value)} autoFocus style={{ ...input, flex: 1, minWidth: 120 }} />
-            ) : (
-              <div style={{ flex: 1, minWidth: 120 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{b.name}</div>
-                <a href={boardPath(site.subdomain, b.board_key)} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#9ca3af', textDecoration: 'none' }}>
-                  /board/{b.board_key} ↗
-                </a>
+      {/* 목록 */}
+      <div style={{ ...card, overflow: 'hidden', marginBottom: 20 }}>
+        {boards.length === 0 && (
+          <p style={{ margin: 0, padding: 28, fontSize: 14, color: '#9ca3af', textAlign: 'center' }}>아직 게시판이 없습니다</p>
+        )}
+        {boards.map((b, i) => {
+          const meta = BOARD_TYPE_META[b.board_type] || BOARD_TYPE_META.general
+          const editing = editId === b.user_board_id
+          return (
+            <div key={b.user_board_id} style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', flexWrap: 'wrap',
+              borderBottom: i < boards.length - 1 ? '1px solid #f3f4f6' : 'none',
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <button type="button" title="위로" disabled={busy || i === 0} onClick={() => move(i, -1)} style={arrow(i === 0)}>▲</button>
+                <button type="button" title="아래로" disabled={busy || i === boards.length - 1} onClick={() => move(i, 1)} style={arrow(i === boards.length - 1)}>▼</button>
               </div>
-            )}
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', background: '#f3f4f6', padding: '2px 8px', borderRadius: 6 }}>
-              {BOARD_TYPE_META[b.board_type]?.label || b.board_type}
-            </span>
-            <span style={{ fontSize: 12, color: '#6b7280', width: 44, textAlign: 'right' }}>글 {countOf(b.user_board_id)}</span>
-            {editId === b.user_board_id ? (
-              <>
-                <button type="button" disabled={busy} onClick={() => saveName(b)} style={small}>저장</button>
-                <button type="button" onClick={() => setEditId(null)} style={small}>취소</button>
-              </>
-            ) : (
-              <>
-                <button type="button" onClick={() => { setEditId(b.user_board_id); setEditName(b.name) }} style={small}>이름 변경</button>
-                <button type="button" disabled={busy} onClick={() => remove(b)} style={{ ...small, color: '#ef4444', borderColor: '#fecaca' }}>삭제</button>
-              </>
-            )}
-          </div>
-        ))}
+
+              <span style={{ fontSize: 22 }}>{meta.icon}</span>
+
+              {editing ? (
+                <input value={editName} onChange={e => setEditName(e.target.value)} autoFocus
+                  style={{ flex: 1, minWidth: 140, padding: '9px 12px', border: '1px solid #111827', borderRadius: 8, fontSize: 15, outline: 'none' }} />
+              ) : (
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>{b.name}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                    {meta.what} · 글 {countOf(b.user_board_id)}개
+                  </div>
+                </div>
+              )}
+
+              {editing ? (
+                <>
+                  <button type="button" disabled={busy} onClick={() => saveName(b)}
+                    style={{ ...small, background: '#111827', color: 'white', border: 'none', fontWeight: 700 }}>저장</button>
+                  <button type="button" onClick={() => setEditId(null)} style={small}>취소</button>
+                </>
+              ) : (
+                <>
+                  <a href={boardPath(site.subdomain, b.board_key)} target="_blank" rel="noreferrer"
+                    style={{ ...small, textDecoration: 'none', color: '#6b7280' }}>사이트에서 보기 ↗</a>
+                  <button type="button" onClick={() => { setEditId(b.user_board_id); setEditName(b.name) }} style={small}>이름 수정</button>
+                  <button type="button" disabled={busy} onClick={() => remove(b)}
+                    style={{ ...small, color: '#ef4444', borderColor: '#fecaca' }}>삭제</button>
+                </>
+              )}
+            </div>
+          )
+        })}
       </div>
 
-      <form onSubmit={addBoard} style={{ ...card, padding: 20 }}>
-        <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 700, color: '#111827' }}>게시판 추가</h3>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-          <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="이름 (예: 이용후기)" style={{ ...input, flex: 1, minWidth: 140 }} />
-          <input value={form.board_key} onChange={e => setForm({ ...form, board_key: normalizeBoardKey(e.target.value) })} placeholder="주소 (예: review)" style={{ ...input, width: 150 }} />
-          <select value={form.board_type} onChange={e => setForm({ ...form, board_type: e.target.value })} style={input}>
-            {Object.entries(BOARD_TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-          </select>
-          <button type="submit" disabled={busy} style={{ padding: '9px 18px', background: '#111827', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>추가</button>
+      {/* 추가 — 이름 + 종류만 */}
+      <form onSubmit={addBoard} style={{ ...card, padding: 24 }}>
+        <h3 style={{ margin: '0 0 14px', fontSize: 15, fontWeight: 700, color: '#111827' }}>새 게시판 만들기</h3>
+
+        <input
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="이름 (예: 이용후기)"
+          style={{
+            width: '100%', boxSizing: 'border-box', padding: '12px 14px', fontSize: 15,
+            border: `1px solid ${addError ? '#ef4444' : '#e5e7eb'}`, borderRadius: 10, outline: 'none',
+          }}
+        />
+        {addError && <p style={{ margin: '6px 2px 0', fontSize: 13, color: '#ef4444' }}>{addError}</p>}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" style={{ margin: '14px 0 18px' }}>
+          {Object.entries(BOARD_TYPE_META).map(([key, meta]) => {
+            const on = type === key
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setType(key)}
+                style={{
+                  textAlign: 'left', padding: '16px 16px 14px', borderRadius: 12, cursor: 'pointer',
+                  border: on ? '2px solid #111827' : '1px solid #e5e7eb',
+                  background: on ? '#111827' : 'white',
+                  color: on ? 'white' : '#111827',
+                }}
+              >
+                <div style={{ fontSize: 22, marginBottom: 8 }}>{meta.icon}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{meta.what}</div>
+                <div style={{ fontSize: 12, color: on ? '#d1d5db' : '#9ca3af', lineHeight: 1.5 }}>{meta.detail}</div>
+              </button>
+            )
+          })}
         </div>
-        <p style={{ margin: 0, fontSize: 12, color: '#9ca3af' }}>
-          공지 = 사장님만 작성 · 문의 = 고객 작성, 비밀글, 답변 필요 · 일반 = 고객 작성
-        </p>
+
+        <button type="submit" disabled={busy} style={{
+          padding: '12px 28px', background: '#111827', color: 'white', border: 'none',
+          borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
+        }}>
+          만들기
+        </button>
       </form>
     </div>
   )

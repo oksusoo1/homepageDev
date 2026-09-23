@@ -23,6 +23,8 @@ erDiagram
   customers ||--o{ customer_payment_methods : cards
   sites ||--o{ support_tickets : 수정요청
   customers ||--o{ support_tickets : opens
+  support_tickets ||--o{ support_ticket_messages : 대화
+  staff ||--o{ support_tickets : handled_by
   sites ||--o{ user_boards : boards
   user_boards ||--o{ user_posts : posts
   user_posts ||--o{ user_comments : comments
@@ -72,6 +74,8 @@ erDiagram
 | sites | user_boards / user_posts / support_tickets | site_id |
 | user_boards | user_posts | user_posts.user_board_id |
 | user_posts | user_comments | user_comments.post_id |
+| support_tickets | support_ticket_messages | support_ticket_messages.ticket_id |
+| staff | support_tickets | support_tickets.handled_by |
 
 ---
 

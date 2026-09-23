@@ -11,7 +11,7 @@ alwaysApply: true
 
 | 범위 | 누가 보나 |
 |------|-----------|
-| **제작하는 사람만** | 지금 만드는 사람 (대리=본사, 셀프=고객). 일반 방문자·상대방 고객 X |
+| **제작하는 사람만** | 대리=본사 · 셀프=본사+사장님. 일반 방문자 X — **본사(staff)는 모든 단계 열람 가능** (고객 요청 응대) |
 | **부분공개** | 본사 + 해당 고객(사장님)만. 일반 방문자 X |
 | **공개** | 누구나 |
 | **미공개** | 아무도 콘텐츠 안 봄 (정지 안내만) |
@@ -19,13 +19,13 @@ alwaysApply: true
 ## FLOW_STEP → 공개 범위
 
 ### 대리제작
-- **intake · deposit · building** → 제작하는 사람만
+- **intake · deposit · building** → 본사만 (고객은 검수 단계부터)
 - **preview · balance** → 부분공개
 - **pay_method · trial · subscribed** → 공개
 - **suspended** → 미공개
 
 ### 셀프제작
-- **building** → 제작하는 사람만
+- **building** → 사장님 + 본사 (고객이 만드는 중이어도 본사는 응대 위해 열람)
 - **preview** → 부분공개
 - **pay_method · trial · subscribed** → 공개
 - **suspended** → 미공개

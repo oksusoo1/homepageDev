@@ -10,9 +10,18 @@
 import { onlyActive } from '@/lib/use-flag'
 
 export const BOARD_TYPE_META = {
-  notice: { label: '공지', userCanWrite: false, allowPrivate: false, needsReply: false, needsContact: false },
-  qna: { label: '문의', userCanWrite: true, allowPrivate: true, needsReply: true, needsContact: true },
-  general: { label: '일반', userCanWrite: true, allowPrivate: false, needsReply: false, needsContact: false },
+  notice: {
+    label: '공지', icon: '📢', what: '나만 글을 씁니다', detail: '고객은 읽기만 합니다',
+    userCanWrite: false, allowPrivate: false, needsReply: false, needsContact: false,
+  },
+  qna: {
+    label: '문의', icon: '💬', what: '고객이 남기고 내가 답합니다', detail: '비밀글로 남길 수 있습니다',
+    userCanWrite: true, allowPrivate: true, needsReply: true, needsContact: true,
+  },
+  general: {
+    label: '자유', icon: '📝', what: '고객도 글을 씁니다', detail: '후기·자유 글에 쓰세요',
+    userCanWrite: true, allowPrivate: false, needsReply: false, needsContact: false,
+  },
 }
 
 export function boardMeta(board) {
@@ -92,7 +101,21 @@ export async function countUnansweredBySite(supabase, siteIds) {
   return out
 }
 
-/** 새 게시판 키: 영문 소문자·숫자·- 만 */
+/** 게시판 키: 영문 소문자·숫자·- 만 (사장님에게 노출하지 않음 — 자동 생성) */
 export function normalizeBoardKey(raw) {
   return String(raw || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '')
+}
+
+/**
+ * 새 게시판 주소 자동 생성 — 사장님은 이름만 입력
+ * 종류별 기본 키(notice/qna/board)에 중복이면 숫자를 붙인다
+ */
+export function makeBoardKey(boardType, existingBoards = []) {
+  const base = boardType === 'notice' ? 'notice' : boardType === 'qna' ? 'qna' : 'board'
+  const used = new Set(existingBoards.map(b => b.board_key))
+  if (!used.has(base)) return base
+  for (let i = 2; i < 100; i++) {
+    if (!used.has(base + i)) return base + i
+  }
+  return base + Date.now()
 }

@@ -62,7 +62,7 @@ export default function SiteHeader({
 
         <span style={{ width: 1, height: 14, background: '#57534e', flexShrink: 0 }} aria-hidden />
 
-        <AuthUserBar variant="dark" />
+        <AuthUserBar variant="dark" siteCode={siteCode} />
       </nav>
     </header>
   )
