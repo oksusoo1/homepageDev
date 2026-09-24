@@ -26,9 +26,11 @@ import {
 } from '@/lib/support-ticket'
 import { softDelete } from '@/lib/use-flag'
 import SiteAdminShell, { parentKeyOf } from '@/components/SiteAdminShell'
+import DeployDoneModal from '@/components/DeployDoneModal'
 import UserPostsManager from '@/components/UserPostsManager'
 import UserBoardsManager from '@/components/UserBoardsManager'
 import { loadBoards, loadPostsWithComments, unansweredPosts } from '@/lib/user-board'
+import { loadTicketQuotes, quoteLabel, cancelQuote } from '@/lib/payment/extra'
 
 const CATEGORIES = [
   { value: 'text_change', icon: '✏️' },
@@ -53,6 +55,7 @@ export default function CustomerPortal({ params }) {
   const [alertsShown, setAlertsShown] = useState(null)   // 알림 화면 진입 시점 목록 (읽음 처리돼도 유지)
   const [showTicketForm, setShowTicketForm] = useState(false)
   const [ticketMsgs, setTicketMsgs] = useState({})     // { ticket_id: [메시지] } — 내부 메모 제외
+  const [ticketQuotes, setTicketQuotes] = useState({}) // { ticket_id: 유료 작업 견적 }
   const [ticketReply, setTicketReply] = useState({})   // { ticket_id: 입력중 }
   const [editTicketId, setEditTicketId] = useState(null)
   const [editTicketForm, setEditTicketForm] = useState({ title: '', content: '' })
@@ -60,6 +63,7 @@ export default function CustomerPortal({ params }) {
   const [saving, setSaving] = useState(false)
   const [deploying, setDeploying] = useState(false)
   const [showDeployModal, setShowDeployModal] = useState(false)
+  const [deployed, setDeployed] = useState(null)   // { trialEndsAt, card, subscription }
   const [subscription, setSubscription] = useState(null)
   const [inquiry, setInquiry] = useState(null)
   const [paymentMethod, setPaymentMethod] = useState(null)
@@ -157,7 +161,9 @@ export default function CustomerPortal({ params }) {
         .eq('site_id', siteId).order('created_at', { ascending: false })
     )
     setTickets(data || [])
-    setTicketMsgs(await loadCustomerTicketMessages(supabase, (data || []).map(t => t.ticket_id)))
+    const ids = (data || []).map(t => t.ticket_id)
+    setTicketMsgs(await loadCustomerTicketMessages(supabase, ids))
+    setTicketQuotes(await loadTicketQuotes(supabase, ids))
   }
 
   /** 사장님 → 본사 추가 메시지 */
@@ -169,6 +175,21 @@ export default function CustomerPortal({ params }) {
         ticketId, authorType: 'customer', author: customer?.name || '사장님', content,
       })
       setTicketReply(prev => ({ ...prev, [ticketId]: '' }))
+      await fetchTickets(site.site_id)
+    } catch (e) {
+      setTicketMsg('❌ ' + e.message)
+    }
+  }
+
+  /** 견적 거절 — 결제 전만 */
+  async function rejectQuote(ticketId, paymentId) {
+    if (!window.confirm('이 견적을 거절할까요?\n본사에 거절 의사가 전달됩니다.')) return
+    try {
+      await cancelQuote(supabase, paymentId)
+      await addTicketMessage(supabase, {
+        ticketId, authorType: 'customer', author: customer?.name || '사장님',
+        content: '보내주신 견적은 진행하지 않겠습니다.',
+      })
       await fetchTickets(site.site_id)
     } catch (e) {
       setTicketMsg('❌ ' + e.message)
@@ -243,7 +264,7 @@ export default function CustomerPortal({ params }) {
     const { data: card } = await onlyActive(
       supabase
         .from('customer_payment_methods')
-        .select('payment_method_id')
+        .select('payment_method_id, card_name, card_last4')
         .eq('customer_id', customer.customer_id)
     ).maybeSingle()
 
@@ -275,6 +296,7 @@ export default function CustomerPortal({ params }) {
           supabase.from('subscriptions').select('*').eq('site_id', site.site_id)
         ).maybeSingle()
         setSubscription(newSub)
+        setDeployed({ trialEndsAt, card, subscription: newSub })
         setShowDeployModal(true)
       }
     }
@@ -536,37 +558,16 @@ export default function CustomerPortal({ params }) {
         </div>
       )}
 
-      {/* 배포 완료 모달 */}
+      {/* 배포 완료 — 등록된 결제 수단 그대로 안내 */}
       {showDeployModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: 'white', borderRadius: 16, padding: '40px 36px', maxWidth: 420, width: '90%', textAlign: 'center', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
-            <div style={{ fontSize: 52, marginBottom: 16 }}>🎉</div>
-            <h2 style={{ margin: '0 0 10px', fontSize: 20, fontWeight: 800, color: '#111827' }}>배포 완료!</h2>
-            <p style={{ margin: '0 0 8px', fontSize: 14, color: '#6b7280', lineHeight: 1.7 }}>
-              사이트가 공개되었습니다.
-            </p>
-            <a href={sitePublicPath(site.subdomain)} target="_blank"
-              style={{ display: 'inline-block', marginBottom: 24, fontSize: 13, color: '#3b82f6', textDecoration: 'none', fontWeight: 600 }}>
-              {sitePublicHostname(site.subdomain)} →
-            </a>
-
-            <div style={{ background: '#f9fafb', borderRadius: 10, padding: '16px 20px', marginBottom: 24, textAlign: 'left' }}>
-              <p style={{ margin: '0 0 4px', fontSize: 13, fontWeight: 700, color: '#111827' }}>💳 카드를 등록하면 사이트가 계속 유지돼요</p>
-              <p style={{ margin: 0, fontSize: 12, color: '#9ca3af' }}>월 30,000원 · 언제든지 해지 가능</p>
-            </div>
-
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => setShowDeployModal(false)}
-                style={{ flex: 1, padding: '11px 0', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>
-                나중에
-              </button>
-              <button onClick={() => { setShowDeployModal(false); router.push(paymentCardPath(siteCode, 'deploy')) }}
-                style={{ flex: 2, padding: '11px 0', background: '#111827', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
-                카드 등록하기 →
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeployDoneModal
+          siteCode={siteCode}
+          trialEndsAt={deployed?.trialEndsAt}
+          card={deployed?.card}
+          subscription={deployed?.subscription || subscription}
+          onClose={() => setShowDeployModal(false)}
+          onGoPayment={(href) => { setShowDeployModal(false); router.push(href) }}
+        />
       )}
 
       <SiteAdminShell
@@ -583,36 +584,68 @@ export default function CustomerPortal({ params }) {
         onMobileOpen={setMobileOpen}
         onLogout={handleLogout}
       >
-        {menuKey === 'dashboard' && (
-          <>
-            <div style={css.card}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#111827' }}>서비스 상태</h3>
-                {badge(codeColor('FLOW_STEP', site.status), codeLabel('FLOW_STEP', site.status))}
-                {trialDaysLeft !== null && badge('#f59e0b', `체험 D-${Math.max(trialDaysLeft, 0)}`)}
+        {menuKey === 'dashboard' && (() => {
+          // 상태·결제·다음 할 일을 카드 하나로 (같은 말 반복 금지)
+          const live = ['trial', 'subscribed'].includes(site.status)
+          const endText = site.trial_ends_at ? new Date(site.trial_ends_at).toLocaleDateString('ko-KR') : null
+          const nextText = subscription?.next_billing_date
+            ? new Date(subscription.next_billing_date).toLocaleDateString('ko-KR')
+            : null
+          const payMethod = paymentMethod ? 'card' : subscription?.payment_method === 'manual' ? 'manual' : null
+
+          let payLine = null
+          if (live && payMethod === 'card') {
+            payLine = `${endText && site.status === 'trial' ? `${endText} 체험 종료 → ` : nextText ? `${nextText} → ` : ''}${paymentMethod.card_name || '카드'} •••• ${paymentMethod.card_last4} 로 월 ${(subscription?.amount || 30000).toLocaleString()}원 자동 결제`
+          } else if (live && payMethod === 'manual') {
+            payLine = `${endText && site.status === 'trial' ? `${endText} 체험 종료 후 ` : nextText ? `${nextText}까지 ` : ''}안내 계좌로 월 ${(subscription?.amount || 30000).toLocaleString()}원 입금 · 입금자명 ${subscription?.depositor_name || '—'}`
+          }
+
+          const tiles = [
+            { label: '답변 대기 글', value: `${waitingPosts.length}건`, menu: 'content.posts', hot: waitingPosts.length > 0 },
+            { label: '진행 중 본사 요청', value: `${openTickets.length}건`, menu: 'support.requests' },
+            unpaidBills.length > 0
+              ? { label: '미납', value: `${unpaidBills.length}건`, menu: 'billing.history', hot: true }
+              : { label: '다음 결제일', value: nextText || '—', menu: 'billing.sub' },
+          ]
+
+          return (
+            <>
+              <div style={css.card}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#111827' }}>{site.name}</h3>
+                  {site.status === 'trial' && trialDaysLeft !== null
+                    ? badge('#f59e0b', `체험 D-${Math.max(trialDaysLeft, 0)}`)
+                    : badge(codeColor('FLOW_STEP', site.status), codeLabel('FLOW_STEP', site.status))}
+                </div>
+
+                <p style={{ margin: '0 0 16px', fontSize: 13.5, color: '#4b5563', lineHeight: 1.7 }}>
+                  {payLine || customerNextLine(site.status, site.build_type)}
+                </p>
+
+                {live && (
+                  <a href={sitePublicPath(siteCode)} target="_blank" rel="noreferrer"
+                    style={{ ...css.btn, padding: '9px 16px', fontSize: 13, textDecoration: 'none', display: 'inline-block' }}>
+                    사이트 보기 →
+                  </a>
+                )}
               </div>
-              <p style={{ margin: 0, fontSize: 13, color: '#6b7280' }}>{customerNextLine(site.status, site.build_type)}</p>
-            </div>
-            {deployPanel}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {[
-                { label: '답변 대기 글', value: `${waitingPosts.length}건`, menu: 'content.posts', hot: waitingPosts.length > 0 },
-                { label: '진행 중 본사 요청', value: `${openTickets.length}건`, menu: 'support.requests' },
-                {
-                  label: '다음 결제일',
-                  value: subscription?.next_billing_date ? new Date(subscription.next_billing_date).toLocaleDateString('ko-KR') : '—',
-                  menu: 'billing.sub',
-                },
-              ].map(t => (
-                <button key={t.label} type="button" onClick={() => selectMenu(t.menu)}
-                  style={{ ...css.card, marginBottom: 0, padding: 18, textAlign: 'left', cursor: 'pointer', border: t.hot ? '1px solid #fecaca' : css.card.border }}>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>{t.label}</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: t.hot ? '#ef4444' : '#111827' }}>{t.value}</div>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+
+              {deployPanel}
+
+              {tiles.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {tiles.map(t => (
+                    <button key={t.label} type="button" onClick={() => selectMenu(t.menu)}
+                      style={{ ...css.card, marginBottom: 0, padding: 18, textAlign: 'left', cursor: 'pointer', border: t.hot ? '1px solid #fecaca' : css.card.border }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>{t.label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: t.hot ? '#ef4444' : '#111827' }}>{t.value}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )
+        })()}
 
         {menuKey === 'alerts' && (
           <div style={css.card}>
@@ -801,6 +834,43 @@ export default function CustomerPortal({ params }) {
                           <p style={{ margin: 0, fontSize: 13, color: '#111827', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{m.content}</p>
                         </div>
                       ))}
+
+                      {(() => {
+                        const q = ticketQuotes[ticket.ticket_id]
+                        if (!q) return null
+                        const payBase = `/s/${siteCode}/admin/payment/one-time/${q.payment_id}`
+                        return (
+                          <div style={{
+                            margin: '0 0 12px', padding: '14px 16px', borderRadius: 10,
+                            background: '#fffbeb', border: '1px solid #fde68a',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#92400e' }}>💰 유료 작업 견적</span>
+                              <span style={{ fontSize: 16, fontWeight: 800, color: '#b45309' }}>{q.amount?.toLocaleString()}원</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: '#92400e', background: '#fef3c7', padding: '2px 8px', borderRadius: 20 }}>
+                                {quoteLabel(q.status)}
+                              </span>
+                            </div>
+                            {q.note && <p style={{ margin: '0 0 10px', fontSize: 12.5, color: '#92400e', lineHeight: 1.6 }}>{q.note}</p>}
+                            {q.status === 'unpaid' && (
+                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                <button onClick={() => router.push(`${payBase}/method`)}
+                                  style={{ ...css.btn, padding: '9px 18px', fontSize: 13 }}>결제하기 →</button>
+                                <button onClick={() => rejectQuote(ticket.ticket_id, q.payment_id)}
+                                  style={{ ...css.btn, padding: '9px 14px', fontSize: 13, background: 'white', color: '#6b7280', border: '1px solid #e5e7eb' }}>
+                                  거절
+                                </button>
+                              </div>
+                            )}
+                            {q.status === 'pending_confirm' && (
+                              <p style={{ margin: 0, fontSize: 12.5, color: '#92400e' }}>본사에서 입금을 확인하면 작업이 시작됩니다.</p>
+                            )}
+                            {q.status === 'paid' && (
+                              <p style={{ margin: 0, fontSize: 12.5, color: '#15803d' }}>결제 완료 · 본사가 작업을 진행합니다.</p>
+                            )}
+                          </div>
+                        )
+                      })()}
 
                       {ticket.status !== 'resolved' && editTicketId !== ticket.ticket_id && (
                         <div style={{ marginBottom: 10 }}>

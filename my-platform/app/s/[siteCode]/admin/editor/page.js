@@ -15,6 +15,7 @@ import {
 } from '@/lib/site-paths'
 import Link from 'next/link'
 import AuthUserBar from '@/components/AuthUserBar'
+import DeployDoneModal from '@/components/DeployDoneModal'
 
 const PRESET_COLORS = ['#1c1917', '#1e3a5f', '#14532d', '#4c1d95', '#7f1d1d', '#0f172a']
 
@@ -196,6 +197,7 @@ export default function EditorPage({ params }) {
   const [saving, setSaving] = useState(false)
   const [deploying, setDeploying] = useState(false)
   const [showDeployModal, setShowDeployModal] = useState(false)
+  const [deployed, setDeployed] = useState(null)   // { trialEndsAt, card, subscription }
   const [saveMsg, setSaveMsg] = useState('')
   const [activeSection, setActiveSection] = useState('hero')
   const [activeField, setActiveField] = useState(null)   // 현재 포커스된 필드
@@ -298,7 +300,7 @@ export default function EditorPage({ params }) {
     const { data: card } = await onlyActive(
       supabase
         .from('customer_payment_methods')
-        .select('payment_method_id')
+        .select('payment_method_id, card_name, card_last4')
         .eq('customer_id', customer.customer_id)
     ).maybeSingle()
 
@@ -319,6 +321,10 @@ export default function EditorPage({ params }) {
 
     if (!error) {
       setSite(prev => ({ ...prev, status: 'trial', trial_ends_at: trialEndsAt }))
+      const { data: sub } = await onlyActive(
+        supabase.from('subscriptions').select('*').eq('site_id', site.site_id)
+      ).maybeSingle()
+      setDeployed({ trialEndsAt, card, subscription: sub })
       setShowDeployModal(true)
     }
     setDeploying(false)
@@ -373,31 +379,14 @@ export default function EditorPage({ params }) {
 
       {/* 배포 완료 모달 */}
       {showDeployModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[1000]">
-          <div className="bg-white rounded-2xl p-8 sm:p-10 max-w-[420px] w-[90%] text-center shadow-2xl">
-            <div className="text-5xl mb-4">🎉</div>
-            <h2 className="text-xl font-extrabold text-gray-900 mb-2">배포 완료!</h2>
-            <p className="text-sm text-gray-500 leading-relaxed mb-2">사이트가 공개되었습니다.</p>
-            <a href={sitePublicPath(siteCode)} target="_blank"
-              className="inline-block mb-6 text-[13px] text-blue-500 no-underline font-semibold">
-              {sitePublicHostname(siteCode)} →
-            </a>
-            <div className="bg-gray-50 rounded-lg p-4 mb-6 text-left">
-              <p className="text-[13px] font-bold text-gray-900 mb-1">💳 카드를 등록하면 사이트가 계속 유지돼요</p>
-              <p className="text-xs text-gray-400 m-0">월 30,000원 · 언제든지 해지 가능</p>
-            </div>
-            <div className="flex gap-2.5">
-              <button onClick={() => setShowDeployModal(false)}
-                className="flex-1 py-2.5 bg-white text-gray-500 border border-gray-200 rounded-lg text-[13px] cursor-pointer">
-                나중에
-              </button>
-              <button onClick={() => { setShowDeployModal(false); router.push(paymentCardPath(siteCode, 'deploy')) }}
-                className="flex-[2] py-2.5 bg-gray-900 text-white border-none rounded-lg text-[13px] font-bold cursor-pointer">
-                카드 등록하기 →
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeployDoneModal
+          siteCode={siteCode}
+          trialEndsAt={deployed?.trialEndsAt}
+          card={deployed?.card}
+          subscription={deployed?.subscription}
+          onClose={() => setShowDeployModal(false)}
+          onGoPayment={(href) => { setShowDeployModal(false); router.push(href) }}
+        />
       )}
 
       {/* 상단 툴바 */}

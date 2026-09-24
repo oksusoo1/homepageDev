@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { siteAdminPath } from '@/lib/site-paths'
 import { codeLabel, codeColor } from '@/lib/common-codes'
 import { lastStaffReply, unreadFrom } from '@/lib/support-ticket'
+import { quoteLabel } from '@/lib/payment/extra'
 
 /**
  * 본사 — 고객 요청 1건 처리 카드 (요청 목록 · 사이트 상세 공통)
@@ -13,13 +14,17 @@ import { lastStaffReply, unreadFrom } from '@/lib/support-ticket'
  * ⚠️ 고객에게 보내는 메시지와 내부 메모는 **입력칸을 분리**한다 (체크박스 토글 금지 — 오발송 사고 방지)
  */
 export default function PlatformTicketCard({
-  ticket, messages = [], staff, subdomain, onUpdate, onAddMessage, onRead, defaultOpen = false,
+  ticket, messages = [], quote = null, staff, subdomain,
+  onUpdate, onAddMessage, onRead, onSendQuote, onCancelQuote, onMarkQuotePaid,
+  defaultOpen = false,
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [reply, setReply] = useState('')
   const [memo, setMemo] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [quoteAmount, setQuoteAmount] = useState('')
+  const [quoteNote, setQuoteNote] = useState('')
 
   const done = ticket.status === 'resolved'
   const overdue = !done && ticket.deadline_at && new Date(ticket.deadline_at) < new Date()
@@ -115,6 +120,10 @@ export default function PlatformTicketCard({
         {unreadCustomer.length > 0
           ? badge('#ef4444', `답장 필요 ${unreadCustomer.length}`)
           : shared.length > 0 && <span style={{ fontSize: 11, color: '#64748b' }}>💬 {shared.length}</span>}
+        {quote && badge(
+          quote.status === 'paid' ? '#22c55e' : quote.status === 'pending_confirm' ? '#f59e0b' : '#b45309',
+          `${quote.amount?.toLocaleString()}원 ${quoteLabel(quote.status)}`,
+        )}
         <span style={{ fontSize: 11, color: '#64748b' }}>
           {codeLabel('TICKET_CATEGORY', ticket.category, ticket.category || '—')}
         </span>
@@ -204,6 +213,60 @@ export default function PlatformTicketCard({
               {btn('#2563eb', '고객에게 보내기', sendReply)}
               {!done && btn('#16a34a', '보내고 완료', finish)}
             </div>
+          </div>
+
+          {/* 유료 작업 견적 — 무료로 처리할 땐 건드리지 않는다 */}
+          <div style={{ border: '1px solid #334155', borderRadius: 8, padding: 10, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', marginBottom: 6 }}>
+              💰 유료 작업 — 견적을 보내면 사장님 화면에 결제 버튼이 생깁니다
+            </div>
+
+            {quote ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 15, fontWeight: 800, color: '#f1f5f9' }}>
+                  {quote.amount?.toLocaleString()}원
+                </span>
+                {badge(
+                  quote.status === 'paid' ? '#22c55e' : quote.status === 'pending_confirm' ? '#f59e0b' : '#64748b',
+                  quoteLabel(quote.status),
+                )}
+                <span style={{ fontSize: 11, color: '#64748b', flex: 1, minWidth: 0 }}>{quote.note}</span>
+                {quote.status === 'pending_confirm' && onMarkQuotePaid && (
+                  btn('#16a34a', '입금 확인', () => run(() => onMarkQuotePaid(quote.payment_id)))
+                )}
+                {quote.status !== 'paid' && onCancelQuote && (
+                  btn('#7f1d1d', '견적 취소', () => run(() => onCancelQuote(quote.payment_id)))
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input
+                  type="number"
+                  value={quoteAmount}
+                  onChange={e => setQuoteAmount(e.target.value)}
+                  placeholder="금액"
+                  style={{
+                    width: 120, padding: '7px 10px', background: '#111827', border: '1px solid #334155',
+                    borderRadius: 6, color: '#e2e8f0', fontSize: 13,
+                  }}
+                />
+                <span style={{ fontSize: 12, color: '#64748b' }}>원</span>
+                <input
+                  value={quoteNote}
+                  onChange={e => setQuoteNote(e.target.value)}
+                  placeholder="작업 내용 (예: 예약 페이지 추가)"
+                  style={{
+                    flex: 1, minWidth: 160, padding: '7px 10px', background: '#111827',
+                    border: '1px solid #334155', borderRadius: 6, color: '#e2e8f0', fontSize: 13,
+                  }}
+                />
+                {btn('#b45309', '견적 보내기', () => run(async () => {
+                  await onSendQuote(ticket, { amount: quoteAmount, note: quoteNote })
+                  setQuoteAmount('')
+                  setQuoteNote('')
+                }))}
+              </div>
+            )}
           </div>
 
           {/* 내부 메모 — 입력칸 자체가 분리되어 있음 */}

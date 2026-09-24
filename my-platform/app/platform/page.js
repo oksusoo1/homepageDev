@@ -11,6 +11,7 @@ import PlatformCommonCodes from '@/components/PlatformCommonCodes'
 import PlatformListSearch from '@/components/PlatformListSearch'
 import PlatformTicketCard from '@/components/PlatformTicketCard'
 import { loadTicketMessages, addTicketMessage, markTicketMessagesRead, unreadFrom } from '@/lib/support-ticket'
+import { loadTicketQuotes, sendQuote, cancelQuote } from '@/lib/payment/extra'
 import AuthUserBar from '@/components/AuthUserBar'
 import { sitePublicPath, siteAdminPath } from '@/lib/site-paths'
 import { getSitePeriodInfo } from '@/lib/site-period'
@@ -78,6 +79,7 @@ export default function AdminConsole() {
   const [loadedAt, setLoadedAt] = useState(null)
   const [ticketOnlyOpen, setTicketOnlyOpen] = useState(true)
   const [ticketMsgs, setTicketMsgs] = useState({})   // { ticket_id: [메시지] }
+  const [ticketQuotes, setTicketQuotes] = useState({}) // { ticket_id: 유료 작업 견적(결제행) }
 
   const [billings, setBillings] = useState([])                  // billing_history 전체
   const [siteFilter, setSiteFilter] = useState('all')
@@ -156,7 +158,9 @@ export default function AdminConsole() {
     setCustomers(cust.data || [])
     setBillings(bh.data || [])
     setLoadedAt(Date.now())
-    setTicketMsgs(await loadTicketMessages(supabase, (t.data || []).map(x => x.ticket_id)))
+    const ticketIds = (t.data || []).map(x => x.ticket_id)
+    setTicketMsgs(await loadTicketMessages(supabase, ticketIds))
+    setTicketQuotes(await loadTicketQuotes(supabase, ticketIds))
     try {
       await loadCommonCodes({ force: true })
       setCodesTick(t => t + 1)
@@ -482,6 +486,31 @@ export default function AdminConsole() {
     setSelectedSiteId(siteId)
     setSelectedCustomerId(null)
     setNav('sites')
+  }
+
+  /** 유료 작업 견적 — 보내기 / 취소 / 입금 확인 */
+  async function sendTicketQuote(ticket, { amount, note }) {
+    await sendQuote(supabase, { ticket, amount, note })
+    await addTicketMessage(supabase, {
+      ticketId: ticket.ticket_id, authorType: 'staff', author: staff?.name || '본사',
+      content: [
+        '유료 작업 견적을 보내드립니다.',
+        `금액: ${parseInt(amount, 10).toLocaleString()}원`,
+        note ? `작업: ${note}` : null,
+        '결제 후 작업을 시작합니다.',
+      ].filter(Boolean).join('\n'),
+    })
+    if (ticket.status === 'open') {
+      await supabase.from('support_tickets')
+        .update({ status: 'in_progress', handled_by: staff?.staff_id || null, updated_at: new Date().toISOString() })
+        .eq('ticket_id', ticket.ticket_id)
+    }
+    await fetchAll()
+  }
+
+  async function cancelTicketQuote(paymentId) {
+    await cancelQuote(supabase, paymentId)
+    await fetchAll()
   }
 
   /** 요청 카드를 펼치면 사장님 메시지 읽음 처리 */
@@ -1338,6 +1367,9 @@ export default function AdminConsole() {
                     onTicketAddMessage={addTicketMsg}
                     onTicketRead={readTicketMsgs}
                     ticketMessages={ticketMsgs}
+                    ticketQuotes={ticketQuotes}
+                    onSendQuote={sendTicketQuote}
+                    onCancelQuote={cancelTicketQuote}
                     staff={staff}
                     onGoCustomer={openCustomerDetail}
                     onSave={saveSiteFields}
@@ -1407,11 +1439,15 @@ export default function AdminConsole() {
                   key={t.ticket_id}
                   ticket={t}
                   messages={ticketMsgs[t.ticket_id] || []}
+                  quote={ticketQuotes[t.ticket_id] || null}
                   staff={staff}
                   subdomain={siteOf(t)?.subdomain}
                   onUpdate={updateTicket}
                   onAddMessage={addTicketMsg}
                   onRead={readTicketMsgs}
+                  onSendQuote={sendTicketQuote}
+                  onCancelQuote={cancelTicketQuote}
+                  onMarkQuotePaid={markOneTimePaid}
                 />
               ))}
             </div>

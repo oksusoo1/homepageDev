@@ -182,6 +182,9 @@ export default function PlatformSiteDetail({
   onTicketAddMessage,
   onTicketRead,
   ticketMessages = {},
+  ticketQuotes = {},
+  onSendQuote,
+  onCancelQuote,
   staff,
   onGoCustomer,
   onSave,
@@ -565,11 +568,15 @@ export default function PlatformSiteDetail({
             key={t.ticket_id}
             ticket={t}
             messages={ticketMessages[t.ticket_id] || []}
+            quote={ticketQuotes[t.ticket_id] || null}
             staff={staff}
             subdomain={site.subdomain}
             onUpdate={onTicketUpdate}
             onAddMessage={onTicketAddMessage}
             onRead={onTicketRead}
+            onSendQuote={onSendQuote}
+            onCancelQuote={onCancelQuote}
+            onMarkQuotePaid={onMarkOtpPaid}
           />
         ))}
       </Section>
