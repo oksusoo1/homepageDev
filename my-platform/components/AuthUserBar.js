@@ -18,7 +18,7 @@ import { siteAdminPath } from '@/lib/site-paths'
  *
  * @param {{ variant?: 'dark'|'light', showLogout?: boolean, className?: string, siteCode?: string, preset?: { status: string, kind: string, name: string, email: string }|null }} props
  */
-export default function AuthUserBar({ variant = 'dark', showLogout = true, className = '', siteCode = '', preset = null }) {
+export default function AuthUserBar({ variant = 'dark', showLogout = true, className = '', siteCode = '', preset = null, isSiteOwner = null }) {
   const pathname = usePathname()
   const [auth, setAuth] = useState({ status: 'loading', kind: null, name: '', email: '' })
   const [isOwner, setIsOwner] = useState(false)
@@ -26,6 +26,7 @@ export default function AuthUserBar({ variant = 'dark', showLogout = true, class
   useEffect(() => {
     if (preset) {
       setAuth(preset)
+      if (typeof isSiteOwner === 'boolean') setIsOwner(isSiteOwner)
       return
     }
     let cancelled = false
@@ -79,7 +80,7 @@ export default function AuthUserBar({ variant = 'dark', showLogout = true, class
       setAuth({ status: 'guest', kind: null, name: '', email: '' })
     })()
     return () => { cancelled = true }
-  }, [siteCode, preset?.kind, preset?.name, preset?.email])
+  }, [siteCode, preset?.kind, preset?.name, preset?.email, isSiteOwner])
 
   async function handleLogout() {
     await supabase.auth.signOut()

@@ -1,17 +1,18 @@
 import { notFound, redirect } from 'next/navigation'
-import { getSiteByCode } from '@/lib/site-public'
+import { getVisitorAccess } from '@/lib/public/site'
 import { boardPath } from '@/lib/site-paths'
-import { supabase } from '@/lib/supabase'
-import { loadBoards } from '@/lib/user-board'
+import SiteGateScreen from '@/components/SiteGateScreen'
+
+export const dynamic = 'force-dynamic'
 
 /** /s/{code}/board → 첫 번째 게시판으로 */
 export default async function BoardIndexPage({ params }) {
   const { siteCode } = await params
-  const site = await getSiteByCode(siteCode)
-  if (!site) notFound()
-
-  const boards = await loadBoards(supabase, site.site_id)
-  if (!boards.length) notFound()
-
-  redirect(boardPath(siteCode, boards[0].board_key))
+  const access = await getVisitorAccess(siteCode)
+  if (access.notFound) notFound()
+  if (!access.ok) {
+    return <SiteGateScreen visibility={access.visibility} siteCode={siteCode} cancelled={access.cancelled} />
+  }
+  if (!access.boards.length) notFound()
+  redirect(boardPath(siteCode, access.boards[0].board_key))
 }

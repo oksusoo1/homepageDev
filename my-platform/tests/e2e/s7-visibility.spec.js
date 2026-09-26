@@ -31,11 +31,5 @@ test('S7 제작 중(building) 비로그인 공개 범위', async ({ page, reques
   const leaked = html.includes(name) || /heroTitle|"hero"/.test(html)
   addDbCheck(ID, 'gate_visible', true)
   addDbCheck(ID, 'html_contains_body', leaked)
-
-  if (leaked) {
-    recordScenario({
-      id: ID,
-      knownIssue: '화면은 차단되나 페이지 소스(RSC)에 본문이 포함됨 — 보안 ④단계 대상',
-    })
-  }
+  expect(leaked, 'HTML/RSC에 사이트 본문이 있으면 안 됨').toBe(false)
 })

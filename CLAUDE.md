@@ -108,7 +108,7 @@
 - ③ 남은 쓰기(에디터·/setup·게시판·본사요청·가입·탈퇴) = Server Actions. 브라우저 insert/update/delete/upsert 0건
 - 사장님 사이트 수정 허용: `name` · `description` · `address` · `phone` · `email` · `content` (`lib/site-edit.js`)
 - 주소 규칙: `lib/subdomain-rules.js` (3~30자, 예약어, site_code VARCHAR(50))
-- ④방문자 공개범위 게이트 구조 · ⑤RLS 잠금 은 다음 단계
+- ④ 방문자 화면 읽기 서버화 (공개 범위·비밀글·문의 연락처). 조회는 `lib/public/*`. ⑤RLS 잠금은 다음 단계
 
 ### 결제·청구 (목업)
 - 카드 등록: `app/s/[siteCode]/admin/payment/card/page.js` `MOCK_MODE = true` (실서비스 전환 시 false + 토스 키)
@@ -120,6 +120,6 @@
 ### 다음 작업 후보 (미구현)
 - 청구 배치 자동 실행(cron) 연결
 - 토스페이먼츠 실결제 연동
-- 보안 ④⑤: 방문자 공개범위 게이트 구조 · RLS 잠금 (현재 전 테이블 `USING (true)`, 조회는 아직 anon)
+- 보안 ⑤: RLS 잠금 (현재 전 테이블 `USING (true)`, 조회는 아직 anon)
 - 템플릿 고도화 (상위/left 메뉴 노코드 구성, 카드형 콘텐츠 등) · GrapesJS 에디터
 - 판매자(에이전시) 구조

@@ -1,36 +1,22 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
 import { sitePublicPath, boardPath } from '@/lib/site-paths'
 import AuthUserBar from '@/components/AuthUserBar'
 
 /**
  * 고객(방문자) 사이트 공통 헤더
- * - 네비: 홈 + 사이트 게시판(user_boards 정렬순)
- * - activePage: 'home' | 게시판 board_key
- * - 우측: AuthUserBar (이름+이메일)
+ * 게시판 목록은 서버에서 받아 표시 (브라우저 supabase 조회 없음)
  */
 export default function SiteHeader({
   siteName,
   siteCode,
+  boards = [],
   bgColor = '#1c1917',
   activePage = '',
+  authPreset = null,
+  isSiteOwner = false,
 }) {
-  const [boards, setBoards] = useState([])
-
-  useEffect(() => {
-    if (!siteCode) return
-    supabase
-      .from('user_boards')
-      .select('board_key, name, sort_order, sites!inner(subdomain)')
-      .eq('sites.subdomain', siteCode)
-      .eq('use_flag', 1)
-      .order('sort_order')
-      .then(({ data }) => setBoards(data || []))
-  }, [siteCode])
-
   const navItems = [
     { label: '홈', href: sitePublicPath(siteCode), key: 'home' },
     ...boards.map(b => ({ label: b.name, href: boardPath(siteCode, b.board_key), key: b.board_key })),
@@ -62,7 +48,7 @@ export default function SiteHeader({
 
         <span style={{ width: 1, height: 14, background: '#57534e', flexShrink: 0 }} aria-hidden />
 
-        <AuthUserBar variant="dark" siteCode={siteCode} />
+        <AuthUserBar variant="dark" siteCode={siteCode} preset={authPreset} isSiteOwner={isSiteOwner} />
       </nav>
     </header>
   )

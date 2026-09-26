@@ -1,21 +1,38 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import SitePublicFrame from '@/components/SitePublicFrame'
+import SiteGateScreen from '@/components/SiteGateScreen'
 import { boardPath } from '@/lib/site-paths'
-import { getBoardBundle, getBoardPosts } from '@/lib/user-board-public'
-import { boardMeta, hasOwnerReply, maskName } from '@/lib/user-board'
+import { getVisitorAccess } from '@/lib/public/site'
+import { loadPublicBoard, loadPublicPosts } from '@/lib/public/board'
+import { boardMeta, maskName } from '@/lib/user-board'
 
-export default async function BoardListPage({ params }) {
+export const dynamic = 'force-dynamic'
+
+export default async function BoardListPage({ params, searchParams }) {
   const { siteCode, boardKey } = await params
-  const bundle = await getBoardBundle(siteCode, boardKey)
-  if (!bundle) notFound()
-  const { site, visibility, board } = bundle
-  const meta = boardMeta(board)
+  const q = await searchParams
+  const access = await getVisitorAccess(siteCode)
+  if (access.notFound) notFound()
+  if (!access.ok) {
+    return <SiteGateScreen visibility={access.visibility} siteCode={siteCode} cancelled={access.cancelled} />
+  }
 
-  const posts = await getBoardPosts(board)
+  const board = await loadPublicBoard(access.siteId, boardKey)
+  if (!board) notFound()
+  const meta = boardMeta(board)
+  const posts = await loadPublicPosts(board, access.viewer, access.customerId)
 
   return (
-    <SitePublicFrame site={site} siteCode={siteCode} visibility={visibility} activePage={board.board_key}>
+    <SitePublicFrame site={access.site} siteCode={siteCode} boards={access.boards} activePage={board.board_key} authPreset={access.authPreset} isSiteOwner={access.isSiteOwner}>
+      {q?.notice === 'secret' && (
+        <p data-testid="secret-post-notice" style={{
+          background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12,
+          padding: '14px 16px', marginBottom: 20, fontSize: 13, color: '#92400e', lineHeight: 1.6,
+        }}>
+          비밀글로 등록되었습니다. 사장님만 볼 수 있어요. 로그인 후 작성하면 나중에 다시 볼 수 있습니다.
+        </p>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32, gap: 16 }}>
         <div>
           <h2 style={{ margin: '0 0 6px', fontSize: 28, color: '#1c1917' }}>{board.name}</h2>
@@ -43,7 +60,6 @@ export default async function BoardListPage({ params }) {
         <div style={{ background: 'white', borderRadius: 12, border: '1px solid #e7e5e4', overflow: 'hidden' }}>
           {posts.map((post, i) => {
             const author = post.author_type === 'owner' ? post.author : maskName(post.author)
-            const answered = hasOwnerReply(post.user_comments)
             return (
               <Link key={post.post_id}
                 href={boardPath(siteCode, board.board_key, post.post_id)}
@@ -53,14 +69,14 @@ export default async function BoardListPage({ params }) {
                   borderBottom: i < posts.length - 1 ? '1px solid #f5f5f4' : 'none',
                 }}>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {post.is_private ? '🔒 비밀글입니다' : post.title}
+                  {post.canRead ? post.title : '🔒 비밀글입니다'}
                 </span>
                 {meta.needsReply && post.author_type === 'user' && (
                   <span style={{
                     fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, whiteSpace: 'nowrap',
-                    background: answered ? '#dcfce7' : '#f5f5f4', color: answered ? '#15803d' : '#a8a29e',
+                    background: post.answered ? '#dcfce7' : '#f5f5f4', color: post.answered ? '#15803d' : '#a8a29e',
                   }}>
-                    {answered ? '답변완료' : '답변대기'}
+                    {post.answered ? '답변완료' : '답변대기'}
                   </span>
                 )}
                 <span style={{ fontSize: 13, color: '#78716c', width: 80, textAlign: 'center', flexShrink: 0 }}>{author}</span>

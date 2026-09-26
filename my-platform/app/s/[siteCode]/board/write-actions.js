@@ -8,10 +8,6 @@ import { resolveSiteVisibility } from '@/lib/site-visibility'
 import { redirect } from 'next/navigation'
 import { boardPath } from '@/lib/site-paths'
 
-function ok(data) {
-  return { ok: true, data }
-}
-
 function fail(error) {
   return { ok: false, error: error || '처리에 실패했습니다.' }
 }
@@ -38,7 +34,7 @@ export async function createPublicPostAction(prev, formData) {
     if (!site) return fail('사이트를 찾을 수 없습니다.')
 
     const { data: board } = await onlyActive(
-      db.from('user_boards').select('*').eq('site_id', site.site_id).eq('board_key', boardKey)
+      db.from('user_boards').select('user_board_id, board_key, name, board_type').eq('site_id', site.site_id).eq('board_key', boardKey)
     ).maybeSingle()
     if (!board) return fail('게시판을 찾을 수 없습니다.')
 
@@ -87,19 +83,27 @@ export async function createPublicPostAction(prev, formData) {
     if (!title) return fail('제목을 입력해 주세요')
     if (!content) return fail('내용을 입력해 주세요')
 
-    const { error } = await db.from('user_posts').insert([{
+    const isPrivate = authorType === 'user' && meta.allowPrivate && !!input.isPrivate
+    const row = {
       site_id: site.site_id,
       user_board_id: board.user_board_id,
       title,
       content,
       author,
       author_type: authorType,
-      is_private: authorType === 'user' && meta.allowPrivate && !!input.isPrivate,
+      is_private: isPrivate,
+      author_auth_id: authorType === 'user' && user?.id ? user.id : null,
       phone: authorType === 'owner' ? null : (clip(input.phone, 50) || null),
       email: authorType === 'owner' ? null : (clip(input.email, 200) || null),
-    }])
+    }
+    let { error } = await db.from('user_posts').insert([row])
+    if (error && /author_auth_id/.test(error.message || '')) {
+      delete row.author_auth_id
+      ;({ error } = await db.from('user_posts').insert([row]))
+    }
     if (error) return fail(error.message)
-    redirect(boardPath(siteCode, board.board_key))
+    const notice = isPrivate && !user ? '?notice=secret' : ''
+    redirect(boardPath(siteCode, board.board_key) + notice)
   } catch (e) {
     if (e?.digest?.startsWith?.('NEXT_REDIRECT')) throw e
     return fail(e.message || '저장에 실패했습니다.')

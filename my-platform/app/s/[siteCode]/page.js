@@ -1,76 +1,27 @@
 ﻿import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { getVisitorSiteBundle } from '@/lib/site-public'
+import { getVisitorAccess } from '@/lib/public/site'
+import { loadRecentPublicNotices } from '@/lib/public/board'
 import { sitePublicPath, boardPath } from '@/lib/site-paths'
-import { loadBoards } from '@/lib/user-board'
-import SiteVisibilityGate from '@/components/SiteVisibilityGate'
+import SiteGateScreen from '@/components/SiteGateScreen'
 import SiteHeader from '@/components/SiteHeader'
-import { onlyActive } from '@/lib/use-flag'
-import { isCancelDue } from '@/lib/subscription-life'
 
-/** 최근 공지 — 공지(notice) 게시판 글만 */
-async function getRecentNotices(supabase, noticeBoard) {
-  if (!noticeBoard) return []
-  const { data } = await onlyActive(
-    supabase
-      .from('user_posts')
-      .select('post_id, title, author, created_at')
-      .eq('user_board_id', noticeBoard.user_board_id)
-      .eq('is_private', false)
-      .order('created_at', { ascending: false })
-      .limit(3)
-  )
-  return data || []
-}
-
-function HiddenSitePage({ cancelled }) {
-  return (
-    <div className="min-h-screen bg-surface flex items-center justify-center font-sans relative">
-      <div className="text-center px-5 py-10">
-        <div className="text-6xl mb-5">{cancelled ? '⏹' : '🔒'}</div>
-        <h1 className="text-2xl font-extrabold text-gray-900 mb-3">
-          {cancelled ? '서비스가 종료되었습니다' : '사이트 준비 중입니다'}
-        </h1>
-        <p className="text-[15px] text-gray-500 leading-relaxed mb-2">
-          {cancelled
-            ? <>이 사이트의 서비스가 해지되었습니다.<br />사이트 운영자에게 문의해 주세요.</>
-            : <>현재 이 사이트는 일시적으로 운영이 중단되었습니다.<br />사이트 운영자에게 문의해 주세요.</>}
-        </p>
-        <p className="text-xs text-gray-400 mt-6">Powered by MyPlatform</p>
-      </div>
-    </div>
-  )
-}
+export const dynamic = 'force-dynamic'
 
 export default async function CustomerSitePage({ params }) {
   const { siteCode } = await params
-  const bundle = await getVisitorSiteBundle(siteCode)
-  if (!bundle) notFound()
-
-  const { site, visibility } = bundle
-
-  if (visibility === 'hidden') {
-    const ended = isCancelDue(bundle.subscription) || !!bundle.subscription?.cancelled_at
-    return <HiddenSitePage cancelled={ended} />
+  const access = await getVisitorAccess(siteCode)
+  if (access.notFound) notFound()
+  if (!access.ok) {
+    return <SiteGateScreen visibility={access.visibility} siteCode={siteCode} cancelled={access.cancelled} />
   }
-
-  const pageBody = await renderSiteBody(site, siteCode)
-
-  if (visibility === 'public') return pageBody
-
-  return (
-    <SiteVisibilityGate site={site} siteCode={siteCode} visibility={visibility}>
-      {pageBody}
-    </SiteVisibilityGate>
-  )
+  return renderSiteBody(access.site, siteCode, access.boards, access.authPreset, access.isSiteOwner)
 }
 
-async function renderSiteBody(site, siteCode) {
-  const { supabase } = await import('@/lib/supabase')
-  const boards = await loadBoards(supabase, site.site_id)
+async function renderSiteBody(site, siteCode, boards, authPreset, isSiteOwner) {
   const noticeBoard = boards.find(b => b.board_type === 'notice')
   const qnaBoard = boards.find(b => b.board_type === 'qna')
-  const posts = await getRecentNotices(supabase, noticeBoard)
+  const posts = await loadRecentPublicNotices(noticeBoard)
 
   const c = site.content || {}
   const hero = { title: '', subtitle: '', ctaText: '문의하기', bgColor: '#1c1917', ...c.hero }
@@ -106,8 +57,11 @@ async function renderSiteBody(site, siteCode) {
       <SiteHeader
         siteName={site.name}
         siteCode={siteCode}
+        boards={boards}
         bgColor={heroBg}
         activePage="home"
+        authPreset={authPreset}
+        isSiteOwner={isSiteOwner}
       />
 
       <section

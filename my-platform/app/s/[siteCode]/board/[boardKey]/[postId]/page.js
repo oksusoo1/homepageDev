@@ -1,18 +1,26 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import SitePublicFrame from '@/components/SitePublicFrame'
+import SiteGateScreen from '@/components/SiteGateScreen'
 import { boardPath } from '@/lib/site-paths'
-import { getBoardBundle, getBoardPost } from '@/lib/user-board-public'
-import { boardMeta, hasOwnerReply, maskName } from '@/lib/user-board'
+import { getVisitorAccess } from '@/lib/public/site'
+import { loadPublicBoard, loadPublicPost } from '@/lib/public/board'
+import { boardMeta, maskName } from '@/lib/user-board'
+
+export const dynamic = 'force-dynamic'
 
 export default async function PostDetailPage({ params }) {
   const { siteCode, boardKey, postId } = await params
-  const bundle = await getBoardBundle(siteCode, boardKey)
-  if (!bundle) notFound()
-  const { site, visibility, board } = bundle
-  const meta = boardMeta(board)
+  const access = await getVisitorAccess(siteCode)
+  if (access.notFound) notFound()
+  if (!access.ok) {
+    return <SiteGateScreen visibility={access.visibility} siteCode={siteCode} cancelled={access.cancelled} />
+  }
 
-  const post = await getBoardPost(board, postId)
+  const board = await loadPublicBoard(access.siteId, boardKey)
+  if (!board) notFound()
+  const meta = boardMeta(board)
+  const post = await loadPublicPost(board, postId, access.viewer, access.customerId)
   if (!post) notFound()
 
   const author = post.author_type === 'owner' ? post.author : maskName(post.author)
@@ -23,7 +31,7 @@ export default async function PostDetailPage({ params }) {
   })
 
   return (
-    <SitePublicFrame site={site} siteCode={siteCode} visibility={visibility} activePage={board.board_key} maxWidth={720}>
+    <SitePublicFrame site={access.site} siteCode={siteCode} boards={access.boards} activePage={board.board_key} maxWidth={720} authPreset={access.authPreset} isSiteOwner={access.isSiteOwner}>
       <Link href={listHref} style={{ fontSize: 13, color: '#78716c', textDecoration: 'none', display: 'inline-block', marginBottom: 32 }}>
         ← {board.name}
       </Link>
@@ -31,38 +39,39 @@ export default async function PostDetailPage({ params }) {
       <article style={{ background: 'white', borderRadius: 12, border: '1px solid #e7e5e4', overflow: 'hidden' }}>
         <div style={{ padding: '32px 36px', borderBottom: '1px solid #e7e5e4' }}>
           <h1 style={{ margin: '0 0 16px', fontSize: 26, color: '#1c1917', lineHeight: 1.4, fontWeight: 700 }}>
-            {post.is_private ? '🔒 비밀글입니다' : post.title}
+            {post.canRead ? post.title : '🔒 비밀글입니다'}
           </h1>
           <div style={{ display: 'flex', gap: 20, fontSize: 13, color: '#a8a29e' }}>
             <span>✍️ {author}</span>
             <span>🕐 {new Date(post.created_at).toLocaleString('ko-KR')}</span>
           </div>
         </div>
-        <div style={{ padding: '36px', fontSize: 16, color: post.is_private ? '#78716c' : '#292524', lineHeight: 1.9, whiteSpace: 'pre-wrap' }}>
-          {post.is_private ? '작성자와 운영자만 내용을 확인할 수 있습니다.' : post.content}
+        <div style={{ padding: '36px', fontSize: 16, color: post.canRead ? '#292524' : '#78716c', lineHeight: 1.9, whiteSpace: 'pre-wrap' }}>
+          {post.canRead ? post.content : '작성자와 운영자만 내용을 확인할 수 있습니다.'}
         </div>
       </article>
 
-      {/* 댓글 (운영자 답변) */}
-      {post.is_private ? (
-        meta.needsReply && hasOwnerReply(post.user_comments) && (
+      {post.canRead ? (
+        post.user_comments.length > 0 && (
+          <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {post.user_comments.map(c => (
+              <div key={c.user_comment_id} style={{
+                background: 'white', borderRadius: 12, border: '1px solid #e7e5e4',
+                borderLeft: c.author_type === 'owner' ? '3px solid #1c1917' : '1px solid #e7e5e4', padding: '16px 20px',
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#78716c', marginBottom: 6 }}>
+                  {c.author_type === 'owner' ? '운영자 답변' : maskName(c.author)}
+                  <span style={{ fontWeight: 400, marginLeft: 8 }}>{new Date(c.created_at).toLocaleDateString('ko-KR')}</span>
+                </div>
+                <p style={{ margin: 0, fontSize: 15, color: '#1c1917', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{c.content}</p>
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+        meta.needsReply && post.answered && (
           <p style={{ margin: '16px 4px 0', fontSize: 13, color: '#a8a29e' }}>✓ 운영자가 답변했습니다 (비공개)</p>
         )
-      ) : post.user_comments.length > 0 && (
-        <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {post.user_comments.map(c => (
-            <div key={c.user_comment_id} style={{
-              background: 'white', borderRadius: 12, border: '1px solid #e7e5e4',
-              borderLeft: c.author_type === 'owner' ? '3px solid #1c1917' : '1px solid #e7e5e4', padding: '16px 20px',
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#78716c', marginBottom: 6 }}>
-                {c.author_type === 'owner' ? '운영자 답변' : maskName(c.author)}
-                <span style={{ fontWeight: 400, marginLeft: 8 }}>{new Date(c.created_at).toLocaleDateString('ko-KR')}</span>
-              </div>
-              <p style={{ margin: 0, fontSize: 15, color: '#1c1917', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{c.content}</p>
-            </div>
-          ))}
-        </div>
       )}
 
       <div style={{ marginTop: 24, display: 'flex', justifyContent: 'space-between' }}>

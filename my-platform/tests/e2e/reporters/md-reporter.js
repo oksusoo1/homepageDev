@@ -16,6 +16,8 @@ const TITLES = {
   S12: '방문자가 공개 문의 게시판에 글 작성',
   S13: '신규 가입 customers 행',
   S14: '유료 구독 중 탈퇴 → 배치 확정',
+  S15: '비밀글 열람(비로그인·사장님·작성자)',
+  S16: '문의 연락처는 방문자 응답에 없음',
 }
 
 function scenarioIdFromTitle(title) {

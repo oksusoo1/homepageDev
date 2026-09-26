@@ -1,20 +1,24 @@
-import { getVisitorSiteBundle } from '@/lib/site-public'
+import { getVisitorAccess } from '@/lib/public/site'
 import { SiteStatusRibbonHost } from '@/components/SiteStatusRibbon'
+
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
 
 /**
  * /s/[siteCode] 공통 레이아웃
- * 방문자 페이지에 공개 범위 리본 표시 (/admin 제외)
+ * 쿠키에 따라 내용이 달라지므로 정적·공유 캐시 금지.
+ * 사이트 조회는 getVisitorAccess(cache)로 page와 1회 공유.
  */
 export default async function SiteCodeLayout({ children, params }) {
   const { siteCode } = await params
-  const bundle = await getVisitorSiteBundle(siteCode)
+  const access = await getVisitorAccess(siteCode)
 
   return (
     <>
-      {bundle && (
+      {access.ok && access.visibility !== 'public' && (
         <SiteStatusRibbonHost
-          status={bundle.site.status}
-          visibility={bundle.visibility === 'public' ? null : bundle.visibility}
+          status={access.site.status}
+          visibility={access.visibility}
         />
       )}
       {children}

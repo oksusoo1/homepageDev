@@ -28,6 +28,7 @@ erDiagram
   sites ||--o{ user_boards : boards
   user_boards ||--o{ user_posts : posts
   user_posts ||--o{ user_comments : comments
+  user_posts }o--o| auth_users : author_auth_id
   common_codes {
     uuid common_code_id PK
     varchar group_code
