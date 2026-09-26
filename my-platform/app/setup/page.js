@@ -1,9 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
-import { onlyActive } from '@/lib/use-flag'
+import { loadCustomerSelfAction, checkSubdomainTakenAction } from '@/app/session/actions'
 import Link from 'next/link'
 import { Suspense } from 'react'
 import { templateCategoryMeta } from '@/lib/template-category'
@@ -34,15 +32,9 @@ function SetupForm() {
   useEffect(() => { checkAuth() }, [])
 
   async function checkAuth() {
-    const user = await requireAuthUser()
-    if (!user) { router.push('/login'); return }
-
-    const { data: cust } = await onlyActive(
-      supabase.from('customers').select('*').eq('auth_id', user.id)
-    ).single()
-    if (!cust) { router.push('/login'); return }
-
-    setCustomer(cust)
+    const res = await loadCustomerSelfAction()
+    if (!res.ok) { router.push('/login'); return }
+    setCustomer(res.data.customer)
     setPageLoading(false)
   }
 
@@ -54,10 +46,8 @@ function SetupForm() {
 
     setSubdomainStatus('checking')
     const timer = setTimeout(async () => {
-      const { data } = await onlyActive(
-        supabase.from('sites').select('site_id').eq('subdomain', v.value)
-      ).maybeSingle()
-      setSubdomainStatus(data ? 'taken' : 'available')
+      const taken = await checkSubdomainTakenAction(v.value)
+      setSubdomainStatus(taken.ok && taken.data.taken ? 'taken' : 'available')
     }, 500)
     return () => clearTimeout(timer)
   }, [form.subdomain])

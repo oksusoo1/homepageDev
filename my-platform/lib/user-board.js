@@ -70,7 +70,7 @@ export function maskName(name) {
 /** 사이트 게시판 목록 (정렬순) */
 export async function loadBoards(supabase, siteId) {
   const { data } = await onlyActive(
-    supabase.from('user_boards').select('*').eq('site_id', siteId).order('sort_order')
+    supabase.from('user_boards').select('user_board_id, site_id, board_key, name, board_type, sort_order, created_at').eq('site_id', siteId).order('sort_order')
   )
   return data || []
 }
@@ -82,7 +82,7 @@ export async function loadBoards(supabase, siteId) {
 export async function loadPostsWithComments(supabase, siteId) {
   const { data } = await onlyActive(
     supabase.from('user_posts')
-      .select('*, user_comments(user_comment_id, author_type, author, content, use_flag, created_at)')
+      .select('post_id, site_id, user_board_id, title, content, author, author_type, is_private, phone, email, created_at, user_comments(user_comment_id, author_type, author, content, use_flag, created_at)')
       .eq('site_id', siteId)
       .order('created_at', { ascending: false })
   )

@@ -4,9 +4,6 @@
  * 코드값(code)은 불변 · 표시명(label)만 관리화면에서 변경
  */
 
-import { supabase } from '@/lib/supabase'
-import { onlyActive } from '@/lib/use-flag'
-
 /** @type {{ groups: string[], byGroup: Record<string, object[]>, loadedAt: number } | null} */
 let cache = null
 
@@ -32,29 +29,10 @@ export function applyCommonCodesCache(codes) {
 /**
  * @param {{ force?: boolean }} [opts]
  */
+/** 브라우저 조회 없음. 서버에서 applyCommonCodesCache 한 뒤에만 라벨이 채워진다. */
 export async function loadCommonCodes({ force = false } = {}) {
   if (!force && cache) return cache
-
-  const { data: codes, error } = await onlyActive(
-    supabase
-      .from('common_codes')
-      .select('*')
-      .order('group_code')
-      .order('sort_order')
-  )
-  if (error) throw error
-
-  const byGroup = {}
-  for (const c of codes || []) {
-    const gc = c.group_code
-    if (!gc) continue
-    if (!byGroup[gc]) byGroup[gc] = []
-    byGroup[gc].push(c)
-  }
-
-  const groups = Object.keys(byGroup).sort()
-  cache = { groups, byGroup, loadedAt: Date.now() }
-  return cache
+  return cache || { groups: [], byGroup: {}, loadedAt: 0 }
 }
 
 /** 동기 조회 (캐시 없으면 code 그대로) */
@@ -94,6 +72,5 @@ export function codeColor(groupCode, code, fallback = '#6b7280') {
 
 /** React용 — 로드 후 label */
 export async function getCodeLabelAsync(groupCode, code, fallback) {
-  await loadCommonCodes()
   return codeLabel(groupCode, code, fallback)
 }

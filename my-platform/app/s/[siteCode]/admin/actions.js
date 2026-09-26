@@ -1,6 +1,10 @@
 'use server'
 
 import { requireOwnedSiteByCode, requireStaff, findSiteByCode } from '@/lib/server/guard'
+import {
+  loadAdminHome, loadAdminTickets, loadAdminBoards,
+  loadEditorSite, loadPaymentSetup, loadCardSuccessSite, loadOwnerQuote,
+} from '@/lib/server/reads'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { onlyActive } from '@/lib/use-flag'
 import { softDelete } from '@/lib/use-flag-write'
@@ -559,4 +563,32 @@ export async function requestQuoteBankTransferAction(siteCode, paymentId, { depo
   const result = await requestQuoteBankTransfer(gate.db, { quote: check.quote, depositorName })
   if (result.error) return fail(result.error)
   return ok(null)
+}
+
+export async function loadAdminHomeAction(siteCode) {
+  return loadAdminHome(siteCode)
+}
+
+export async function loadAdminTicketsAction(siteCode) {
+  return loadAdminTickets(siteCode)
+}
+
+export async function loadAdminBoardsAction(siteCode) {
+  return loadAdminBoards(siteCode)
+}
+
+export async function loadEditorSiteAction(siteCode) {
+  return loadEditorSite(siteCode)
+}
+
+export async function loadPaymentSetupAction(siteCode) {
+  return loadPaymentSetup(siteCode)
+}
+
+export async function loadCardSuccessSiteAction(siteCode) {
+  return loadCardSuccessSite(siteCode)
+}
+
+export async function loadOwnerQuoteAction(siteCode, paymentId) {
+  return loadOwnerQuote(siteCode, paymentId)
 }

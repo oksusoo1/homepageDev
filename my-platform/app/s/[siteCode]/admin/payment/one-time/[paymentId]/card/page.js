@@ -3,9 +3,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
-import { loadQuote } from '@/lib/payment/extra'
+import { loadOwnerQuoteAction } from '@/app/s/[siteCode]/admin/actions'
 import { payQuoteCardMockAction } from '@/app/s/[siteCode]/admin/actions'
 import { siteAdminPath } from '@/lib/site-paths'
 import PaymentResultPanel from '@/components/PaymentResultPanel'
@@ -25,14 +23,9 @@ function Inner() {
   useEffect(() => { init() }, [paymentId])
 
   async function init() {
-    const user = await requireAuthUser()
-    if (!user) { router.push('/login'); return }
-    const { data: cust } = await supabase.from('customers').select('customer_id').eq('auth_id', user.id).single()
-    if (!cust) { router.push('/login'); return }
-
-    const res = await loadQuote(supabase, paymentId, cust.customer_id)
+    const res = await loadOwnerQuoteAction(siteCode, paymentId)
     if (!res.ok) { setBlocked(res.error); setLoading(false); return }
-    setQuote(res.quote)
+    setQuote(res.data.quote)
     setLoading(false)
   }
 

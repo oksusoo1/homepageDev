@@ -2,11 +2,8 @@
 import { useState, useEffect } from 'react'
 import { use } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
-import { requireAuthUser, isPlatformAdmin } from '@/lib/auth'
-import { onlyActive } from '@/lib/use-flag'
 import { paymentMethodUrl } from '@/lib/billing'
-import { deploySiteAction, saveSiteOwnerPatchAction } from '@/app/s/[siteCode]/admin/actions'
+import { deploySiteAction, saveSiteOwnerPatchAction, loadEditorSiteAction } from '@/app/s/[siteCode]/admin/actions'
 import {
   paymentCardPath,
   siteAdminPath,
@@ -235,35 +232,19 @@ export default function EditorPage({ params }) {
   }
 
   async function init() {
-    const user = await requireAuthUser()
-    if (!user) { router.push('/login'); return }
-
-    // 본사: 에디터만 허용 (고객 포털은 불가)
-    if (await isPlatformAdmin()) {
+    const res = await loadEditorSiteAction(siteCode)
+    if (!res.ok) {
+      router.push(res.error === '로그인이 필요합니다.' ? '/login' : '/my')
+      return
+    }
+    if (res.data.kind === 'staff') {
       setIsStaffEditor(true)
-      const { data: siteData } = await onlyActive(
-        supabase.from('sites').select('*').eq('subdomain', siteCode)
-      ).maybeSingle()
-      if (!siteData) { router.push('/platform'); return }
-      applySiteToEditor(siteData)
+      applySiteToEditor(res.data.site)
       setLoading(false)
       return
     }
-
-    const { data: cust } = await onlyActive(
-      supabase.from('customers').select('*').eq('auth_id', user.id)
-    ).maybeSingle()
-    if (!cust) { router.push('/login'); return }
-    setCustomer(cust)
-
-    const { data: siteData } = await onlyActive(
-      supabase.from('sites').select('*')
-        .eq('subdomain', siteCode)
-        .eq('customer_id', cust.customer_id)
-    ).maybeSingle()
-    if (!siteData) { router.push('/my'); return }
-
-    applySiteToEditor(siteData)
+    setCustomer(res.data.customer)
+    applySiteToEditor(res.data.site)
     setLoading(false)
   }
 

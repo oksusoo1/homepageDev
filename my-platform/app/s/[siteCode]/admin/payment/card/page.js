@@ -1,12 +1,8 @@
 'use client'
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
-import { onlyActive } from '@/lib/use-flag'
-import { assertPaymentSetupAllowed } from '@/lib/billing'
+import { loadPaymentSetupAction, registerCardMockAction } from '@/app/s/[siteCode]/admin/actions'
 import { paymentCardSuccessPath, siteAdminPath, sitePublicHostname } from '@/lib/site-paths'
-import { registerCardMockAction } from '@/app/s/[siteCode]/admin/actions'
 
 // TODO: 실제 서비스 시 아래 플래그를 false로 변경 후 토스 연동
 const MOCK_MODE = true
@@ -30,33 +26,15 @@ function CardRegisterForm() {
   useEffect(() => { init() }, [siteCode])
 
   async function init() {
-    const user = await requireAuthUser()
-    if (!user) { router.push('/login'); return }
-
-    const { data: cust } = await onlyActive(
-      supabase.from('customers').select('*').eq('auth_id', user.id)
-    ).single()
-    if (!cust) { router.push('/login'); return }
-
-    const { data: siteData } = await onlyActive(
-      supabase.from('sites').select('*').eq('subdomain', siteCode).eq('customer_id', cust.customer_id)
-    ).single()
-    if (!siteData) { router.push('/my'); return }
-
-    const gate = await assertPaymentSetupAllowed(supabase, siteData.site_id)
-    if (!gate.ok) {
-      alert(gate.error)
+    const res = await loadPaymentSetupAction(siteCode)
+    if (!res.ok) {
+      if (res.error === '로그인이 필요합니다.') { router.push('/login'); return }
+      alert(res.error)
       router.push(siteAdminPath(siteCode))
       return
     }
-
-    setSite(siteData)
-
-    const { data: sub } = await onlyActive(
-      supabase.from('subscriptions').select('*').eq('site_id', siteData.site_id)
-    ).maybeSingle()
-    setSubscription(sub)
-
+    setSite(res.data.site)
+    setSubscription(res.data.subscription)
     setLoading(false)
   }
 

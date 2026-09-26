@@ -2,14 +2,12 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
+import { loadOwnerInquiryPaymentAction } from '@/app/my/actions'
 import PaymentMethodChooser from '@/components/PaymentMethodChooser'
 import PaymentResultPanel from '@/components/PaymentResultPanel'
 import DevFeeSummary from '@/components/DevFeeSummary'
 import {
   getStageAmount,
-  loadInquiryForPayment,
   stageMeta,
 } from '@/lib/payment/one-time'
 import {
@@ -31,20 +29,13 @@ function MethodPageInner() {
   useEffect(() => { init() }, [inquiryId, stage])
 
   async function init() {
-    const user = await requireAuthUser()
-    if (!user) { router.push('/login'); return }
-
-    const { data: cust } = await supabase.from('customers').select('customer_id').eq('auth_id', user.id).single()
-    if (!cust) { router.push('/login'); return }
-
-    const result = await loadInquiryForPayment(supabase, inquiryId, cust.customer_id, stage)
+    const result = await loadOwnerInquiryPaymentAction(inquiryId, stage)
     if (!result.ok) {
       setBlocked(result.error)
       setLoading(false)
       return
     }
-
-    setInquiry(result.inquiry)
+    setInquiry(result.data.inquiry)
     setLoading(false)
   }
 

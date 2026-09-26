@@ -1,9 +1,7 @@
 'use client'
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
-import { onlyActive } from '@/lib/use-flag'
+import { loadCardSuccessSiteAction } from '@/app/s/[siteCode]/admin/actions'
 import { paymentCardPath, siteAdminPath, sitePublicPath, sitePublicHostname } from '@/lib/site-paths'
 
 function CardSuccessForm() {
@@ -23,13 +21,9 @@ function CardSuccessForm() {
 
   async function confirmBillingAuth() {
     try {
-      const user = await requireAuthUser()
-      if (!user) { router.push('/login'); return }
-
-      const { data: siteData } = await onlyActive(
-        supabase.from('sites').select('*').eq('subdomain', siteCode)
-      ).single()
-      setSite(siteData)
+      const loaded = await loadCardSuccessSiteAction(siteCode)
+      if (!loaded.ok) { router.push('/login'); return }
+      setSite(loaded.data.site)
 
       const isMock = searchParams.get('mock') === 'true'
       if (isMock) { setStatus('success'); return }

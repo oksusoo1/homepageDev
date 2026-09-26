@@ -2,14 +2,12 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
 import Link from 'next/link'
 import { siteAdminPath, sitePublicPath, sitePublicHostname } from '@/lib/site-paths'
 import { paymentMethodPath, oneTimePaymentMethodPath } from '@/lib/payment/paths'
 import {
   payableStage,
   pendingOtpOf,
-  loadDevFeePayments,
   isFinalPaymentPending,
   stageMeta,
 } from '@/lib/payment/one-time'
@@ -24,13 +22,13 @@ import {
   cancelManagedIntakeAction,
   createManagedInquiryAction,
   reactivateCustomerAction,
+  loadMyHomeAction,
 } from '@/app/my/actions'
 import { validateSubdomain, SUBDOMAIN_MIN, SUBDOMAIN_MAX } from '@/lib/subdomain-rules'
 import DevFeeSummary from '@/components/DevFeeSummary'
-import { onlyActive } from '@/lib/use-flag'
-import { loadCommonCodes, codeLabel } from '@/lib/common-codes'
+import { applyCommonCodesCache, codeLabel } from '@/lib/common-codes'
+import { loadCommonCodesAction } from '@/app/session/actions'
 import AuthUserBar from '@/components/AuthUserBar'
-import { countUnansweredBySite } from '@/lib/user-board'
 import { siteTemplateCategory, templateCategoryMeta } from '@/lib/template-category'
 
 export default function MySitesPage() {
@@ -99,60 +97,32 @@ export default function MySitesPage() {
 
   useEffect(() => { checkAuth() }, [])
 
-  async function checkAuth() {
-    const user = await requireAuthUser()
-    if (!user) { router.push('/login'); return }
-
-    try { await loadCommonCodes() } catch (_) { /* 라벨 fallback = code */ }
-
-    const { data: cust } = await onlyActive(
-      supabase.from('customers').select('*').eq('auth_id', user.id)
-    ).single()
-    if (!cust) { router.push('/login'); return }
-
-    if (cust.status === 'withdrawn') {
-      setCustomer(cust)
+  async function applyHome(data) {
+    setCustomer(data.customer)
+    if (data.withdrawn) {
       setIsWithdrawn(true)
-      setLoading(false)
+      setSites([])
+      setMyInquiries([])
+      setLinkedSiteMap({})
+      setPendingOtps([])
+      setWaitingBySite({})
       return
     }
+    setIsWithdrawn(false)
+    setSites(data.sites || [])
+    setWaitingBySite(data.waitingBySite || {})
+    setMyInquiries(data.inquiries || [])
+    setLinkedSiteMap(data.linkedSiteMap || {})
+    setPendingOtps(data.pendingOtps || [])
+  }
 
-    setCustomer(cust)
+  async function checkAuth() {
+    const codes = await loadCommonCodesAction()
+    if (codes.ok) applyCommonCodesCache(codes.data.codes)
 
-    const { data: siteList } = await onlyActive(
-      supabase
-        .from('sites')
-        .select('*, templates(name, category), subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
-        .eq('customer_id', cust.customer_id)
-    ).order('created_at', { ascending: false })
-    setSites(siteList || [])
-    setWaitingBySite(await countUnansweredBySite(supabase, (siteList || []).map(x => x.site_id)))
-
-    // 내 제작 문의 조회
-    const { data: inqList } = await onlyActive(
-      supabase.from('inquiries').select('*').eq('customer_id', cust.customer_id)
-    ).order('created_at', { ascending: false })
-    setMyInquiries(inqList || [])
-
-    // inquiry에 연결된 사이트 조회 (inquiry_id가 있는 사이트)
-    if (inqList?.length) {
-      const { data: linkedSites } = await onlyActive(
-        supabase
-          .from('sites')
-          .select('site_id, subdomain, status, inquiry_id')
-          .eq('customer_id', cust.customer_id)
-          .not('inquiry_id', 'is', null)
-      )
-      if (linkedSites?.length) {
-        const map = {}
-        linkedSites.forEach(s => { map[s.inquiry_id] = s })
-        setLinkedSiteMap(map)
-      }
-    }
-
-    // 잔금 입금확인대기 (계좌이체 신청 후 /my 표시용)
-    setPendingOtps(await loadDevFeePayments(supabase, cust.customer_id))
-
+    const res = await loadMyHomeAction()
+    if (!res.ok) { router.push('/login'); return }
+    applyHome(res.data)
     setLoading(false)
   }
 
@@ -203,33 +173,8 @@ export default function MySitesPage() {
       if (!res.ok) throw new Error(res.error)
 
       setInquiryDone(true)
-
-      const { data: inqList } = await onlyActive(
-        supabase.from('inquiries').select('*').eq('customer_id', customer.customer_id)
-      ).order('created_at', { ascending: false })
-      setMyInquiries(inqList || [])
-
-      const { data: siteList } = await onlyActive(
-        supabase
-          .from('sites')
-          .select('*, templates(name, category), subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
-          .eq('customer_id', customer.customer_id)
-      ).order('created_at', { ascending: false })
-      setSites(siteList || [])
-    setWaitingBySite(await countUnansweredBySite(supabase, (siteList || []).map(x => x.site_id)))
-
-      if (inqList?.length) {
-        const { data: linkedSites } = await onlyActive(
-          supabase
-            .from('sites')
-            .select('site_id, subdomain, status, inquiry_id')
-            .eq('customer_id', customer.customer_id)
-            .not('inquiry_id', 'is', null)
-        )
-        const map = {}
-        ;(linkedSites || []).forEach(s => { map[s.inquiry_id] = s })
-        setLinkedSiteMap(map)
-      }
+      const home = await loadMyHomeAction()
+      if (home.ok) applyHome(home.data)
     } catch (err) {
       setInquiryError('접수 오류: ' + (err.message || err))
       setInquiryErrorField('')
@@ -238,33 +183,8 @@ export default function MySitesPage() {
   }
 
   async function reloadMyLists() {
-    if (!customer?.customer_id) return
-    const { data: inqList } = await onlyActive(
-      supabase.from('inquiries').select('*').eq('customer_id', customer.customer_id)
-    ).order('created_at', { ascending: false })
-    setMyInquiries(inqList || [])
-
-    const { data: siteList } = await onlyActive(
-      supabase
-        .from('sites')
-        .select('*, templates(name, category), subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
-        .eq('customer_id', customer.customer_id)
-    ).order('created_at', { ascending: false })
-    setSites(siteList || [])
-    setWaitingBySite(await countUnansweredBySite(supabase, (siteList || []).map(x => x.site_id)))
-
-    const map = {}
-    if (inqList?.length) {
-      const { data: linkedSites } = await onlyActive(
-        supabase
-          .from('sites')
-          .select('site_id, subdomain, status, inquiry_id')
-          .eq('customer_id', customer.customer_id)
-          .not('inquiry_id', 'is', null)
-      )
-      ;(linkedSites || []).forEach(s => { map[s.inquiry_id] = s })
-    }
-    setLinkedSiteMap(map)
+    const home = await loadMyHomeAction()
+    if (home.ok) applyHome(home.data)
   }
 
   async function handleCancelManaged(inquiryId) {
@@ -288,14 +208,8 @@ export default function MySitesPage() {
     }
     setIsWithdrawn(false)
     setReactivating(false)
-    // 사이트 목록 다시 로드
-    const { data: siteList } = await supabase
-      .from('sites')
-      .select('*, templates(name, category), subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
-      .eq('customer_id', customer.customer_id)
-      .order('created_at', { ascending: false })
-    setSites(siteList || [])
-    setWaitingBySite(await countUnansweredBySite(supabase, (siteList || []).map(x => x.site_id)))
+    const home = await loadMyHomeAction()
+    if (home.ok) applyHome(home.data)
   }
 
   const STATUS_COLOR = {

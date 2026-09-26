@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { getPostLoginPath } from '@/lib/auth'
+import { getPostLoginPathAction } from '@/app/session/actions'
 import { completeCustomerProfileAction } from '@/app/my/actions'
 import Link from 'next/link'
 import { Suspense } from 'react'
@@ -40,7 +40,8 @@ function LoginForm() {
       const { data: { session } } = await supabase.auth.getSession()
       if (cancelled || !session) return
       const next = safeNextPath(searchParams.get('next'))
-      const path = await getPostLoginPath()
+      const res = await getPostLoginPathAction()
+      const path = res.ok ? res.data.path : null
       if (cancelled || !path) return
       // 고객이 사이트에서 온 경우 next 우선
       router.replace(path === '/my' && next ? next : path)
@@ -69,7 +70,8 @@ function LoginForm() {
     }
 
     const next = safeNextPath(searchParams.get('next'))
-    const path = await getPostLoginPath()
+    const res = await getPostLoginPathAction()
+    const path = res.ok ? res.data.path : null
     if (!path) {
       await supabase.auth.signOut()
       setError('등록된 고객·관리자 프로필이 없어요. 관리자에게 문의해 주세요.')

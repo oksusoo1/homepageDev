@@ -96,11 +96,7 @@ export async function createPublicPostAction(prev, formData) {
       phone: authorType === 'owner' ? null : (clip(input.phone, 50) || null),
       email: authorType === 'owner' ? null : (clip(input.email, 200) || null),
     }
-    let { error } = await db.from('user_posts').insert([row])
-    if (error && /author_auth_id/.test(error.message || '')) {
-      delete row.author_auth_id
-      ;({ error } = await db.from('user_posts').insert([row]))
-    }
+    const { error } = await db.from('user_posts').insert([row])
     if (error) return fail(error.message)
     const notice = isPrivate && !user ? '?notice=secret' : ''
     redirect(boardPath(siteCode, board.board_key) + notice)

@@ -18,6 +18,7 @@ const TITLES = {
   S14: '유료 구독 중 탈퇴 → 배치 확정',
   S15: '비밀글 열람(비로그인·사장님·작성자)',
   S16: '문의 연락처는 방문자 응답에 없음',
+  S17: 'DB 직접 접근 차단(anon 키)',
 }
 
 function scenarioIdFromTitle(title) {
@@ -58,6 +59,7 @@ function statusLabel(s) {
   if (s === 'known_issue') return '알려진 이슈'
   if (s === 'failed') return '실패'
   if (s === 'skipped') return '스킵'
+  if (s === 'lockdown_waiting') return '잠금 대기'
   return s || '미실행'
 }
 
@@ -107,6 +109,7 @@ class MdReporter {
       const extra = meta.scenarios[id] || {}
       let status = rec.status || extra.status || 'skipped'
       if (extra.knownIssue && status === 'passed') status = 'known_issue'
+      if (extra.lockdownWaiting && status === 'passed') status = 'lockdown_waiting'
       lines.push(`| ${id} | ${scenarioTitle(id, rec)} | ${statusLabel(status)} |`)
     }
 
@@ -116,6 +119,7 @@ class MdReporter {
       const extra = meta.scenarios[id] || {}
       let status = rec.status || extra.status || 'skipped'
       if (extra.knownIssue && (status === 'passed' || !rec.status)) status = 'known_issue'
+      if (extra.lockdownWaiting && (status === 'passed' || !rec.status)) status = 'lockdown_waiting'
       lines.push(`## ${id}. ${scenarioTitle(id, rec)}`)
       lines.push('')
       lines.push(`- 결과: **${statusLabel(status)}**`)

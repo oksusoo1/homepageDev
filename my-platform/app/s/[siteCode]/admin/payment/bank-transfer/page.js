@@ -2,13 +2,9 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
-import { onlyActive } from '@/lib/use-flag'
-import { assertPaymentSetupAllowed } from '@/lib/billing'
+import { loadPaymentSetupAction, registerBankTransferAction } from '@/app/s/[siteCode]/admin/actions'
 import { getBankAccountText } from '@/lib/billing'
 import { paymentMethodPath, siteAdminPath } from '@/lib/site-paths'
-import { registerBankTransferAction } from '@/app/s/[siteCode]/admin/actions'
 
 function BankTransferForm() {
   const router = useRouter()
@@ -29,34 +25,15 @@ function BankTransferForm() {
   useEffect(() => { init() }, [siteCode])
 
   async function init() {
-    const user = await requireAuthUser()
-    if (!user) { router.push('/login'); return }
-
-    const { data: cust } = await onlyActive(
-      supabase.from('customers').select('*').eq('auth_id', user.id)
-    ).single()
-    if (!cust) { router.push('/login'); return }
-    setDepositorName(cust.name || '')
-
-    const { data: siteData } = await onlyActive(
-      supabase.from('sites').select('*').eq('subdomain', siteCode).eq('customer_id', cust.customer_id)
-    ).single()
-    if (!siteData) { router.push('/my'); return }
-
-    const gate = await assertPaymentSetupAllowed(supabase, siteData.site_id)
-    if (!gate.ok) {
-      alert(gate.error)
+    const res = await loadPaymentSetupAction(siteCode)
+    if (!res.ok) {
+      if (res.error === '로그인이 필요합니다.') { router.push('/login'); return }
+      alert(res.error)
       router.push(siteAdminPath(siteCode))
       return
     }
-
-    setSite(siteData)
-
-    const { data: sub } = await onlyActive(
-      supabase.from('subscriptions').select('depositor_name').eq('site_id', siteData.site_id)
-    ).maybeSingle()
-    if (sub?.depositor_name) setDepositorName(sub.depositor_name)
-
+    setSite(res.data.site)
+    setDepositorName(res.data.subscription?.depositor_name || res.data.customerName || '')
     setLoading(false)
   }
 

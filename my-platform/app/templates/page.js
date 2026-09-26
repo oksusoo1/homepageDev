@@ -1,10 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
-import { onlyActive } from '@/lib/use-flag'
-import { requireAuthUser } from '@/lib/auth'
+import { loadTemplateListAction } from '@/app/session/actions'
 import { templateCategoryMeta } from '@/lib/template-category'
 
 // 카테고리별 썸네일 색상 (thumbnail_url 없을 때)
@@ -29,15 +27,10 @@ export default function TemplatesPage() {
   }, [])
 
   async function checkAuthAndFetch() {
-    const user = await requireAuthUser()
-    if (!user) { router.push('/login'); return }
+    const res = await loadTemplateListAction()
+    if (!res.ok) { router.push('/login'); return }
     setAuthChecked(true)
-
-    // 템플릿 목록 조회
-    const { data } = await onlyActive(
-      supabase.from('templates').select('*')
-    ).order('sort_order')
-    setTemplates(data || [])
+    setTemplates(res.data.templates || [])
     setLoading(false)
   }
 

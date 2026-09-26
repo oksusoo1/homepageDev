@@ -10,6 +10,7 @@ import { submitStageBankTransfer, completeStageCardMock } from '@/lib/payment/on
 import { assertSubdomainAvailable, resolveTemplateId, makeSiteCode } from '@/lib/site-create'
 import { pickSiteOwnerPatch } from '@/lib/site-edit'
 import { isPaidSubscription } from '@/lib/subscription-life'
+import { loadMyHome, loadOwnerInquiryPayment } from '@/lib/server/reads'
 
 function ok(data) {
   return { ok: true, data }
@@ -274,4 +275,12 @@ export async function withdrawCustomerAction(siteCode) {
     .update({ status: 'withdrawn' })
     .eq('customer_id', customer.customer_id)
   return ok({ pending: false })
+}
+
+export async function loadMyHomeAction() {
+  return loadMyHome()
+}
+
+export async function loadOwnerInquiryPaymentAction(inquiryId, stage) {
+  return loadOwnerInquiryPayment(inquiryId, stage === 'down' ? 'down' : 'final')
 }

@@ -4,8 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
-import { onlyActive } from '@/lib/use-flag'
+import { loadAuthBarAction } from '@/app/session/actions'
 import { siteAdminPath } from '@/lib/site-paths'
 
 /**
@@ -31,53 +30,14 @@ export default function AuthUserBar({ variant = 'dark', showLogout = true, class
     }
     let cancelled = false
     ;(async () => {
-      const user = await requireAuthUser()
+      const res = await loadAuthBarAction(siteCode)
       if (cancelled) return
-      if (!user) {
+      if (!res.ok) {
         setAuth({ status: 'guest', kind: null, name: '', email: '' })
         return
       }
-
-      const { data: staff } = await onlyActive(
-        supabase
-          .from('staff')
-          .select('name, email, role')
-          .eq('auth_id', user.id)
-          .eq('status', 'active')
-      ).maybeSingle()
-      if (cancelled) return
-      if (staff?.role === 'platform_admin') {
-        setAuth({
-          status: 'ok',
-          kind: 'staff',
-          name: staff.name || '본사',
-          email: staff.email || user.email || '',
-        })
-        return
-      }
-
-      const { data: customer } = await onlyActive(
-        supabase.from('customers').select('customer_id, name, email').eq('auth_id', user.id)
-      ).maybeSingle()
-      if (cancelled) return
-      if (customer) {
-        if (siteCode) {
-          const { data: site } = await onlyActive(
-            supabase.from('sites').select('customer_id').eq('subdomain', siteCode)
-          ).maybeSingle()
-          if (cancelled) return
-          setIsOwner(site?.customer_id === customer.customer_id)
-        }
-        setAuth({
-          status: 'ok',
-          kind: 'customer',
-          name: customer.name || '회원',
-          email: customer.email || user.email || '',
-        })
-        return
-      }
-
-      setAuth({ status: 'guest', kind: null, name: '', email: '' })
+      setAuth(res.data.preset)
+      setIsOwner(!!res.data.isSiteOwner)
     })()
     return () => { cancelled = true }
   }, [siteCode, preset?.kind, preset?.name, preset?.email, isSiteOwner])

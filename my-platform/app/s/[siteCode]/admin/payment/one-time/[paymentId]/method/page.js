@@ -2,12 +2,10 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
+import { loadOwnerQuoteAction } from '@/app/s/[siteCode]/admin/actions'
 import PaymentMethodChooser from '@/components/PaymentMethodChooser'
 import PaymentResultPanel from '@/components/PaymentResultPanel'
 import QuoteSummary from '@/components/QuoteSummary'
-import { loadQuote } from '@/lib/payment/extra'
 import { siteAdminPath } from '@/lib/site-paths'
 
 /** 추가 작업 견적 — 결제 수단 선택 */
@@ -21,14 +19,9 @@ function Inner() {
   useEffect(() => { init() }, [paymentId])
 
   async function init() {
-    const user = await requireAuthUser()
-    if (!user) { router.push('/login'); return }
-    const { data: cust } = await supabase.from('customers').select('customer_id').eq('auth_id', user.id).single()
-    if (!cust) { router.push('/login'); return }
-
-    const res = await loadQuote(supabase, paymentId, cust.customer_id)
+    const res = await loadOwnerQuoteAction(siteCode, paymentId)
     if (!res.ok) { setBlocked(res.error); setLoading(false); return }
-    setQuote(res.quote)
+    setQuote(res.data.quote)
     setLoading(false)
   }
 

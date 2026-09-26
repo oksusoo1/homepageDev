@@ -1,43 +1,7 @@
-import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
-import { onlyActive } from '@/lib/use-flag'
-
 /**
- * 게시판 글쓰기 권한
- * - staff(본사) → 읽기만, 글쓰기 불가 (customers 겸직이어도 불가)
- * - 해당 사이트 소유 customers 만 글쓰기 가능
- *
- * @returns {{ ok: true, customer: { customer_id, name } } | { ok: false, reason: 'login'|'staff'|'other_customer' }}
+ * 글쓰기 권한 판단은 서버 write/page.js + createPublicPostAction.
+ * 브라우저에서 staff/customers를 조회하지 않는다.
  */
-export async function checkSiteOwnerWriteAccess(siteCustomerId) {
-  const user = await requireAuthUser()
-  if (!user) return { ok: false, reason: 'login' }
-
-  // staff 면 글쓰기 차단 (공개 사이트는 읽기만)
-  const { data: staff } = await onlyActive(
-    supabase
-      .from('staff')
-      .select('staff_id')
-      .eq('auth_id', user.id)
-      .eq('status', 'active')
-  ).maybeSingle()
-
-  if (staff) return { ok: false, reason: 'staff' }
-
-  const { data: customer } = await onlyActive(
-    supabase
-      .from('customers')
-      .select('customer_id, name')
-      .eq('auth_id', user.id)
-  ).maybeSingle()
-
-  if (customer && customer.customer_id === siteCustomerId) {
-    return { ok: true, customer }
-  }
-
-  if (customer) return { ok: false, reason: 'other_customer' }
-  return { ok: false, reason: 'login' }
-}
 
 export const WRITE_DENY_COPY = {
   login: {

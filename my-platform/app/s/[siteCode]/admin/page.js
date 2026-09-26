@@ -3,8 +3,6 @@ import { useState, useEffect } from 'react'
 import { use } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { requireAuthUser } from '@/lib/auth'
-import { onlyActive } from '@/lib/use-flag'
 import { paymentMethodUrl, getBankAccountText } from '@/lib/billing'
 import {
   deploySiteAction,
@@ -17,6 +15,9 @@ import {
   addCustomerTicketMessageAction,
   markCustomerTicketsReadAction,
   rejectQuoteAction,
+  loadAdminHomeAction,
+  loadAdminTicketsAction,
+  loadAdminBoardsAction,
 } from '@/app/s/[siteCode]/admin/actions'
 import { withdrawCustomerAction } from '@/app/my/actions'
 import { getSubscriptionUiFlags } from '@/lib/subscription-life'
@@ -30,17 +31,16 @@ import {
   sitePublicPath,
   sitePublicHostname,
 } from '@/lib/site-paths'
-import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
+import { applyCommonCodesCache, codeLabel, codeColor } from '@/lib/common-codes'
+import { loadCommonCodesAction } from '@/app/session/actions'
 import { customerNextLine } from '@/lib/flow-step'
-import {
-  loadCustomerTicketMessages, canCustomerEditTicket, unreadFrom,
-} from '@/lib/support-ticket'
+import { canCustomerEditTicket, unreadFrom } from '@/lib/support-ticket'
 import SiteAdminShell, { parentKeyOf } from '@/components/SiteAdminShell'
 import DeployDoneModal from '@/components/DeployDoneModal'
 import UserPostsManager from '@/components/UserPostsManager'
 import UserBoardsManager from '@/components/UserBoardsManager'
-import { loadBoards, loadPostsWithComments, unansweredPosts } from '@/lib/user-board'
-import { loadTicketQuotes, quoteLabel } from '@/lib/payment/extra'
+import { unansweredPosts } from '@/lib/user-board'
+import { quoteLabel } from '@/lib/payment/extra'
 import { siteTemplateCategory, templateCategoryLabel } from '@/lib/template-category'
 
 const CATEGORIES = [
@@ -100,81 +100,45 @@ export default function CustomerPortal({ params }) {
     const ids = tickets.filter(t => unreadFrom(ticketMsgs[t.ticket_id], 'staff').length).map(t => t.ticket_id)
     if (!ids.length) return
     markCustomerTicketsReadAction(siteCode, ids).then(res => {
-      if (res.ok && res.data?.changed) fetchTickets(site.site_id)
+      if (res.ok && res.data?.changed) fetchTickets()
     })
   }, [menuKey, tickets, ticketMsgs, site])
 
   async function checkAuthAndFetch() {
-    const user = await requireAuthUser()
-    if (!user) { router.push('/login'); return }
+    const codes = await loadCommonCodesAction()
+    if (codes.ok) applyCommonCodesCache(codes.data.codes)
 
-    try { await loadCommonCodes() } catch (_) { /* 라벨 fallback = code */ }
-
-    const { data: cust } = await onlyActive(
-      supabase.from('customers').select('*').eq('auth_id', user.id)
-    ).single()
-    if (!cust) { router.push('/login'); return }
-    if (cust.status === 'withdrawn') {
-      router.push('/my')  // /my 에서 재활성화 UI 처리
+    const res = await loadAdminHomeAction(siteCode)
+    if (!res.ok) {
+      if (res.error === '로그인이 필요합니다.') router.push('/login')
+      else router.push('/my')
       return
     }
-    setCustomer(cust)
-
-    const { data: siteData } = await onlyActive(
-      supabase.from('sites').select('*, templates(name, category)')
-        .eq('subdomain', siteCode)
-        .eq('customer_id', cust.customer_id)
-    ).single()
-    if (!siteData) { router.push('/my'); return }
-
-    setSite(siteData)
+    const d = res.data
+    setCustomer(d.customer)
+    setSite(d.site)
     setSiteForm({
-      name: siteData.name || '', description: siteData.description || '',
-      address: siteData.address || '', phone: siteData.phone || '', email: siteData.email || '',
+      name: d.site.name || '', description: d.site.description || '',
+      address: d.site.address || '', phone: d.site.phone || '', email: d.site.email || '',
     })
-    if (siteData.inquiry_id) {
-      const { data: inq } = await onlyActive(
-        supabase.from('inquiries').select('*').eq('inquiry_id', siteData.inquiry_id)
-      ).maybeSingle()
-      setInquiry(inq)
-    } else {
-      setInquiry(null)
-    }
-    fetchTickets(siteData.site_id)
-    fetchBoardData(siteData.site_id)
-
-    const { data: sub } = await onlyActive(
-      supabase.from('subscriptions').select('*').eq('site_id', siteData.site_id)
-    ).maybeSingle()
-    setSubscription(sub)
-
-    const { data: pm } = await onlyActive(
-      supabase.from('customer_payment_methods').select('*')
-        .eq('customer_id', cust.customer_id)
-    ).maybeSingle()
-    setPaymentMethod(pm)
-
-    if (sub) {
-      const { data: bh } = await onlyActive(
-        supabase.from('billing_history').select('*')
-          .eq('subscription_id', sub.subscription_id)
-          .order('period', { ascending: false })
-      )
-      setBillingHistory(bh || [])
-    }
-
+    setInquiry(d.inquiry)
+    setSubscription(d.subscription)
+    setPaymentMethod(d.paymentMethod)
+    setBillingHistory(d.billingHistory || [])
+    setTickets(d.tickets || [])
+    setTicketMsgs(d.ticketMsgs || {})
+    setTicketQuotes(d.ticketQuotes || {})
+    setBoards(d.boards || [])
+    setPosts(d.posts || [])
     setLoading(false)
   }
 
-  async function fetchTickets(siteId) {
-    const { data } = await onlyActive(
-      supabase.from('support_tickets').select('*')
-        .eq('site_id', siteId).order('created_at', { ascending: false })
-    )
-    setTickets(data || [])
-    const ids = (data || []).map(t => t.ticket_id)
-    setTicketMsgs(await loadCustomerTicketMessages(supabase, ids))
-    setTicketQuotes(await loadTicketQuotes(supabase, ids))
+  async function fetchTickets() {
+    const res = await loadAdminTicketsAction(siteCode)
+    if (!res.ok) return
+    setTickets(res.data.tickets || [])
+    setTicketMsgs(res.data.ticketMsgs || {})
+    setTicketQuotes(res.data.ticketQuotes || {})
   }
 
   /** 사장님 → 본사 추가 메시지 */
@@ -184,7 +148,7 @@ export default function CustomerPortal({ params }) {
     const res = await addCustomerTicketMessageAction(siteCode, ticketId, content)
     if (!res.ok) { setTicketMsg('❌ ' + res.error); return }
     setTicketReply(prev => ({ ...prev, [ticketId]: '' }))
-    await fetchTickets(site.site_id)
+    await fetchTickets()
   }
 
   /** 견적 거절 — 결제 전만 */
@@ -192,7 +156,7 @@ export default function CustomerPortal({ params }) {
     if (!window.confirm('이 견적을 거절할까요?\n본사에 거절 의사가 전달됩니다.')) return
     const res = await rejectQuoteAction(siteCode, ticketId, paymentId)
     if (!res.ok) { setTicketMsg('❌ ' + res.error); return }
-    await fetchTickets(site.site_id)
+    await fetchTickets()
   }
 
   /** 접수 상태에서만 수정 */
@@ -204,7 +168,7 @@ export default function CustomerPortal({ params }) {
     })
     if (!res.ok) { setTicketMsg('❌ ' + res.error); return }
     setEditTicketId(null)
-    await fetchTickets(site.site_id)
+    await fetchTickets()
   }
 
   /** 접수 상태에서만 취소 (soft delete) */
@@ -212,13 +176,14 @@ export default function CustomerPortal({ params }) {
     if (!window.confirm('이 요청을 취소할까요?\n본사가 처리를 시작하기 전에만 취소할 수 있습니다.')) return
     const res = await cancelSupportTicketAction(siteCode, ticketId)
     if (!res.ok) { setTicketMsg('❌ ' + res.error); return }
-    await fetchTickets(site.site_id)
+    await fetchTickets()
   }
 
-  async function fetchBoardData(siteId) {
-    const [b, p] = await Promise.all([loadBoards(supabase, siteId), loadPostsWithComments(supabase, siteId)])
-    setBoards(b)
-    setPosts(p)
+  async function fetchBoardData() {
+    const res = await loadAdminBoardsAction(siteCode)
+    if (!res.ok) return
+    setBoards(res.data.boards || [])
+    setPosts(res.data.posts || [])
   }
 
   async function saveSiteInfo(e) {
@@ -236,7 +201,7 @@ export default function CustomerPortal({ params }) {
       setTicketMsg('✅ 접수되었습니다! 3영업일 이내 처리해드릴게요.')
       setTicketForm({ title: '', content: '', category: 'etc' })
       setShowTicketForm(false)
-      fetchTickets(site.site_id)
+      fetchTickets()
       setTimeout(() => setTicketMsg(''), 3000)
     }
   }
@@ -664,12 +629,12 @@ export default function CustomerPortal({ params }) {
             boards={boards}
             posts={posts}
             focusPostId={focusPostId}
-            onReload={() => fetchBoardData(site.site_id)}
+            onReload={() => fetchBoardData()}
           />
         )}
 
         {menuKey === 'content.boards' && (
-          <UserBoardsManager site={site} boards={boards} posts={posts} onReload={() => fetchBoardData(site.site_id)} />
+          <UserBoardsManager site={site} boards={boards} posts={posts} onReload={() => fetchBoardData()} />
         )}
 
         {menuKey === 'support.requests' && (
