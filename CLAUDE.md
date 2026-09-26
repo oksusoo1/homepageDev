@@ -114,6 +114,8 @@
 ### DB 스키마 변경
 - 마이그레이션은 `my-platform/docs/db/sql/migrations/` 파일로만 작성한다.
 - **실행은 사용자가 한다.** agent는 ALTER/CREATE/DROP을 직접 실행하지 않는다.
+- 새 테이블을 만드는 마이그레이션은 **같은 파일에서** `ENABLE ROW LEVEL SECURITY` 한다. 정책은 만들지 않는다 (030 이후 anon/authenticated 차단 유지).
+- 마이그레이션 작성 후 `docs/db/sql/check/rls_status.sql`로 RLS·권한을 확인한다.
 
 ### 결제·청구 (목업)
 - 카드 등록: `app/s/[siteCode]/admin/payment/card/page.js` `MOCK_MODE = true` (실서비스 전환 시 false + 토스 키)
@@ -125,6 +127,6 @@
 ### 다음 작업 후보 (미구현)
 - 청구 배치 자동 실행(cron) 연결
 - 토스페이먼츠 실결제 연동
-- 보안 ⑤ RLS: `030_rls_lockdown.sql` 사용자 실행 후 E2E S17 재확인
+- 보안 ⑤ RLS: 030 실행·E2E S17 통과 (2026-09-27_0139)
 - 템플릿 고도화 (상위/left 메뉴 노코드 구성, 카드형 콘텐츠 등) · GrapesJS 에디터
 - 판매자(에이전시) 구조

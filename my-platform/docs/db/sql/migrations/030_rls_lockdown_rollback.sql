@@ -54,3 +54,9 @@ CREATE POLICY "user_posts_all"        ON user_posts               FOR ALL USING 
 CREATE POLICY "user_comments_all"     ON user_comments            FOR ALL USING (true);
 CREATE POLICY "notification_logs_all" ON notification_logs        FOR ALL USING (true);
 CREATE POLICY "common_codes_all"      ON common_codes             FOR ALL USING (true);
+
+-- 030에서 회수한 anon/authenticated 권한 복원 (service_role 은 그대로)
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated;
