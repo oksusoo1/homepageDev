@@ -23,7 +23,6 @@ import { canCancelManagedIntake } from '@/lib/managed-flow'
 import {
   cancelManagedIntakeAction,
   createManagedInquiryAction,
-  finalizeWithdrawDueAction,
   reactivateCustomerAction,
 } from '@/app/my/actions'
 import { validateSubdomain, SUBDOMAIN_MIN, SUBDOMAIN_MAX } from '@/lib/subdomain-rules'
@@ -116,16 +115,6 @@ export default function MySitesPage() {
       setIsWithdrawn(true)
       setLoading(false)
       return
-    }
-
-    if (cust.withdraw_at && new Date(cust.withdraw_at) <= new Date()) {
-      const done = await finalizeWithdrawDueAction()
-      if (done.ok && done.data?.finalized) {
-        setCustomer({ ...cust, status: 'withdrawn' })
-        setIsWithdrawn(true)
-        setLoading(false)
-        return
-      }
     }
 
     setCustomer(cust)
@@ -651,6 +640,14 @@ export default function MySitesPage() {
 
       {/* 콘텐츠 */}
       <div style={{ maxWidth: 860, margin: '0 auto', padding: '40px 20px' }}>
+        {customer?.withdraw_at && (
+          <div style={{
+            background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12,
+            padding: '14px 16px', marginBottom: 20, fontSize: 13, color: '#92400e', lineHeight: 1.6,
+          }}>
+            탈퇴가 예약되어 있습니다. {new Date(customer.withdraw_at).toLocaleDateString('ko-KR')}까지 이용할 수 있고, 그날 이후 계정이 정리됩니다.
+          </div>
+        )}
 
         {/* 타이틀 + 새 사이트 버튼 */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 }}>

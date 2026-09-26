@@ -14,7 +14,7 @@ COMMENT ON COLUMN customers.created_at IS '생성 시각';
 COMMENT ON COLUMN customers.updated_at IS '수정 시각';
 COMMENT ON COLUMN customers.auth_id IS 'Supabase Auth 사용자 ID → auth.users(id)';
 COMMENT ON COLUMN customers.use_flag IS '1=사용 · 0=삭제(소프트딜리트). 조회 기본 1';
-COMMENT ON COLUMN customers.withdraw_at IS '탈퇴 예약일. 미래=잔여기간 대기(로그인 가능), 과거=/my 진입 시 withdrawn 처리';
+COMMENT ON COLUMN customers.withdraw_at IS '탈퇴 예약일. 미래=잔여기간 대기(로그인 가능), 과거=청구 배치에서 withdrawn 처리';
 
 -- ---------- staff ----------
 COMMENT ON TABLE staff IS '본사 직원. /platform 접근 (role=platform_admin)';

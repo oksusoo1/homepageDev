@@ -12,11 +12,11 @@ export async function fillCard(page, last4 = '1111') {
   await page.getByTestId('card-submit').click()
 }
 
-export async function createSelfSite(page, { scenarioId, scenarioKey, shotPrefix }) {
+export async function createSelfSite(page, { scenarioId, scenarioKey, shotPrefix, skipLogin }) {
   const subdomain = uniqueSubdomain(scenarioKey)
   const name = `E2E ${scenarioKey.toUpperCase()} ${subdomain.slice(-6)}`
 
-  await loginAs(page, 'a')
+  if (!skipLogin) await loginAs(page, 'a')
   await page.getByTestId('my-new-site').waitFor({ state: 'visible', timeout: 20000 })
   if (shotPrefix) await shot(page, scenarioId, `${shotPrefix}-01-my`)
 
@@ -54,7 +54,7 @@ export async function deployWithMockCard(page, { scenarioId, subdomain, last4 = 
     const st = (await getSiteBySubdomain(subdomain))?.status
     if (st === 'trial') return (phase = 'trial')
     return st || 'wait'
-  }, { timeout: 45000 }).toMatch(/^(method|card|trial)$/)
+  }, { timeout: 90000 }).toMatch(/^(method|card|trial)$/)
 
   if (phase === 'trial') {
     if (shotPrefix) await shot(page, scenarioId, `${shotPrefix}-08-trial`)

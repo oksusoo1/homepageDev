@@ -217,29 +217,6 @@ export async function completeCustomerProfileAction({ name, phone } = {}) {
   return ok({ customerId: data.customer_id, existed: false })
 }
 
-/** /my 로드 시 withdraw_at 경과 → 정지·탈퇴 (현행 유지) */
-export async function finalizeWithdrawDueAction() {
-  const gate = await requireCustomer()
-  if (!gate.ok) return fail(gate.error)
-
-  const { db, customer } = gate
-  if (!customer.withdraw_at || new Date(customer.withdraw_at) > new Date()) {
-    return ok({ finalized: false })
-  }
-
-  const { data: sites } = await onlyActive(
-    db.from('sites').select('site_id').eq('customer_id', customer.customer_id)
-  )
-  const siteIds = (sites || []).map(s => s.site_id)
-  if (siteIds.length) {
-    await db.from('sites').update({ status: 'suspended' }).in('site_id', siteIds).eq('use_flag', 1)
-  }
-  await db.from('customers')
-    .update({ status: 'withdrawn', withdraw_at: null })
-    .eq('customer_id', customer.customer_id)
-  return ok({ finalized: true })
-}
-
 /** 탈퇴 계정 재활성화 — customers.status만 (현행) */
 export async function reactivateCustomerAction() {
   const gate = await requireCustomer()

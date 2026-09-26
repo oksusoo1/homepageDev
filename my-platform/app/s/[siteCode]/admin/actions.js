@@ -52,7 +52,7 @@ async function loadBillingContext(db, site) {
 
 function canDeployStatus(site, inquiry) {
   if (site.build_type === 'self') {
-    return ['building', 'pay_method', 'preview'].includes(site.status)
+    return ['building', 'pay_method'].includes(site.status)
   }
   return site.status === 'pay_method' && !!inquiry?.final_paid_at
 }

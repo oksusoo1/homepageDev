@@ -15,6 +15,27 @@ const TITLES = {
   S11: 'B가 A 사이트 에디터·게시판 관리 접근',
   S12: '방문자가 공개 문의 게시판에 글 작성',
   S13: '신규 가입 customers 행',
+  S14: '유료 구독 중 탈퇴 → 배치 확정',
+}
+
+function scenarioIdFromTitle(title) {
+  const m = String(title || '').match(/\b(S\d+)\b/)
+  return m ? m[1] : title
+}
+
+function sortScenarioIds(ids) {
+  return [...ids].sort((a, b) => {
+    const na = String(a).match(/^S(\d+)$/)
+    const nb = String(b).match(/^S(\d+)$/)
+    if (na && nb) return Number(na[1]) - Number(nb[1])
+    if (na) return -1
+    if (nb) return 1
+    return String(a).localeCompare(String(b), 'ko')
+  })
+}
+
+function scenarioTitle(id, rec) {
+  return TITLES[id] || rec?.title || id
 }
 
 function loadRun() {
@@ -45,8 +66,7 @@ class MdReporter {
 
   onTestEnd(test, result) {
     const title = test.title
-    const idMatch = title.match(/\b(S1[0-3]|S[1-9])\b/)
-    const id = idMatch ? idMatch[1] : title
+    const id = scenarioIdFromTitle(title)
     this.results[id] = {
       title,
       status: result.status === 'passed' ? 'passed' : result.status,
@@ -79,13 +99,13 @@ class MdReporter {
     lines.push('| # | 시나리오 | 결과 |')
     lines.push('|---|---|---|')
 
-    const IDS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13']
+    const IDS = sortScenarioIds(Object.keys(this.results))
     for (const id of IDS) {
       const rec = this.results[id] || {}
       const extra = meta.scenarios[id] || {}
       let status = rec.status || extra.status || 'skipped'
       if (extra.knownIssue && status === 'passed') status = 'known_issue'
-      lines.push(`| ${id} | ${TITLES[id]} | ${statusLabel(status)} |`)
+      lines.push(`| ${id} | ${scenarioTitle(id, rec)} | ${statusLabel(status)} |`)
     }
 
     lines.push('')
@@ -94,7 +114,7 @@ class MdReporter {
       const extra = meta.scenarios[id] || {}
       let status = rec.status || extra.status || 'skipped'
       if (extra.knownIssue && (status === 'passed' || !rec.status)) status = 'known_issue'
-      lines.push(`## ${id}. ${TITLES[id]}`)
+      lines.push(`## ${id}. ${scenarioTitle(id, rec)}`)
       lines.push('')
       lines.push(`- 결과: **${statusLabel(status)}**`)
       if (extra.site) lines.push(`- 사이트: \`${extra.site}\``)

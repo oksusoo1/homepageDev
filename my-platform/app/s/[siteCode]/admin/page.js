@@ -467,6 +467,7 @@ export default function CustomerPortal({ params }) {
               아래 입력란에 <b>탈퇴</b>를 입력하면 탈퇴가 진행됩니다.
             </div>
             <input
+              data-testid="admin-withdraw-input"
               value={withdrawInput}
               onChange={e => setWithdrawInput(e.target.value)}
               placeholder="탈퇴"
@@ -477,7 +478,7 @@ export default function CustomerPortal({ params }) {
                 style={{ flex: 1, padding: '11px 0', background: 'white', color: '#6b7280', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 14, cursor: 'pointer' }}>
                 취소
               </button>
-              <button onClick={handleWithdraw} disabled={withdrawInput !== '탈퇴' || withdrawing}
+              <button data-testid="admin-withdraw-confirm" onClick={handleWithdraw} disabled={withdrawInput !== '탈퇴' || withdrawing}
                 style={{ flex: 1, padding: '11px 0', background: withdrawInput === '탈퇴' ? '#ef4444' : '#f3f4f6', color: withdrawInput === '탈퇴' ? 'white' : '#9ca3af', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: withdrawInput === '탈퇴' ? 'pointer' : 'default' }}>
                 {withdrawing ? '처리 중...' : '탈퇴하기'}
               </button>
@@ -1022,7 +1023,7 @@ export default function CustomerPortal({ params }) {
               <p style={{ margin: '0 0 16px', fontSize: 13, color: '#9ca3af', lineHeight: 1.6 }}>
                 탈퇴 시 모든 사이트가 즉시 비활성화됩니다. 고객 데이터는 보관됩니다.
               </p>
-              <button onClick={() => setShowWithdrawModal(true)}
+              <button data-testid="admin-withdraw-open" onClick={() => setShowWithdrawModal(true)}
                 style={{ fontSize: 13, color: '#ef4444', background: 'none', border: '1px solid #fecaca', borderRadius: 7, padding: '7px 16px', cursor: 'pointer' }}>
                 회원 탈퇴
               </button>

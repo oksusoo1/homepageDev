@@ -7,18 +7,11 @@
  * 계좌: D-5~D-day 매일 리마인드 로그 / 미납 +2일 초과 시 sites→suspended
  * 청구 대상: sites.status trial|subscribed + cancelled_at NULL
  * 해지 예정일 도래(cancels_at ≤ asOf, cancelled_at NULL) → cancelled_at + sites.suspended
+ * 탈퇴 예약일 도래(withdraw_at ≤ asOf) → 사이트 suspended · customers.withdrawn
  */
 
-import { createClient } from '@supabase/supabase-js'
 import { onlyActive } from '@/lib/use-flag'
 import { isBillableSubscription } from '@/lib/subscription-life'
-
-function defaultClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  )
-}
 
 function parseDate(ymd) {
   const [y, m, d] = ymd.split('-').map(Number)
@@ -92,17 +85,20 @@ function withSiteIds(query, siteIds) {
 }
 
 /**
- * @param {{ asOfDate?: string, siteIds?: string[] }} opts asOfDate 기본=실제 오늘. siteIds 있으면 그 사이트만
+ * @param {{ asOfDate?: string, client: object, siteIds?: string[] }} opts
+ *   asOfDate 기본=실제 오늘. client 필수(admin). siteIds 있으면 그 사이트만
  * @returns {Promise<{ asOfDate: string, actions: object[] }>}
  */
 export async function runBillingBatch({ asOfDate, client, siteIds } = {}) {
-  const db = client || defaultClient()
+  if (!client) throw new Error('runBillingBatch: client(admin) 가 필요합니다.')
+  const db = client
   const asOf = asOfDate || formatDate(new Date())
   const onlySites = normalizeSiteIds(siteIds)
   const actions = []
 
   // 1) 해지 예정일 도래부터 — 이후 청구 조회가 최신 cancelled_at/status를 보게
   await applyDueCancellations(db, asOf, actions, onlySites)
+  await applyDueWithdrawals(db, asOf, actions, onlySites)
 
   const { data: subs, error } = await onlyActive(
     withSiteIds(
@@ -180,6 +176,58 @@ async function applyDueCancellations(db, asOf, actions, siteIds = null) {
       subscription_id: sub.subscription_id,
       site: site?.subdomain,
       cancels_at: due,
+    })
+  }
+}
+
+/**
+ * withdraw_at 도래 → 해당 고객의 사이트 정지 + customers.withdrawn
+ * siteIds 있으면 그 사이트의 고객만 (처리 값은 고객 단위, 기존 /my 확정과 동일)
+ */
+async function applyDueWithdrawals(db, asOf, actions, siteIds = null) {
+  let customerIds = null
+  if (siteIds) {
+    const { data: sites, error } = await onlyActive(
+      db.from('sites').select('customer_id').in('site_id', siteIds)
+    )
+    if (error) throw error
+    customerIds = [...new Set((sites || []).map(s => s.customer_id).filter(Boolean))]
+    if (!customerIds.length) return
+  }
+
+  let q = onlyActive(
+    db.from('customers').select('customer_id, withdraw_at, status').not('withdraw_at', 'is', null)
+  )
+  if (customerIds) q = q.in('customer_id', customerIds)
+  const { data: customers, error } = await q
+  if (error) throw error
+
+  for (const cust of customers || []) {
+    const due = String(cust.withdraw_at).slice(0, 10)
+    if (!due || due > asOf) continue
+
+    const { data: sites, error: siteErr } = await onlyActive(
+      db.from('sites').select('site_id').eq('customer_id', cust.customer_id)
+    )
+    if (siteErr) throw siteErr
+    const ids = (sites || []).map(s => s.site_id)
+    if (ids.length) {
+      const { error: susErr } = await db.from('sites')
+        .update({ status: 'suspended' })
+        .in('site_id', ids)
+        .eq('use_flag', 1)
+      if (susErr) throw susErr
+    }
+    const { error: custErr } = await db.from('customers')
+      .update({ status: 'withdrawn', withdraw_at: null })
+      .eq('customer_id', cust.customer_id)
+    if (custErr) throw custErr
+
+    actions.push({
+      task: 'withdraw_due',
+      customer_id: cust.customer_id,
+      site_ids: ids,
+      withdraw_at: due,
     })
   }
 }
