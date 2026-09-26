@@ -9,22 +9,24 @@ import { onlyActive } from '@/lib/use-flag'
 /** 직원용 — 내부 메모 포함 */
 export async function loadTicketMessages(supabase, ticketIds) {
   if (!ticketIds?.length) return {}
-  const { data } = await onlyActive(
+  const { data, error } = await onlyActive(
     supabase.from('support_ticket_messages').select('*').in('ticket_id', ticketIds).order('created_at')
   )
+  if (error) throw error
   return groupByTicket(data)
 }
 
 /** 사장님용 — 내부 메모 제외 (쿼리 단계에서 차단) */
 export async function loadCustomerTicketMessages(supabase, ticketIds) {
   if (!ticketIds?.length) return {}
-  const { data } = await onlyActive(
+  const { data, error } = await onlyActive(
     supabase.from('support_ticket_messages')
       .select('ticket_message_id, ticket_id, author_type, author, content, created_at, read_at')
       .in('ticket_id', ticketIds)
       .eq('is_internal', false)
       .order('created_at')
   )
+  if (error) throw error
   return groupByTicket(data)
 }
 

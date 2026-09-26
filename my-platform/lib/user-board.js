@@ -69,9 +69,10 @@ export function maskName(name) {
 
 /** 사이트 게시판 목록 (정렬순) */
 export async function loadBoards(supabase, siteId) {
-  const { data } = await onlyActive(
+  const { data, error } = await onlyActive(
     supabase.from('user_boards').select('user_board_id, site_id, board_key, name, board_type, sort_order, created_at').eq('site_id', siteId).order('sort_order')
   )
+  if (error) throw error
   return data || []
 }
 
@@ -80,12 +81,13 @@ export async function loadBoards(supabase, siteId) {
  * @returns {Promise<object[]>} post.user_comments 포함
  */
 export async function loadPostsWithComments(supabase, siteId) {
-  const { data } = await onlyActive(
+  const { data, error } = await onlyActive(
     supabase.from('user_posts')
       .select('post_id, site_id, user_board_id, title, content, author, author_type, is_private, phone, email, created_at, user_comments(user_comment_id, author_type, author, content, use_flag, created_at)')
       .eq('site_id', siteId)
       .order('created_at', { ascending: false })
   )
+  if (error) throw error
   return (data || []).map(p => ({
     ...p,
     user_comments: (p.user_comments || [])
@@ -106,7 +108,7 @@ export function unansweredPosts(posts, boards) {
  */
 export async function countUnansweredBySite(supabase, siteIds) {
   if (!siteIds?.length) return {}
-  const { data } = await onlyActive(
+  const { data, error } = await onlyActive(
     supabase.from('user_posts')
       .select('site_id, user_boards!inner(board_type, use_flag), user_comments(author_type, use_flag)')
       .in('site_id', siteIds)
@@ -114,6 +116,7 @@ export async function countUnansweredBySite(supabase, siteIds) {
       .eq('user_boards.board_type', 'qna')
       .eq('user_boards.use_flag', 1)
   )
+  if (error) throw error
   const out = {}
   for (const p of data || []) {
     if (!hasOwnerReply(p.user_comments)) out[p.site_id] = (out[p.site_id] || 0) + 1

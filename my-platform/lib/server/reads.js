@@ -30,7 +30,7 @@ const SITE_EDITOR_COLS = 'site_id, site_code, subdomain, name, description, addr
 const SITE_PAY_COLS = 'site_id, site_code, subdomain, name, status, build_type, inquiry_id, customer_id, content'
 const INQUIRY_COLS = 'inquiry_id, customer_id, business_type, description, phone, dev_fee_total, down_paid_at, final_paid_at, created_at'
 const SUB_COLS = 'subscription_id, site_id, customer_id, amount, payment_method, next_billing_date, cancelled_at, cancels_at, depositor_name, bank_transfer_agreed_at'
-const PM_COLS = 'payment_method_id, customer_id, card_last4, pg_customer_id, created_at'
+const PM_COLS = 'payment_method_id, customer_id, card_last4, card_brand, card_name, created_at'
 const BH_COLS = 'billing_id, subscription_id, period, amount, status, created_at'
 const TICKET_COLS = 'ticket_id, site_id, customer_id, title, content, category, status, created_at, deadline_at, deadline_days'
 const TPL_COLS = 'template_id, name, category, thumbnail_url, sort_order'
@@ -40,13 +40,14 @@ export async function loadAuthBar(siteCode = '') {
   if (!user) return ok({ preset: { status: 'guest', kind: null, name: '', email: '' }, isSiteOwner: false })
 
   const db = createAdminClient()
-  const { data: staff } = await db
+  const { data: staff, error: staffErr } = await db
     .from('staff')
     .select('name, email, role')
     .eq('auth_id', user.id)
     .eq('status', 'active')
     .eq('use_flag', 1)
     .maybeSingle()
+  if (staffErr) return fail(staffErr.message)
   if (staff?.role === 'platform_admin') {
     return ok({
       preset: { status: 'ok', kind: 'staff', name: staff.name || '본사', email: staff.email || user.email || '' },
@@ -54,9 +55,10 @@ export async function loadAuthBar(siteCode = '') {
     })
   }
 
-  const { data: customer } = await onlyActive(
+  const { data: customer, error: custErr } = await onlyActive(
     db.from('customers').select('customer_id, name, email').eq('auth_id', user.id)
   ).maybeSingle()
+  if (custErr) return fail(custErr.message)
   if (!customer) {
     return ok({ preset: { status: 'guest', kind: null, name: '', email: '' }, isSiteOwner: false })
   }
@@ -81,13 +83,15 @@ export async function resolvePostLoginPath() {
   const user = await getServerUser()
   if (!user) return ok({ path: null })
   const db = createAdminClient()
-  const { data: staff } = await onlyActive(
+  const { data: staff, error: staffErr } = await onlyActive(
     db.from('staff').select('role').eq('auth_id', user.id).eq('status', 'active')
   ).maybeSingle()
+  if (staffErr) return fail(staffErr.message)
   if (staff?.role === 'platform_admin') return ok({ path: '/platform' })
-  const { data: customer } = await onlyActive(
+  const { data: customer, error: custErr } = await onlyActive(
     db.from('customers').select('customer_id').eq('auth_id', user.id)
   ).maybeSingle()
+  if (custErr) return fail(custErr.message)
   return ok({ path: customer ? '/my' : null })
 }
 
@@ -147,8 +151,14 @@ export async function loadMyHome() {
     }
   }
 
-  const pendingOtps = await loadDevFeePayments(db, customer.customer_id)
-  const waitingBySite = await countUnansweredBySite(db, siteList.map(s => s.site_id))
+  let pendingOtps
+  let waitingBySite
+  try {
+    pendingOtps = await loadDevFeePayments(db, customer.customer_id)
+    waitingBySite = await countUnansweredBySite(db, siteList.map(s => s.site_id))
+  } catch (e) {
+    return fail(e.message)
+  }
   return ok({
     customer: cust,
     withdrawn: false,
@@ -178,9 +188,10 @@ export async function loadCustomerSelf() {
 export async function checkSubdomainTaken(subdomain) {
   const gate = await requireCustomer()
   if (!gate.ok) return fail(gate.error)
-  const { data } = await onlyActive(
+  const { data, error } = await onlyActive(
     gate.db.from('sites').select('site_id').eq('subdomain', subdomain)
   ).maybeSingle()
+  if (error) return fail(error.message)
   return ok({ taken: !!data })
 }
 
@@ -196,9 +207,10 @@ export async function loadTemplateList() {
 }
 
 async function loadTicketsBundle(db, siteId) {
-  const { data } = await onlyActive(
+  const { data, error } = await onlyActive(
     db.from('support_tickets').select(TICKET_COLS).eq('site_id', siteId)
   ).order('created_at', { ascending: false })
+  if (error) throw new Error(error.message)
   const tickets = data || []
   const ids = tickets.map(t => t.ticket_id)
   const [ticketMsgs, ticketQuotes] = await Promise.all([
@@ -214,40 +226,52 @@ export async function loadAdminHome(siteCode) {
   const { db, customer, site } = gate
   if (customer.status === 'withdrawn') return fail('withdrawn')
 
-  const { data: siteData } = await onlyActive(
+  const { data: siteData, error: siteErr } = await onlyActive(
     db.from('sites').select(SITE_ADMIN_COLS).eq('site_id', site.site_id)
   ).maybeSingle()
+  if (siteErr) return fail(siteErr.message)
   if (!siteData) return fail('사이트를 찾을 수 없습니다.')
 
   let inquiry = null
   if (siteData.inquiry_id) {
-    const { data: inq } = await onlyActive(
+    const { data: inq, error: inqErr } = await onlyActive(
       db.from('inquiries').select(INQUIRY_COLS).eq('inquiry_id', siteData.inquiry_id)
     ).maybeSingle()
+    if (inqErr) return fail(inqErr.message)
     inquiry = inq
   }
 
-  const { data: subscription } = await onlyActive(
+  const { data: subscription, error: subErr } = await onlyActive(
     db.from('subscriptions').select(SUB_COLS).eq('site_id', site.site_id)
   ).maybeSingle()
+  if (subErr) return fail(subErr.message)
 
-  const { data: paymentMethod } = await onlyActive(
+  const { data: paymentMethod, error: pmErr } = await onlyActive(
     db.from('customer_payment_methods').select(PM_COLS).eq('customer_id', customer.customer_id)
   ).maybeSingle()
+  if (pmErr) return fail(pmErr.message)
 
   let billingHistory = []
   if (subscription) {
-    const { data: bh } = await onlyActive(
+    const { data: bh, error: bhErr } = await onlyActive(
       db.from('billing_history').select(BH_COLS).eq('subscription_id', subscription.subscription_id)
     ).order('period', { ascending: false })
+    if (bhErr) return fail(bhErr.message)
     billingHistory = bh || []
   }
 
-  const [boards, posts, ticketBundle] = await Promise.all([
-    loadBoards(db, site.site_id),
-    loadPostsWithComments(db, site.site_id),
-    loadTicketsBundle(db, site.site_id),
-  ])
+  let boards
+  let posts
+  let ticketBundle
+  try {
+    ;[boards, posts, ticketBundle] = await Promise.all([
+      loadBoards(db, site.site_id),
+      loadPostsWithComments(db, site.site_id),
+      loadTicketsBundle(db, site.site_id),
+    ])
+  } catch (e) {
+    return fail(e.message)
+  }
 
   return ok({
     customer: {
@@ -271,17 +295,25 @@ export async function loadAdminHome(siteCode) {
 export async function loadAdminTickets(siteCode) {
   const gate = await requireOwnedSiteByCode(siteCode)
   if (!gate.ok) return fail(gate.error)
-  return ok(await loadTicketsBundle(gate.db, gate.site.site_id))
+  try {
+    return ok(await loadTicketsBundle(gate.db, gate.site.site_id))
+  } catch (e) {
+    return fail(e.message)
+  }
 }
 
 export async function loadAdminBoards(siteCode) {
   const gate = await requireOwnedSiteByCode(siteCode)
   if (!gate.ok) return fail(gate.error)
-  const [boards, posts] = await Promise.all([
-    loadBoards(gate.db, gate.site.site_id),
-    loadPostsWithComments(gate.db, gate.site.site_id),
-  ])
-  return ok({ boards, posts })
+  try {
+    const [boards, posts] = await Promise.all([
+      loadBoards(gate.db, gate.site.site_id),
+      loadPostsWithComments(gate.db, gate.site.site_id),
+    ])
+    return ok({ boards, posts })
+  } catch (e) {
+    return fail(e.message)
+  }
 }
 
 export async function loadEditorSite(siteCode) {
@@ -290,17 +322,21 @@ export async function loadEditorSite(siteCode) {
     const db = createAdminClient()
     const site = await findSiteByCode(db, siteCode)
     if (!site) return fail('사이트를 찾을 수 없습니다.')
-    const { data } = await onlyActive(
+    const { data, error } = await onlyActive(
       db.from('sites').select(SITE_EDITOR_COLS).eq('site_id', site.site_id)
     ).maybeSingle()
+    if (error) return fail(error.message)
+    if (!data) return fail('사이트를 찾을 수 없습니다.')
     return ok({ kind: 'staff', site: data, customer: null })
   }
 
   const gate = await requireOwnedSiteByCode(siteCode)
   if (!gate.ok) return fail(gate.error)
-  const { data } = await onlyActive(
+  const { data, error } = await onlyActive(
     gate.db.from('sites').select(SITE_EDITOR_COLS).eq('site_id', gate.site.site_id)
   ).maybeSingle()
+  if (error) return fail(error.message)
+  if (!data) return fail('사이트를 찾을 수 없습니다.')
   return ok({
     kind: 'owner',
     site: data,
@@ -320,12 +356,14 @@ export async function loadPaymentSetup(siteCode) {
   const allowed = await assertPaymentSetupAllowed(gate.db, gate.site.site_id)
   if (!allowed.ok) return fail(allowed.error)
 
-  const { data: site } = await onlyActive(
+  const { data: site, error: siteErr } = await onlyActive(
     gate.db.from('sites').select(SITE_PAY_COLS).eq('site_id', gate.site.site_id)
   ).maybeSingle()
-  const { data: subscription } = await onlyActive(
+  if (siteErr) return fail(siteErr.message)
+  const { data: subscription, error: subErr } = await onlyActive(
     gate.db.from('subscriptions').select(SUB_COLS).eq('site_id', gate.site.site_id)
   ).maybeSingle()
+  if (subErr) return fail(subErr.message)
   return ok({
     site,
     subscription,

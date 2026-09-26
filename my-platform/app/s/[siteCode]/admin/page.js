@@ -135,7 +135,7 @@ export default function CustomerPortal({ params }) {
 
   async function fetchTickets() {
     const res = await loadAdminTicketsAction(siteCode)
-    if (!res.ok) return
+    if (!res.ok) { setTicketMsg('❌ ' + res.error); return }
     setTickets(res.data.tickets || [])
     setTicketMsgs(res.data.ticketMsgs || {})
     setTicketQuotes(res.data.ticketQuotes || {})

@@ -77,13 +77,15 @@ export const loadPublicSite = cache(async (siteCode) => {
   noStore()
   if (!siteCode) return null
   const db = createAdminClient()
-  let { data } = await onlyActive(
+  let { data, error } = await onlyActive(
     db.from('sites').select(SITE_LOAD_COLS).eq('subdomain', siteCode)
   ).maybeSingle()
+  if (error) throw error
   if (!data) {
-    ;({ data } = await onlyActive(
+    ;({ data, error } = await onlyActive(
       db.from('sites').select(SITE_LOAD_COLS).eq('site_code', siteCode)
     ).maybeSingle())
+    if (error) throw error
   }
   if (!data || !FLOW_STEPS.includes(data.status)) return null
   return data
@@ -92,9 +94,10 @@ export const loadPublicSite = cache(async (siteCode) => {
 export const loadPublicBoards = cache(async (siteId) => {
   if (!siteId) return []
   const db = createAdminClient()
-  const { data } = await onlyActive(
+  const { data, error } = await onlyActive(
     db.from('user_boards').select(BOARD_COLS).eq('site_id', siteId).order('sort_order')
   )
+  if (error) throw error
   return data || []
 })
 

@@ -49,11 +49,20 @@ export async function fetchPlatformData() {
     onlyActive(db.from('common_codes').select('*')).order('group_code').order('sort_order'),
   ])
 
+  const firstErr = [s, sub, t, otp, tmpl, inq, cust, bh, codes].find(x => x.error)
+  if (firstErr) return fail(firstErr.error.message)
+
   const ticketIds = (t.data || []).map(x => x.ticket_id)
-  const [ticketMsgs, ticketQuotes] = await Promise.all([
-    loadTicketMessages(db, ticketIds),
-    loadTicketQuotes(db, ticketIds),
-  ])
+  let ticketMsgs
+  let ticketQuotes
+  try {
+    ;[ticketMsgs, ticketQuotes] = await Promise.all([
+      loadTicketMessages(db, ticketIds),
+      loadTicketQuotes(db, ticketIds),
+    ])
+  } catch (e) {
+    return fail(e.message)
+  }
 
   return ok({
     sites: s.data || [],

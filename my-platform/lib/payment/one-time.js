@@ -69,12 +69,13 @@ export function pendingOtpOf(otps, stage, siteId = null) {
 
 /** 고객의 개발비 결제 행 (선금·잔금) */
 export async function loadDevFeePayments(supabase, customerId) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('one_time_payments')
     .select('payment_id, site_id, stage, status, amount, note')
     .eq('customer_id', customerId)
     .eq('type', 'dev_fee')
     .eq('use_flag', 1)
+  if (error) throw error
   return data || []
 }
 
@@ -101,14 +102,20 @@ export async function loadInquiryForPayment(supabase, inquiryId, customerId, sta
   if (!inquiry) return { ok: false, error: '제작 의뢰를 찾을 수 없습니다.' }
   if (!inquiry.dev_fee_total) return { ok: false, error: '아직 견적이 나오지 않았습니다. 본사 안내를 기다려 주세요.' }
 
-  const { data: site } = await supabase
+  const { data: site, error: siteErr } = await supabase
     .from('sites')
     .select('site_id, status')
     .eq('inquiry_id', inquiryId)
     .eq('use_flag', 1)
     .maybeSingle()
+  if (siteErr) return { ok: false, error: siteErr.message }
 
-  const otps = await loadDevFeePayments(supabase, customerId)
+  let otps
+  try {
+    otps = await loadDevFeePayments(supabase, customerId)
+  } catch (e) {
+    return { ok: false, error: e.message }
+  }
   if (pendingOtpOf(otps, stage, site?.site_id)) {
     return { ok: false, error: `${stageMeta(stage).label} 입금 확인을 이미 요청하셨습니다. 본사 확인을 기다려 주세요.` }
   }
