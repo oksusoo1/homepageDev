@@ -1,7 +1,6 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useActionState } from 'react'
 import { use } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { onlyActive } from '@/lib/use-flag'
@@ -9,6 +8,7 @@ import { boardPath } from '@/lib/site-paths'
 import { checkSiteOwnerWriteAccess, WRITE_DENY_COPY } from '@/lib/site-owner-auth'
 import { boardMeta } from '@/lib/user-board'
 import SitePublicFrame from '@/components/SitePublicFrame'
+import { createPublicPostAction } from './actions'
 
 /**
  * 게시글 작성
@@ -18,15 +18,14 @@ import SitePublicFrame from '@/components/SitePublicFrame'
  */
 export default function WritePostPage({ params }) {
   const { siteCode, boardKey } = use(params)
-  const router = useRouter()
   const [site, setSite] = useState(null)
   const [board, setBoard] = useState(null)
   const [mode, setMode] = useState(null) // 'owner' | 'user' | 'deny'
   const [denyReason, setDenyReason] = useState('login')
   const [owner, setOwner] = useState(null)
   const [form, setForm] = useState({ name: '', phone: '', email: '', title: '', content: '', is_private: false })
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [actionState, formAction, saving] = useActionState(createPublicPostAction, null)
 
   useEffect(() => { load() }, [siteCode, boardKey])
 
@@ -55,38 +54,17 @@ export default function WritePostPage({ params }) {
     }
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault()
+  function handleSubmit(e) {
     setError('')
     const meta = boardMeta(board)
     const isOwner = mode === 'owner'
-
     if (!isOwner) {
-      if (!form.name.trim()) return setError('이름을 입력해 주세요')
+      if (!form.name.trim()) { e.preventDefault(); return setError('이름을 입력해 주세요') }
       if (meta.needsContact && !form.phone.trim() && !form.email.trim()) {
+        e.preventDefault()
         return setError('연락처(전화 또는 이메일)를 하나 이상 입력해 주세요')
       }
     }
-
-    setSaving(true)
-    const { error: err } = await supabase.from('user_posts').insert([{
-      site_id: site.site_id,
-      user_board_id: board.user_board_id,
-      title: form.title.trim(),
-      content: form.content.trim(),
-      author: isOwner ? (owner?.name || '운영자') : form.name.trim(),
-      author_type: isOwner ? 'owner' : 'user',
-      is_private: !isOwner && meta.allowPrivate && form.is_private,
-      phone: isOwner ? null : (form.phone.trim() || null),
-      email: isOwner ? null : (form.email.trim() || null),
-    }])
-    if (err) {
-      setError('저장 중 오류: ' + err.message)
-      setSaving(false)
-      return
-    }
-    router.push(boardPath(siteCode, board.board_key))
-    router.refresh()
   }
 
   const inputStyle = {
@@ -97,7 +75,7 @@ export default function WritePostPage({ params }) {
   const field = (key, text, props = {}) => (
     <div style={{ marginBottom: 18 }}>
       <label style={label}>{text}</label>
-      <input value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} style={inputStyle} {...props} />
+      <input name={key} value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} style={inputStyle} {...props} />
     </div>
   )
 
@@ -143,26 +121,28 @@ export default function WritePostPage({ params }) {
           : meta.needsReply ? '운영자가 확인 후 답변합니다. 연락처는 공개되지 않습니다.' : '연락처는 공개되지 않습니다.'}
       </p>
 
-      <form onSubmit={handleSubmit} style={{ background: 'white', borderRadius: 12, border: '1px solid #e7e5e4', padding: 32 }}>
+      <form action={formAction} onSubmit={handleSubmit} style={{ background: 'white', borderRadius: 12, border: '1px solid #e7e5e4', padding: 32 }}>
+        <input type="hidden" name="siteCode" value={siteCode} />
+        <input type="hidden" name="boardKey" value={board.board_key} />
         {mode === 'user' && (
           <>
-            {field('name', '이름 *', { placeholder: '홍길동', required: true })}
+            {field('name', '이름 *', { placeholder: '홍길동', required: true, 'data-testid': 'board-author' })}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {field('phone', meta.needsContact ? '전화' : '전화 (선택)', { placeholder: '010-0000-0000' })}
+              {field('phone', meta.needsContact ? '전화' : '전화 (선택)', { placeholder: '010-0000-0000', 'data-testid': 'board-phone' })}
               {field('email', meta.needsContact ? '이메일' : '이메일 (선택)', { type: 'email', placeholder: 'you@example.com' })}
             </div>
           </>
         )}
-        {field('title', '제목 *', { placeholder: '제목을 입력하세요', required: true })}
+        {field('title', '제목 *', { placeholder: '제목을 입력하세요', required: true, 'data-testid': 'board-title' })}
         <div style={{ marginBottom: 20 }}>
           <label style={label}>내용 *</label>
-          <textarea value={form.content} onChange={e => setForm({ ...form, content: e.target.value })}
+          <textarea name="content" data-testid="board-content" value={form.content} onChange={e => setForm({ ...form, content: e.target.value })}
             placeholder="내용을 입력하세요" required rows={8} style={{ ...inputStyle, resize: 'vertical' }} />
         </div>
 
         {mode === 'user' && meta.allowPrivate && (
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 24, fontSize: 14, color: '#44403c', cursor: 'pointer' }}>
-            <input type="checkbox" checked={form.is_private}
+            <input type="checkbox" name="isPrivate" checked={form.is_private}
               onChange={e => setForm({ ...form, is_private: e.target.checked })} style={{ marginTop: 3 }} />
             <span>
               <strong>비밀글로 남기기</strong>
@@ -171,13 +151,13 @@ export default function WritePostPage({ params }) {
           </label>
         )}
 
-        {error && <p style={{ color: '#ef4444', fontSize: 13, marginBottom: 16 }}>{error}</p>}
+        {(error || actionState?.error) && <p style={{ color: '#ef4444', fontSize: 13, marginBottom: 16 }}>{error || actionState.error}</p>}
 
         <div style={{ display: 'flex', gap: 12 }}>
           <Link href={listHref} style={{ padding: '13px 24px', background: '#f5f5f4', color: '#1c1917', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}>
             취소
           </Link>
-          <button type="submit" disabled={saving} style={{
+          <button type="submit" data-testid="board-submit" disabled={saving} style={{
             flex: 1, padding: 13, background: '#1c1917', color: 'white', border: 'none', borderRadius: 8,
             fontSize: 15, fontWeight: 600, cursor: 'pointer', opacity: saving ? 0.6 : 1,
           }}>

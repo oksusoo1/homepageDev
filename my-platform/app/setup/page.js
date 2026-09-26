@@ -7,6 +7,8 @@ import { onlyActive } from '@/lib/use-flag'
 import Link from 'next/link'
 import { Suspense } from 'react'
 import { templateCategoryMeta } from '@/lib/template-category'
+import { validateSubdomain, SUBDOMAIN_MIN, SUBDOMAIN_MAX } from '@/lib/subdomain-rules'
+import { createSelfSiteAction } from '@/app/my/actions'
 
 function SetupForm() {
   const router = useRouter()
@@ -44,16 +46,17 @@ function SetupForm() {
     setPageLoading(false)
   }
 
-  // 서브도메인 중복 체크 (디바운스)
+  // 서브도메인 규칙 + 중복 체크 (디바운스). 서버 검사가 최종.
   useEffect(() => {
     if (!form.subdomain) { setSubdomainStatus('idle'); return }
-    if (!/^[a-z0-9-]+$/.test(form.subdomain)) { setSubdomainStatus('invalid'); return }
+    const v = validateSubdomain(form.subdomain)
+    if (!v.ok) { setSubdomainStatus('invalid'); return }
 
     setSubdomainStatus('checking')
     const timer = setTimeout(async () => {
       const { data } = await onlyActive(
-        supabase.from('sites').select('site_id').eq('subdomain', form.subdomain)
-      ).single()
+        supabase.from('sites').select('site_id').eq('subdomain', v.value)
+      ).maybeSingle()
       setSubdomainStatus(data ? 'taken' : 'available')
     }, 500)
     return () => clearTimeout(timer)
@@ -65,52 +68,35 @@ function SetupForm() {
   }
 
   function handleSubdomainChange(value) {
-    const cleaned = value.toLowerCase().replace(/[^a-z0-9-]/g, '')
+    const cleaned = value.replace(/[^a-zA-Z0-9-]/g, '')
     setForm(prev => ({ ...prev, subdomain: cleaned }))
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
+    const v = validateSubdomain(form.subdomain)
+    if (!v.ok) { setError(v.error); return }
     if (subdomainStatus === 'taken') { setError('이미 사용 중인 사이트주소명이에요'); return }
-    if (subdomainStatus === 'invalid') { setError('사이트주소명은 영문 소문자, 숫자, - 만 사용 가능해요'); return }
     if (!form.name.trim()) { setError('사이트명을 입력해주세요'); return }
-    if (!form.subdomain.trim()) { setError('사이트주소명을 입력해주세요'); return }
 
     setLoading(true)
     setError('')
 
-    try {
-      // sites 테이블 INSERT
-      const site_code = form.subdomain + '_' + Date.now()
-      const { data: site, error: sErr } = await supabase
-        .from('sites')
-        .insert([{
-          site_code,
-          customer_id: customer.customer_id,
-          template_id: templateId || null,
-          name: form.name.trim(),
-          subdomain: form.subdomain.trim(),
-          description: form.description.trim() || null,
-          address: form.address.trim() || null,
-          phone: form.phone.trim() || null,
-          email: form.email.trim() || null,
-          build_type: 'self',
-          status: 'building',
-        }])
-        .select()
-        .single()
-
-      if (sErr) throw new Error(sErr.message)
-
-      // 구독은 배포(deploySite) 시 자동 생성됨 — 여기서는 사이트만 생성
-
-      // 완료 → 내 사이트로
-      router.push('/my?created=1')
-
-    } catch (err) {
-      setError('사이트 생성 오류: ' + err.message)
+    const res = await createSelfSiteAction({
+      templateId,
+      name: form.name,
+      subdomain: form.subdomain,
+      description: form.description,
+      address: form.address,
+      phone: form.phone,
+      email: form.email,
+    })
+    if (!res.ok) {
+      setError(res.error)
       setLoading(false)
+      return
     }
+    router.push('/my?created=1')
   }
 
   const meta = templateCategoryMeta(category)
@@ -127,12 +113,13 @@ function SetupForm() {
   }
 
   // 사이트주소명 상태 표시 (idle일 때는 고정 안내만)
+  const rule = validateSubdomain(form.subdomain)
   const subdomainHint = {
-    idle:      null,
+    idle:      { color: '#9ca3af', text: `영문 소문자·숫자·하이픈 ${SUBDOMAIN_MIN}~${SUBDOMAIN_MAX}자. 예약 주소는 쓸 수 없어요.` },
     checking:  { color: '#9ca3af', text: '확인 중...' },
     available: { color: '#16a34a', text: '✓ 사용 가능한 주소명이에요' },
     taken:     { color: '#dc2626', text: '✗ 이미 사용 중이에요. 다른 주소명을 입력해주세요' },
-    invalid:   { color: '#dc2626', text: '✗ 영문 소문자, 숫자, - 만 사용 가능해요' },
+    invalid:   { color: '#dc2626', text: rule.ok ? '주소를 확인해 주세요' : rule.error },
   }[subdomainStatus]
 
   if (pageLoading) return (
@@ -226,7 +213,7 @@ function SetupForm() {
             <div style={{ marginBottom: 20 }}>
               <label style={{ ...css.label, display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
                 <span>사이트주소명 *</span>
-                <span style={{ fontSize: 11, fontWeight: 500, color: '#9ca3af' }}>영문 소문자, 숫자, - 만</span>
+                <span style={{ fontSize: 11, fontWeight: 500, color: '#9ca3af' }}>영문 소문자·숫자·하이픈, {SUBDOMAIN_MIN}~{SUBDOMAIN_MAX}자</span>
               </label>
               <div style={{
                 display: 'flex', alignItems: 'center',
@@ -262,7 +249,7 @@ function SetupForm() {
                 </span>
               </div>
               {subdomainHint && (
-                <div style={{ ...css.hint, color: subdomainHint.color }}>
+                <div data-testid="setup-subdomain-hint" style={{ ...css.hint, color: subdomainHint.color }}>
                   {subdomainHint.text}
                 </div>
               )}
@@ -322,7 +309,7 @@ function SetupForm() {
 
           {/* 에러 메시지 */}
           {error && (
-            <div style={{
+            <div data-testid="setup-error" style={{
               margin: '16px 0 0', padding: '12px 16px', borderRadius: 8,
               background: '#fef2f2', color: '#dc2626', fontSize: 13,
             }}>

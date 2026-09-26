@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { requireAuthUser, isPlatformAdmin } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
 import { paymentMethodUrl } from '@/lib/billing'
-import { deploySiteAction } from '@/app/s/[siteCode]/admin/actions'
+import { deploySiteAction, saveSiteOwnerPatchAction } from '@/app/s/[siteCode]/admin/actions'
 import {
   paymentCardPath,
   siteAdminPath,
@@ -269,16 +269,13 @@ export default function EditorPage({ params }) {
 
   async function save() {
     setSaving(true); setSaveMsg('')
-    const { error } = await supabase.from('sites')
-      .update({
-        content,
-        address: contact.address,
-        phone:   contact.phone,
-        email:   contact.email,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('site_id', site.site_id)
-    setSaveMsg(error ? '❌ 저장 실패' : '✅ 저장됨')
+    const res = await saveSiteOwnerPatchAction(siteCode, {
+      content,
+      address: contact.address,
+      phone: contact.phone,
+      email: contact.email,
+    })
+    setSaveMsg(res.ok ? '✅ 저장됨' : '❌ ' + res.error)
     setSaving(false)
     setTimeout(() => setSaveMsg(''), 2500)
   }
@@ -427,7 +424,7 @@ export default function EditorPage({ params }) {
           <a href={sitePublicPath(siteCode)} target="_blank" className="hidden sm:inline-block text-xs text-gray-400 no-underline px-3 py-1 border border-[#374151] rounded-md">
             실제 사이트 →
           </a>
-          <button onClick={save} disabled={saving} className="px-3 sm:px-5 py-1.5 bg-[#374151] text-white border-none rounded-lg text-[13px] font-semibold cursor-pointer disabled:opacity-70">
+          <button data-testid="editor-save" onClick={save} disabled={saving} className="px-3 sm:px-5 py-1.5 bg-[#374151] text-white border-none rounded-lg text-[13px] font-semibold cursor-pointer disabled:opacity-70">
             {saving ? '저장 중...' : '저장'}
           </button>
           {isStaffEditor ? (
@@ -502,6 +499,7 @@ export default function EditorPage({ params }) {
                 <div style={{ marginBottom: 16 }}>
                   <label style={labelStyle('hero.title')}>메인 제목</label>
                   <input
+                    data-testid="editor-hero-title"
                     value={content.hero.title}
                     onChange={e => updateHero('title', e.target.value)}
                     onFocus={() => setActiveField('hero.title')}

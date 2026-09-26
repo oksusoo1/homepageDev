@@ -24,6 +24,11 @@ export const BOARD_TYPE_META = {
   },
 }
 
+export const POST_TITLE_MAX = 200
+export const POST_CONTENT_MAX = 10000
+export const COMMENT_MAX = 5000
+export const BOARD_NAME_MAX = 80
+
 export function boardMeta(board) {
   return BOARD_TYPE_META[board?.board_type] || BOARD_TYPE_META.general
 }

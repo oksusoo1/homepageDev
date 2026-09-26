@@ -22,7 +22,7 @@ export async function requireCustomer() {
   return { ok: true, user, customer, db }
 }
 
-async function findSiteByCode(db, siteCode) {
+export async function findSiteByCode(db, siteCode) {
   if (!siteCode) return null
   let { data } = await onlyActive(
     db.from('sites').select('*').eq('subdomain', siteCode)

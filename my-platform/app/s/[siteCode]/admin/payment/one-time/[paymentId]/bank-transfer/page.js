@@ -6,7 +6,8 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { requireAuthUser } from '@/lib/auth'
 import { getBankAccountText } from '@/lib/payment/common'
-import { loadQuote, requestQuoteBankTransfer } from '@/lib/payment/extra'
+import { loadQuote } from '@/lib/payment/extra'
+import { requestQuoteBankTransferAction } from '@/app/s/[siteCode]/admin/actions'
 import { siteAdminPath } from '@/lib/site-paths'
 import PaymentResultPanel from '@/components/PaymentResultPanel'
 import QuoteSummary from '@/components/QuoteSummary'
@@ -44,9 +45,9 @@ function Inner() {
     setError('')
     if (!agreed) { setError('안내 사항에 동의해 주세요.'); return }
     setSubmitting(true)
-    const { error: err } = await requestQuoteBankTransfer(supabase, { quote, depositorName })
+    const res = await requestQuoteBankTransferAction(siteCode, paymentId, { depositorName })
     setSubmitting(false)
-    if (err) { setError(err); return }
+    if (!res.ok) { setError(res.error); return }
     setSubmitted(true)
   }
 

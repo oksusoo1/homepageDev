@@ -100,6 +100,17 @@ export async function getInquiry(inquiryId) {
   return data
 }
 
+export async function listPosts(siteId) {
+  const { data, error } = await adminDb()
+    .from('user_posts')
+    .select('*')
+    .eq('site_id', siteId)
+    .eq('use_flag', 1)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
 export function addDaysYmd(ymd, n) {
   const [y, m, d] = String(ymd).slice(0, 10).split('-').map(Number)
   const dt = new Date(y, m - 1, d)

@@ -18,28 +18,6 @@ export function siteFlow(site) {
   return isSiteFlowStep(s) ? s : null
 }
 
-/**
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase
- * @param {string} siteId
- * @param {string} flowStep
- * @param {object} [extra] 추가 sites 컬럼
- */
-export async function setSiteFlow(supabase, siteId, flowStep, extra = {}) {
-  if (!isSiteFlowStep(flowStep)) {
-    throw new Error(`잘못된 FLOW_STEP: ${flowStep}`)
-  }
-  const { error } = await supabase
-    .from('sites')
-    .update({
-      status: flowStep,
-      updated_at: new Date().toISOString(),
-      ...extra,
-    })
-    .eq('site_id', siteId)
-    .eq('use_flag', 1)
-  if (error) throw new Error(error.message)
-}
-
 export function siteFlowLabel(site, fallback) {
   const f = siteFlow(site)
   return f ? flowStepLabel(f) : (fallback ?? '—')

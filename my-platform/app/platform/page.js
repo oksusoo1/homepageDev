@@ -619,7 +619,7 @@ export default function AdminConsole() {
                     style={css.input}
                   />
                   <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
-                    {form.subdomain || '…'}.myplatform.com
+                    {form.subdomain || '…'}.myplatform.com · 영문 소문자·숫자·하이픈 3~30자
                   </div>
                 </div>
               </div>

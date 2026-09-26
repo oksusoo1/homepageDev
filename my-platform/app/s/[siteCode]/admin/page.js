@@ -10,8 +10,16 @@ import {
   deploySiteAction,
   cancelSubscriptionAction,
   reinstateSubscriptionAction,
+  saveSiteOwnerPatchAction,
+  createSupportTicketAction,
+  updateSupportTicketAction,
+  cancelSupportTicketAction,
+  addCustomerTicketMessageAction,
+  markCustomerTicketsReadAction,
+  rejectQuoteAction,
 } from '@/app/s/[siteCode]/admin/actions'
-import { isPaidSubscription, getSubscriptionUiFlags } from '@/lib/subscription-life'
+import { withdrawCustomerAction } from '@/app/my/actions'
+import { getSubscriptionUiFlags } from '@/lib/subscription-life'
 import {
   canStartManagedService,
   managedBlockedMessage,
@@ -25,16 +33,14 @@ import {
 import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
 import { customerNextLine } from '@/lib/flow-step'
 import {
-  loadCustomerTicketMessages, addTicketMessage, canCustomerEditTicket,
-  markTicketMessagesRead, unreadFrom,
+  loadCustomerTicketMessages, canCustomerEditTicket, unreadFrom,
 } from '@/lib/support-ticket'
-import { softDelete } from '@/lib/use-flag'
 import SiteAdminShell, { parentKeyOf } from '@/components/SiteAdminShell'
 import DeployDoneModal from '@/components/DeployDoneModal'
 import UserPostsManager from '@/components/UserPostsManager'
 import UserBoardsManager from '@/components/UserBoardsManager'
 import { loadBoards, loadPostsWithComments, unansweredPosts } from '@/lib/user-board'
-import { loadTicketQuotes, quoteLabel, cancelQuote } from '@/lib/payment/extra'
+import { loadTicketQuotes, quoteLabel } from '@/lib/payment/extra'
 import { siteTemplateCategory, templateCategoryLabel } from '@/lib/template-category'
 
 const CATEGORIES = [
@@ -93,8 +99,8 @@ export default function CustomerPortal({ params }) {
     if (!['support.requests', 'alerts'].includes(menuKey) || !tickets.length || !site) return
     const ids = tickets.filter(t => unreadFrom(ticketMsgs[t.ticket_id], 'staff').length).map(t => t.ticket_id)
     if (!ids.length) return
-    markTicketMessagesRead(supabase, ids, 'customer').then(changed => {
-      if (changed) fetchTickets(site.site_id)
+    markCustomerTicketsReadAction(siteCode, ids).then(res => {
+      if (res.ok && res.data?.changed) fetchTickets(site.site_id)
     })
   }, [menuKey, tickets, ticketMsgs, site])
 
@@ -175,43 +181,28 @@ export default function CustomerPortal({ params }) {
   async function sendTicketMessage(ticketId) {
     const content = ticketReply[ticketId] || ''
     if (!content.trim()) return
-    try {
-      await addTicketMessage(supabase, {
-        ticketId, authorType: 'customer', author: customer?.name || '사장님', content,
-      })
-      setTicketReply(prev => ({ ...prev, [ticketId]: '' }))
-      await fetchTickets(site.site_id)
-    } catch (e) {
-      setTicketMsg('❌ ' + e.message)
-    }
+    const res = await addCustomerTicketMessageAction(siteCode, ticketId, content)
+    if (!res.ok) { setTicketMsg('❌ ' + res.error); return }
+    setTicketReply(prev => ({ ...prev, [ticketId]: '' }))
+    await fetchTickets(site.site_id)
   }
 
   /** 견적 거절 — 결제 전만 */
   async function rejectQuote(ticketId, paymentId) {
     if (!window.confirm('이 견적을 거절할까요?\n본사에 거절 의사가 전달됩니다.')) return
-    try {
-      await cancelQuote(supabase, paymentId)
-      await addTicketMessage(supabase, {
-        ticketId, authorType: 'customer', author: customer?.name || '사장님',
-        content: '보내주신 견적은 진행하지 않겠습니다.',
-      })
-      await fetchTickets(site.site_id)
-    } catch (e) {
-      setTicketMsg('❌ ' + e.message)
-    }
+    const res = await rejectQuoteAction(siteCode, ticketId, paymentId)
+    if (!res.ok) { setTicketMsg('❌ ' + res.error); return }
+    await fetchTickets(site.site_id)
   }
 
   /** 접수 상태에서만 수정 */
   async function saveTicketEdit(ticketId) {
     if (!editTicketForm.title.trim() || !editTicketForm.content.trim()) return
-    const { error } = await supabase.from('support_tickets')
-      .update({
-        title: editTicketForm.title.trim(),
-        content: editTicketForm.content.trim(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('ticket_id', ticketId)
-    if (error) { setTicketMsg('❌ ' + error.message); return }
+    const res = await updateSupportTicketAction(siteCode, ticketId, {
+      title: editTicketForm.title,
+      content: editTicketForm.content,
+    })
+    if (!res.ok) { setTicketMsg('❌ ' + res.error); return }
     setEditTicketId(null)
     await fetchTickets(site.site_id)
   }
@@ -219,12 +210,9 @@ export default function CustomerPortal({ params }) {
   /** 접수 상태에서만 취소 (soft delete) */
   async function cancelTicket(ticketId) {
     if (!window.confirm('이 요청을 취소할까요?\n본사가 처리를 시작하기 전에만 취소할 수 있습니다.')) return
-    try {
-      await softDelete(supabase, 'support_tickets', 'ticket_id', ticketId)
-      await fetchTickets(site.site_id)
-    } catch (e) {
-      setTicketMsg('❌ ' + e.message)
-    }
+    const res = await cancelSupportTicketAction(siteCode, ticketId)
+    if (!res.ok) { setTicketMsg('❌ ' + res.error); return }
+    await fetchTickets(site.site_id)
   }
 
   async function fetchBoardData(siteId) {
@@ -235,22 +223,15 @@ export default function CustomerPortal({ params }) {
 
   async function saveSiteInfo(e) {
     e.preventDefault(); setSaving(true); setSaveMsg('')
-    const { error } = await supabase.from('sites')
-      .update({ ...siteForm, updated_at: new Date().toISOString() })
-      .eq('site_id', site.site_id)
-    setSaveMsg(error ? '❌ 저장 실패' : '✅ 저장되었습니다!')
+    const res = await saveSiteOwnerPatchAction(siteCode, siteForm)
+    setSaveMsg(res.ok ? '✅ 저장되었습니다!' : '❌ ' + res.error)
     setSaving(false)
   }
 
   async function submitTicket(e) {
     e.preventDefault(); setTicketMsg('')
-    const { error } = await supabase.from('support_tickets').insert([{
-      site_id: site.site_id, customer_id: site.customer_id,
-      title: ticketForm.title, content: ticketForm.content, category: ticketForm.category,
-      status: 'open', priority: 'normal', deadline_days: 3,
-      deadline_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-    }])
-    if (error) { setTicketMsg('❌ 접수 실패: ' + error.message) }
+    const res = await createSupportTicketAction(siteCode, ticketForm)
+    if (!res.ok) { setTicketMsg('❌ 접수 실패: ' + res.error) }
     else {
       setTicketMsg('✅ 접수되었습니다! 3영업일 이내 처리해드릴게요.')
       setTicketForm({ title: '', content: '', category: 'etc' })
@@ -313,46 +294,16 @@ export default function CustomerPortal({ params }) {
     if (withdrawInput !== '탈퇴') return
     setWithdrawing(true)
 
-    const now = new Date()
-    const { data: allSites } = await onlyActive(
-      supabase.from('sites').select('site_id').eq('customer_id', customer.customer_id)
-    )
-    const siteIds = allSites?.map(s => s.site_id) || []
-
-    const isActiveSubscription = isPaidSubscription(site, subscription)
-
-    if (isActiveSubscription) {
-      // ── 구독 중 탈퇴: 잔여 기간(next_billing_date) 보장 ──
-      const withdrawAt = new Date(subscription.next_billing_date).toISOString()
-
-      // 구독 pending cancel (cancels_at = next_billing_date)
-      if (siteIds.length) {
-        await supabase.from('subscriptions')
-          .update({ cancelled_at: now.toISOString(), cancels_at: subscription.next_billing_date })
-          .in('site_id', siteIds)
-      }
-      // 고객에 탈퇴 예정일 기록 (잔여 기간 로그인 가능)
-      await supabase.from('customers')
-        .update({ withdraw_at: withdrawAt })
-        .eq('customer_id', customer.customer_id)
-
-      await supabase.auth.signOut()
-      router.push('/login?error=withdraw_pending&until=' + subscription.next_billing_date)
+    const res = await withdrawCustomerAction(siteCode)
+    if (!res.ok) {
+      alert(res.error)
+      setWithdrawing(false)
+      return
+    }
+    await supabase.auth.signOut()
+    if (res.data?.pending) {
+      router.push('/login?error=withdraw_pending&until=' + res.data.until)
     } else {
-      // ── Trial 중 또는 구독 없음: 즉시 탈퇴 ──
-      if (siteIds.length) {
-        await supabase.from('subscriptions')
-          .update({ cancelled_at: now.toISOString(), cancels_at: null })
-          .in('site_id', siteIds)
-        await supabase.from('sites')
-          .update({ status: 'suspended' })
-          .in('site_id', siteIds)
-      }
-      await supabase.from('customers')
-        .update({ status: 'withdrawn' })
-        .eq('customer_id', customer.customer_id)
-
-      await supabase.auth.signOut()
       router.push('/login?error=withdrawn')
     }
   }

@@ -5,7 +5,7 @@
 import { paymentMethodPath } from '@/lib/site-paths'
 import { canAccessPaymentSetup, isManagedSite } from '@/lib/managed-flow'
 import { getBankAccountText } from '@/lib/payment/common'
-import { onlyActive, USE_FLAG_ON } from '@/lib/use-flag'
+import { onlyActive } from '@/lib/use-flag'
 
 export { getBankAccountText }
 
@@ -58,53 +58,3 @@ export async function assertPaymentSetupAllowed(supabase, siteId) {
   return { ok: true }
 }
 
-/**
- * 계좌이체 등록 — 구독 행은 서비스 시작(deploySite) 시 생성
- * 서비스 시작 전에는 sites.content._billing_draft 에만 저장
- */
-export async function registerBankTransfer(supabase, { customerId, siteId, depositorName }) {
-  const gate = await assertPaymentSetupAllowed(supabase, siteId)
-  if (!gate.ok) return { error: gate.error }
-
-  const now = new Date().toISOString()
-  const name = (depositorName || '').trim()
-  if (!name) return { error: '입금자명을 입력해 주세요.' }
-
-  const { data: existing } = await onlyActive(
-    supabase.from('subscriptions').select('subscription_id').eq('site_id', siteId)
-  ).maybeSingle()
-
-  const draft = {
-    depositor_name: name,
-    bank_transfer_agreed_at: now,
-  }
-
-  if (existing) {
-    const { error } = await supabase
-      .from('subscriptions')
-      .update({
-        payment_method: 'manual',
-        depositor_name: name,
-        bank_transfer_agreed_at: now,
-        updated_at: now,
-      })
-      .eq('site_id', siteId)
-      .eq('use_flag', USE_FLAG_ON)
-    if (error) return { error: error.message }
-    return { error: null }
-  }
-
-  const { data: site } = await onlyActive(
-    supabase.from('sites').select('content').eq('site_id', siteId)
-  ).single()
-
-  const content = { ...(site?.content || {}), _billing_draft: draft }
-  const { error } = await supabase
-    .from('sites')
-    .update({ content, updated_at: now })
-    .eq('site_id', siteId)
-    .eq('use_flag', USE_FLAG_ON)
-  if (error) return { error: error.message }
-
-  return { error: null }
-}

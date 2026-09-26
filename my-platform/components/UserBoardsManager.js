@@ -1,10 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import { supabase } from '@/lib/supabase'
-import { softDelete } from '@/lib/use-flag'
 import { boardPath } from '@/lib/site-paths'
-import { BOARD_TYPE_META, makeBoardKey } from '@/lib/user-board'
+import { BOARD_TYPE_META } from '@/lib/user-board'
+import {
+  createBoardAction,
+  renameBoardAction,
+  moveBoardAction,
+  deleteBoardAction,
+} from '@/app/s/[siteCode]/admin/actions'
 
 /**
  * 사장님 관리자 — 게시판 관리
@@ -37,14 +41,8 @@ export default function UserBoardsManager({ site, boards, posts, onReload }) {
     e.preventDefault()
     run(async () => {
       if (!name.trim()) throw new Error('게시판 이름을 적어 주세요')
-      const { error } = await supabase.from('user_boards').insert({
-        site_id: site.site_id,
-        name: name.trim(),
-        board_key: makeBoardKey(type, boards),
-        board_type: type,
-        sort_order: Math.max(0, ...boards.map(b => b.sort_order || 0)) + 1,
-      })
-      if (error) throw error
+      const res = await createBoardAction(site.subdomain, { name, boardType: type })
+      if (!res.ok) throw new Error(res.error)
       setName('')
       setType('general')
     }, `✅ 「${name.trim()}」 게시판을 만들었습니다`, setAddError)
@@ -52,10 +50,8 @@ export default function UserBoardsManager({ site, boards, posts, onReload }) {
 
   const saveName = (b) => run(async () => {
     if (!editName.trim()) throw new Error('이름을 적어 주세요')
-    const { error } = await supabase.from('user_boards')
-      .update({ name: editName.trim(), updated_at: new Date().toISOString() })
-      .eq('user_board_id', b.user_board_id)
-    if (error) throw error
+    const res = await renameBoardAction(site.subdomain, b.user_board_id, { name: editName })
+    if (!res.ok) throw new Error(res.error)
     setEditId(null)
   }, '이름을 바꿨습니다')
 
@@ -64,17 +60,18 @@ export default function UserBoardsManager({ site, boards, posts, onReload }) {
     const other = boards[idx + dir]
     if (!other) return
     run(async () => {
-      const now = new Date().toISOString()
-      const r1 = await supabase.from('user_boards').update({ sort_order: idx + dir + 1, updated_at: now }).eq('user_board_id', cur.user_board_id)
-      const r2 = await supabase.from('user_boards').update({ sort_order: idx + 1, updated_at: now }).eq('user_board_id', other.user_board_id)
-      if (r1.error || r2.error) throw (r1.error || r2.error)
+      const res = await moveBoardAction(site.subdomain, cur.user_board_id, dir)
+      if (!res.ok) throw new Error(res.error)
     })
   }
 
   const remove = (b) => {
     const n = countOf(b.user_board_id)
     if (!window.confirm(`「${b.name}」 게시판을 삭제할까요?${n ? `\n글 ${n}개도 사이트에서 보이지 않게 됩니다.` : ''}`)) return
-    run(() => softDelete(supabase, 'user_boards', 'user_board_id', b.user_board_id), '게시판을 삭제했습니다')
+    run(async () => {
+      const res = await deleteBoardAction(site.subdomain, b.user_board_id)
+      if (!res.ok) throw new Error(res.error)
+    }, '게시판을 삭제했습니다')
   }
 
   const card = { background: 'white', borderRadius: 14, border: '1px solid #e5e7eb' }

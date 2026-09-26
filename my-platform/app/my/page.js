@@ -20,7 +20,13 @@ import {
   customerNextLine,
 } from '@/lib/flow-step'
 import { canCancelManagedIntake } from '@/lib/managed-flow'
-import { cancelManagedIntakeAction } from '@/app/my/actions'
+import {
+  cancelManagedIntakeAction,
+  createManagedInquiryAction,
+  finalizeWithdrawDueAction,
+  reactivateCustomerAction,
+} from '@/app/my/actions'
+import { validateSubdomain, SUBDOMAIN_MIN, SUBDOMAIN_MAX } from '@/lib/subdomain-rules'
 import DevFeeSummary from '@/components/DevFeeSummary'
 import { onlyActive } from '@/lib/use-flag'
 import { loadCommonCodes, codeLabel } from '@/lib/common-codes'
@@ -112,22 +118,14 @@ export default function MySitesPage() {
       return
     }
 
-    // withdraw_at이 과거 → 실제 탈퇴 처리
     if (cust.withdraw_at && new Date(cust.withdraw_at) <= new Date()) {
-      const { data: custSites } = await onlyActive(
-        supabase.from('sites').select('site_id').eq('customer_id', cust.customer_id)
-      )
-      if (custSites?.length) {
-        const siteIds = custSites.map(s => s.site_id)
-        await supabase.from('sites').update({ status: 'suspended' }).in('site_id', siteIds).eq('use_flag', 1)
+      const done = await finalizeWithdrawDueAction()
+      if (done.ok && done.data?.finalized) {
+        setCustomer({ ...cust, status: 'withdrawn' })
+        setIsWithdrawn(true)
+        setLoading(false)
+        return
       }
-      await supabase.from('customers')
-        .update({ status: 'withdrawn', withdraw_at: null })
-        .eq('customer_id', cust.customer_id)
-      setCustomer({ ...cust, status: 'withdrawn' })
-      setIsWithdrawn(true)
-      setLoading(false)
-      return
     }
 
     setCustomer(cust)
@@ -177,7 +175,6 @@ export default function MySitesPage() {
   // 본사 제작 문의 제출 → 문의 + 사이트(intake) 동시 생성
   async function handleInquirySubmit() {
     const siteName = (inquiryForm.site_name || '').trim()
-    const subdomain = (inquiryForm.subdomain || '').trim().toLowerCase()
     const description = (inquiryForm.description || '').trim()
 
     if (!inquiryForm.business_type) {
@@ -190,8 +187,9 @@ export default function MySitesPage() {
       setInquiryErrorField('site_name')
       return
     }
-    if (!subdomain || !/^[a-z0-9-]+$/.test(subdomain)) {
-      setInquiryError('사이트 주소명은 영문 소문자·숫자·하이픈만 가능합니다.')
+    const sub = validateSubdomain(inquiryForm.subdomain)
+    if (!sub.ok) {
+      setInquiryError(sub.error)
       setInquiryErrorField('subdomain')
       return
     }
@@ -206,40 +204,14 @@ export default function MySitesPage() {
     setInquiryErrorField('')
     setInquirySubmitting(true)
     try {
-      const { data: tmpls } = await onlyActive(
-        supabase.from('templates').select('template_id').eq('category', inquiryForm.business_type)
-      ).order('sort_order').limit(1)
-      let templateId = tmpls?.[0]?.template_id || null
-      if (!templateId) {
-        const { data: anyTmpls } = await onlyActive(
-          supabase.from('templates').select('template_id')
-        ).order('sort_order').limit(1)
-        templateId = anyTmpls?.[0]?.template_id || null
-      }
-
-      const { data: inq, error: inqErr } = await supabase.from('inquiries').insert({
-        customer_id: customer.customer_id,
-        business_type: inquiryForm.business_type,
+      const res = await createManagedInquiryAction({
+        businessType: inquiryForm.business_type,
+        siteName,
+        subdomain: inquiryForm.subdomain,
         description,
         phone: inquiryForm.phone || customer.phone,
-      }).select('inquiry_id').single()
-      if (inqErr) throw new Error(inqErr.message)
-
-      const site_code = subdomain + '_' + Date.now()
-      const { error: sErr } = await supabase.from('sites').insert({
-        site_code,
-        customer_id: customer.customer_id,
-        template_id: templateId,
-        name: siteName,
-        subdomain,
-        description,
-        phone: inquiryForm.phone || customer.phone || null,
-        email: customer.email || null,
-        build_type: 'managed',
-        inquiry_id: inq.inquiry_id,
-        status: 'intake',
       })
-      if (sErr) throw new Error(sErr.message)
+      if (!res.ok) throw new Error(res.error)
 
       setInquiryDone(true)
 
@@ -319,9 +291,12 @@ export default function MySitesPage() {
 
   async function handleReactivate() {
     setReactivating(true)
-    await supabase.from('customers')
-      .update({ status: 'active' })
-      .eq('customer_id', customer.customer_id)
+    const res = await reactivateCustomerAction()
+    if (!res.ok) {
+      alert(res.error)
+      setReactivating(false)
+      return
+    }
     setIsWithdrawn(false)
     setReactivating(false)
     // 사이트 목록 다시 로드
@@ -583,14 +558,14 @@ export default function MySitesPage() {
                 />
 
                 <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: '#374151' }}>
-                  사이트 주소명 * <span style={{ fontWeight: 500, color: '#9ca3af' }}>(영문 소문자)</span>
+                  사이트 주소명 * <span style={{ fontWeight: 500, color: '#9ca3af' }}>(영문 소문자·숫자·하이픈 {SUBDOMAIN_MIN}~{SUBDOMAIN_MAX}자)</span>
                 </p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
                   <input
                     data-testid="inquiry-subdomain"
                     value={inquiryForm.subdomain}
                     onChange={e => patchInquiryForm({
-                      subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
+                      subdomain: e.target.value.replace(/[^a-zA-Z0-9-]/g, ''),
                     })}
                     placeholder="magokcafe"
                     style={{

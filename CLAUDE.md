@@ -24,7 +24,7 @@
 - 서버 차단: `lib/server/guard.js` — `getServerUser()`, `requireStaff()`, `requireSiteOwner()`
 - `/platform` 은 `layout.js`에서 `requireStaff()` + DB는 `app/platform/actions.js` + `lib/supabase/admin.js` (service role)
 - 고객 결제·상태 전환: `app/s/[siteCode]/admin/actions.js` · `app/my/actions.js` (`requireOwnedSiteByCode` / `requireOwnedInquiry`)
-- 문서: `docs/플로우.md` · `docs/db/테이블명세.md` · `docs/db/ERD.md`
+- 문서: `docs/플로우.md` · `docs/db/테이블명세.md` · `docs/db/ERD.md` · `docs/설계/방문자회원.md`(설계만, 구현 전)
 
 ## 기술 스택
 - Frontend/Backend: Next.js 16 (App Router) + React 19, Tailwind 4
@@ -98,14 +98,17 @@
 - 2차 목표: 각 기능 세부 완성도 개선
 - 3차 목표: GrapesJS 에디터 연동, 카드 결제(토스페이먼츠), 판매자 구조 추가
 
-## 현재 진행 상황 (2026-09-25 기준)
+## 현재 진행 상황 (2026-09-26 기준)
 
-### 보안 ①② (완료)
+### 보안 ①②③ (완료)
 - `/platform` DB 조회·쓰기 = Server Actions + service role. 브라우저 anon 직접 호출 없음
 - 세션 쿠키(`@supabase/ssr`) · `requireStaff()` 레이아웃 차단
 - 고객 결제·상태 전환(`/s/.../admin` 서비스시작·카드·계좌·해지, `/my` 선금·잔금·접수취소) = Server Actions
 - 셀프 흐름에 preview 없음 (`building → pay_method → trial → subscribed`)
-- ③사장님 편집 ④방문자 공개범위 ⑤RLS 잠금 은 다음 단계
+- ③ 남은 쓰기(에디터·/setup·게시판·본사요청·가입·탈퇴) = Server Actions. 브라우저 insert/update/delete/upsert 0건
+- 사장님 사이트 수정 허용: `name` · `description` · `address` · `phone` · `email` · `content` (`lib/site-edit.js`)
+- 주소 규칙: `lib/subdomain-rules.js` (3~30자, 예약어, site_code VARCHAR(50))
+- ④방문자 공개범위 게이트 구조 · ⑤RLS 잠금 은 다음 단계
 
 ### 결제·청구 (목업)
 - 카드 등록: `app/s/[siteCode]/admin/payment/card/page.js` `MOCK_MODE = true` (실서비스 전환 시 false + 토스 키)
@@ -117,6 +120,6 @@
 ### 다음 작업 후보 (미구현)
 - 청구 배치 자동 실행(cron) 연결
 - 토스페이먼츠 실결제 연동
-- 보안 ③~⑤: 사장님 편집·방문자 게이트·RLS 잠금 (현재 전 테이블 `USING (true)`, 편집·게시판은 아직 anon)
+- 보안 ④⑤: 방문자 공개범위 게이트 구조 · RLS 잠금 (현재 전 테이블 `USING (true)`, 조회는 아직 anon)
 - 템플릿 고도화 (상위/left 메뉴 노코드 구성, 카드형 콘텐츠 등) · GrapesJS 에디터
 - 판매자(에이전시) 구조

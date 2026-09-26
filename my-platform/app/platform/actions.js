@@ -2,12 +2,16 @@
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireStaff } from '@/lib/server/guard'
-import { onlyActive, softDelete, USE_FLAG_OFF, USE_FLAG_ON } from '@/lib/use-flag'
-import { cancelManagedIntake } from '@/lib/managed-flow'
-import { loadTicketMessages, addTicketMessage, markTicketMessagesRead } from '@/lib/support-ticket'
-import { loadTicketQuotes, sendQuote, cancelQuote } from '@/lib/payment/extra'
+import { onlyActive, USE_FLAG_OFF, USE_FLAG_ON } from '@/lib/use-flag'
+import { softDelete } from '@/lib/use-flag-write'
+import { cancelManagedIntake } from '@/lib/managed-flow-write'
+import { loadTicketMessages } from '@/lib/support-ticket'
+import { addTicketMessage, markTicketMessagesRead } from '@/lib/support-ticket-write'
+import { loadTicketQuotes } from '@/lib/payment/extra'
+import { sendQuote, cancelQuote } from '@/lib/payment/extra-write'
 import { runBillingBatch } from '@/lib/billing-batch'
 import { calcTrialWindow } from '@/lib/trial'
+import { assertSubdomainAvailable, makeSiteCode } from '@/lib/site-create'
 
 function ok(data) {
   return { ok: true, data }
@@ -72,10 +76,9 @@ export async function createSite(form) {
   if (!gate.ok) return fail(gate.error)
 
   try {
-    const subdomain = (form.subdomain || '').trim().toLowerCase()
-    if (!/^[a-z0-9-]+$/.test(subdomain)) {
-      return fail('서브도메인은 영문 소문자·숫자·하이픈만 가능합니다.')
-    }
+    const sub = await assertSubdomainAvailable(db, form.subdomain)
+    if (!sub.ok) return fail(sub.error)
+    const subdomain = sub.value
     if (!form.site_name?.trim()) return fail('사이트명을 입력하세요.')
 
     let customer
@@ -110,7 +113,7 @@ export async function createSite(form) {
       return fail('회원을 선택하거나 이메일을 입력하세요.')
     }
 
-    const site_code = subdomain + '_' + Date.now()
+    const site_code = makeSiteCode(subdomain)
     const { data: newSite, error: sErr } = await db
       .from('sites')
       .insert([{

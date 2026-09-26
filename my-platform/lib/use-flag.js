@@ -12,29 +12,4 @@ export function onlyActive(query) {
   return query.eq('use_flag', USE_FLAG_ON)
 }
 
-/**
- * Soft delete
- * @param {import('@supabase/supabase-js').SupabaseClient} supabase
- * @param {string} table
- * @param {string} idColumn  예: 'site_id'
- * @param {string} id
- */
-export async function softDelete(supabase, table, idColumn, id) {
-  const patch = { use_flag: USE_FLAG_OFF }
-  // updated_at 있는 테이블은 갱신
-  if (['customers', 'staff', 'sites', 'inquiries', 'subscriptions', 'support_tickets', 'user_boards', 'user_posts', 'user_comments'].includes(table)) {
-    patch.updated_at = new Date().toISOString()
-  }
-  const { error } = await supabase.from(table).update(patch).eq(idColumn, id)
-  if (error) throw error
-}
-
-/** Soft delete 복구 */
-export async function softRestore(supabase, table, idColumn, id) {
-  const patch = { use_flag: USE_FLAG_ON }
-  if (['customers', 'staff', 'sites', 'inquiries', 'subscriptions', 'support_tickets', 'user_boards', 'user_posts', 'user_comments'].includes(table)) {
-    patch.updated_at = new Date().toISOString()
-  }
-  const { error } = await supabase.from(table).update(patch).eq(idColumn, id)
-  if (error) throw error
-}
+/** 쓰기(softDelete/softRestore)는 lib/use-flag-write.js (server-only) */

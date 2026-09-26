@@ -5,7 +5,8 @@ import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { requireAuthUser } from '@/lib/auth'
-import { loadQuote, payQuoteCardMock } from '@/lib/payment/extra'
+import { loadQuote } from '@/lib/payment/extra'
+import { payQuoteCardMockAction } from '@/app/s/[siteCode]/admin/actions'
 import { siteAdminPath } from '@/lib/site-paths'
 import PaymentResultPanel from '@/components/PaymentResultPanel'
 import QuoteSummary from '@/components/QuoteSummary'
@@ -38,9 +39,9 @@ function Inner() {
   async function handlePay() {
     setError('')
     setSubmitting(true)
-    const { error: err } = await payQuoteCardMock(supabase, { quote })
+    const res = await payQuoteCardMockAction(siteCode, paymentId)
     setSubmitting(false)
-    if (err) { setError(err); return }
+    if (!res.ok) { setError(res.error); return }
     setPaid(true)
   }
 

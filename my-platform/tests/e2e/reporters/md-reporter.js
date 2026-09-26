@@ -9,6 +9,12 @@ const TITLES = {
   S5: '대리: B 의뢰 → staff 견적 → B 선금 입금했어요 → staff 선금 확인',
   S6: '권한 차단',
   S7: '공개 범위 (제작 중 비로그인)',
+  S8: 'A: 에디터 내용 저장',
+  S9: '편집 요청에 금지 필드 섞음',
+  S10: '/setup 주소 검사',
+  S11: 'B가 A 사이트 에디터·게시판 관리 접근',
+  S12: '방문자가 공개 문의 게시판에 글 작성',
+  S13: '신규 가입 customers 행',
 }
 
 function loadRun() {
@@ -39,7 +45,7 @@ class MdReporter {
 
   onTestEnd(test, result) {
     const title = test.title
-    const idMatch = title.match(/\b(S[1-7])\b/)
+    const idMatch = title.match(/\b(S1[0-3]|S[1-9])\b/)
     const id = idMatch ? idMatch[1] : title
     this.results[id] = {
       title,
@@ -73,7 +79,8 @@ class MdReporter {
     lines.push('| # | 시나리오 | 결과 |')
     lines.push('|---|---|---|')
 
-    for (const id of ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7']) {
+    const IDS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12', 'S13']
+    for (const id of IDS) {
       const rec = this.results[id] || {}
       const extra = meta.scenarios[id] || {}
       let status = rec.status || extra.status || 'skipped'
@@ -82,7 +89,7 @@ class MdReporter {
     }
 
     lines.push('')
-    for (const id of ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7']) {
+    for (const id of IDS) {
       const rec = this.results[id] || {}
       const extra = meta.scenarios[id] || {}
       let status = rec.status || extra.status || 'skipped'

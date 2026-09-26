@@ -26,10 +26,12 @@ export async function loginAs(page, who) {
 }
 
 export async function logout(page) {
+  await page.keyboard.press('Escape').catch(() => {})
+  await page.getByRole('button', { name: '확인' }).click({ timeout: 2000 }).catch(() => {})
   const btn = page.getByTestId('auth-logout')
   try {
     await btn.waitFor({ state: 'visible', timeout: 8000 })
-    await btn.click()
+    await btn.click({ timeout: 5000 })
     await page.waitForURL(/\/login/, { timeout: 15000 })
     return
   } catch { /* 쿠키 정리로 폴백 */ }

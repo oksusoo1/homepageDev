@@ -1,7 +1,7 @@
 import 'server-only'
 import { canStartManagedService, isManagedSite } from '@/lib/managed-flow'
 import { onlyActive } from '@/lib/use-flag'
-import { setSiteFlow } from '@/lib/site-flow'
+import { setSiteFlow } from '@/lib/site-flow-write'
 import { calcTrialWindow } from '@/lib/trial'
 
 /**

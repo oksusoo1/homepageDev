@@ -1,10 +1,14 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
-import { softDelete } from '@/lib/use-flag'
 import { boardPath } from '@/lib/site-paths'
 import { boardMeta, isUnanswered } from '@/lib/user-board'
+import {
+  createOwnerPostAction,
+  deleteOwnerPostAction,
+  addOwnerCommentAction,
+  deleteOwnerCommentAction,
+} from '@/app/s/[siteCode]/admin/actions'
 
 /**
  * 사장님 관리자 — 게시물 관리 (모든 게시판 통합 목록)
@@ -54,22 +58,24 @@ export default function UserPostsManager({ site, ownerName, boards, posts, focus
   const addReply = (post) => run(async () => {
     const text = reply.trim()
     if (!text) throw new Error('답변 내용을 입력해 주세요')
-    const { error } = await supabase.from('user_comments').insert({
-      post_id: post.post_id, author_type: 'owner', author: ownerName || '운영자', content: text,
-    })
-    if (error) throw error
+    const res = await addOwnerCommentAction(site.subdomain, post.post_id, text)
+    if (!res.ok) throw new Error(res.error)
     setReply('')
   }, '✅ 답변을 등록했습니다')
 
   const deleteComment = (c) => {
     if (!window.confirm('이 댓글을 삭제할까요?')) return
-    run(() => softDelete(supabase, 'user_comments', 'user_comment_id', c.user_comment_id), '댓글을 삭제했습니다')
+    run(async () => {
+      const res = await deleteOwnerCommentAction(site.subdomain, c.user_comment_id)
+      if (!res.ok) throw new Error(res.error)
+    }, '댓글을 삭제했습니다')
   }
 
   const deletePost = (post) => {
     if (!window.confirm('이 글을 삭제할까요?')) return
     run(async () => {
-      await softDelete(supabase, 'user_posts', 'post_id', post.post_id)
+      const res = await deleteOwnerPostAction(site.subdomain, post.post_id)
+      if (!res.ok) throw new Error(res.error)
       setOpenId(null)
     }, '글을 삭제했습니다')
   }
@@ -79,12 +85,10 @@ export default function UserPostsManager({ site, ownerName, boards, posts, focus
     run(async () => {
       const boardId = draft.boardId || boards[0]?.user_board_id
       if (!boardId) throw new Error('게시판이 없습니다')
-      const { error } = await supabase.from('user_posts').insert({
-        site_id: site.site_id, user_board_id: boardId,
-        title: draft.title.trim(), content: draft.content.trim(),
-        author: ownerName || '운영자', author_type: 'owner',
+      const res = await createOwnerPostAction(site.subdomain, {
+        boardId, title: draft.title, content: draft.content,
       })
-      if (error) throw error
+      if (!res.ok) throw new Error(res.error)
       setDraft({ boardId: '', title: '', content: '' })
       setWriting(false)
     }, '✅ 글을 등록했습니다')

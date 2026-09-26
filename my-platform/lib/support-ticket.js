@@ -34,42 +34,6 @@ function groupByTicket(rows) {
   return out
 }
 
-/**
- * @param {{ ticketId: string, authorType: 'customer'|'staff', author: string, content: string, isInternal?: boolean }} msg
- */
-export async function addTicketMessage(supabase, { ticketId, authorType, author, content, isInternal = false }) {
-  const text = (content || '').trim()
-  if (!text) throw new Error('내용을 입력해 주세요.')
-  const { error } = await supabase.from('support_ticket_messages').insert({
-    ticket_id: ticketId,
-    author_type: authorType,
-    author: author || (authorType === 'staff' ? '본사' : '고객'),
-    content: text,
-    is_internal: authorType === 'staff' ? !!isInternal : false,
-  })
-  if (error) throw new Error(error.message)
-}
-
-/**
- * 읽음 처리 — 상대방이 보낸 안 읽은 메시지에 read_at 기록
- * @param {'customer'|'staff'} reader 읽는 쪽
- * @returns {Promise<boolean>} 실제로 읽음 처리한 게 있으면 true
- */
-export async function markTicketMessagesRead(supabase, ticketIds, reader) {
-  if (!ticketIds?.length) return false
-  const from = reader === 'customer' ? 'staff' : 'customer'
-  const q = supabase.from('support_ticket_messages')
-    .update({ read_at: new Date().toISOString() })
-    .in('ticket_id', ticketIds)
-    .eq('author_type', from)
-    .eq('use_flag', 1)
-    .is('read_at', null)
-  // 내부 메모는 고객에게 가지 않으므로 읽음 대상 아님
-  const { data, error } = await (from === 'staff' ? q.eq('is_internal', false) : q).select('ticket_message_id')
-  if (error) return false
-  return (data || []).length > 0
-}
-
 /** 안 읽은 메시지 (상대가 보낸 것) */
 export function unreadFrom(messages, authorType) {
   return (messages || []).filter(m => m.author_type === authorType && !m.read_at && !m.is_internal)

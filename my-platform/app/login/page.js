@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { getPostLoginPath } from '@/lib/auth'
+import { completeCustomerProfileAction } from '@/app/my/actions'
 import Link from 'next/link'
 import { Suspense } from 'react'
 
@@ -98,7 +99,7 @@ function LoginForm() {
     }
 
     // 1. Supabase Auth 가입
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    const { error: authError } = await supabase.auth.signUp({
       email: signupForm.email,
       password: signupForm.password,
     })
@@ -109,18 +110,12 @@ function LoginForm() {
       return
     }
 
-    // 2. customers 테이블에 INSERT
-    const { error: dbError } = await supabase
-      .from('customers')
-      .insert([{
-        auth_id: authData.user.id,
-        email: signupForm.email,
-        name: signupForm.name,
-        phone: signupForm.phone || null,
-      }])
-
-    if (dbError) {
-      setError('고객 정보 저장 오류: ' + dbError.message)
+    const profile = await completeCustomerProfileAction({
+      name: signupForm.name,
+      phone: signupForm.phone,
+    })
+    if (!profile.ok) {
+      setError('고객 정보 저장 오류: ' + profile.error)
       setLoading(false)
       return
     }
@@ -175,10 +170,11 @@ function LoginForm() {
         }}>
           {[
             { key: 'login', label: '로그인' },
-            { key: 'signup', label: '회원가입' },
-          ].map(({ key, label }) => (
+            { key: 'signup', label: '회원가입', testid: 'signup-tab' },
+          ].map(({ key, label, testid }) => (
             <button
               key={key}
+              data-testid={testid}
               onClick={() => { setTab(key); setError(''); setSuccess('') }}
               style={{
                 flex: 1, padding: '9px 0', borderRadius: 7,
@@ -255,6 +251,7 @@ function LoginForm() {
                 <label style={labelStyle}>이름 *</label>
                 <input
                   type="text" autoComplete="name" value={signupForm.name} required
+                  data-testid="signup-name"
                   onChange={e => setSignupForm({ ...signupForm, name: e.target.value })}
                   placeholder="홍길동" style={inputStyle}
                 />
@@ -263,6 +260,7 @@ function LoginForm() {
                 <label style={labelStyle}>이메일 *</label>
                 <input
                   type="email" autoComplete="email" value={signupForm.email} required
+                  data-testid="signup-email"
                   onChange={e => setSignupForm({ ...signupForm, email: e.target.value })}
                   placeholder="example@email.com" style={inputStyle}
                 />
@@ -271,6 +269,7 @@ function LoginForm() {
                 <label style={labelStyle}>전화번호</label>
                 <input
                   type="tel" autoComplete="tel" value={signupForm.phone}
+                  data-testid="signup-phone"
                   onChange={e => setSignupForm({ ...signupForm, phone: e.target.value })}
                   placeholder="010-0000-0000" style={inputStyle}
                 />
@@ -279,6 +278,7 @@ function LoginForm() {
                 <label style={labelStyle}>비밀번호 * (6자 이상)</label>
                 <input
                   type="password" autoComplete="new-password" value={signupForm.password} required
+                  data-testid="signup-password"
                   onChange={e => setSignupForm({ ...signupForm, password: e.target.value })}
                   placeholder="••••••••" style={inputStyle}
                 />
@@ -287,6 +287,7 @@ function LoginForm() {
                 <label style={labelStyle}>비밀번호 확인 *</label>
                 <input
                   type="password" autoComplete="new-password" value={signupForm.passwordConfirm} required
+                  data-testid="signup-password-confirm"
                   onChange={e => setSignupForm({ ...signupForm, passwordConfirm: e.target.value })}
                   placeholder="••••••••" style={inputStyle}
                 />
@@ -303,7 +304,7 @@ function LoginForm() {
                 </div>
               )}
 
-              <button type="submit" disabled={loading} style={{
+              <button type="submit" disabled={loading} data-testid="signup-submit" style={{
                 width: '100%', padding: '12px',
                 background: '#111827', color: 'white', border: 'none',
                 borderRadius: 8, fontSize: 14, fontWeight: 700,
