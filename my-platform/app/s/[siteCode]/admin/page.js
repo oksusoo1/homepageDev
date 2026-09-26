@@ -5,8 +5,12 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { requireAuthUser } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
-import { deploySite as deployAction } from '@/lib/deploy'
-import { getBillingReadiness, paymentMethodUrl, getBankAccountText } from '@/lib/billing'
+import { paymentMethodUrl, getBankAccountText } from '@/lib/billing'
+import {
+  deploySiteAction,
+  cancelSubscriptionAction,
+  reinstateSubscriptionAction,
+} from '@/app/s/[siteCode]/admin/actions'
 import { isPaidSubscription, getSubscriptionUiFlags } from '@/lib/subscription-life'
 import {
   canStartManagedService,
@@ -31,6 +35,7 @@ import UserPostsManager from '@/components/UserPostsManager'
 import UserBoardsManager from '@/components/UserBoardsManager'
 import { loadBoards, loadPostsWithComments, unansweredPosts } from '@/lib/user-board'
 import { loadTicketQuotes, quoteLabel, cancelQuote } from '@/lib/payment/extra'
+import { siteTemplateCategory, templateCategoryLabel } from '@/lib/template-category'
 
 const CATEGORIES = [
   { value: 'text_change', icon: '✏️' },
@@ -110,7 +115,7 @@ export default function CustomerPortal({ params }) {
     setCustomer(cust)
 
     const { data: siteData } = await onlyActive(
-      supabase.from('sites').select('*')
+      supabase.from('sites').select('*, templates(name, category)')
         .eq('subdomain', siteCode)
         .eq('customer_id', cust.customer_id)
     ).single()
@@ -261,44 +266,26 @@ export default function CustomerPortal({ params }) {
       return
     }
 
-    const { data: card } = await onlyActive(
-      supabase
-        .from('customer_payment_methods')
-        .select('payment_method_id, card_name, card_last4')
-        .eq('customer_id', customer.customer_id)
-    ).maybeSingle()
-
-    const { data: subNow } = await onlyActive(
-      supabase.from('subscriptions').select('*').eq('site_id', site.site_id)
-    ).maybeSingle()
-
-    const billing = getBillingReadiness(card, subNow || subscription, site)
-    if (!billing.ready) {
-      router.push(paymentMethodUrl(siteCode, 'deploy'))
+    setDeploying(true)
+    const res = await deploySiteAction(siteCode)
+    if (!res.ok) {
+      alert(res.error)
+      setDeploying(false)
       return
     }
 
-    setDeploying(true)
-    const { error, trialEndsAt, requireBillingSetup } = await deployAction(
-      site.site_id, site.customer_id, subNow || subscription, site, billing.method
-    )
-
-    if (!error) {
+    const { requireBillingSetup, trialEndsAt, card, subscription: newSub } = res.data
+    if (requireBillingSetup) {
+      router.push(paymentMethodUrl(siteCode, 'deploy'))
+    } else {
       setSite(prev => ({
         ...prev,
-        status: requireBillingSetup ? 'pay_method' : 'trial',
+        status: 'trial',
         trial_ends_at: trialEndsAt,
       }))
-      if (requireBillingSetup) {
-        router.push(paymentMethodUrl(siteCode, 'deploy'))
-      } else {
-        const { data: newSub } = await onlyActive(
-          supabase.from('subscriptions').select('*').eq('site_id', site.site_id)
-        ).maybeSingle()
-        setSubscription(newSub)
-        setDeployed({ trialEndsAt, card, subscription: newSub })
-        setShowDeployModal(true)
-      }
+      setSubscription(newSub)
+      setDeployed({ trialEndsAt, card, subscription: newSub })
+      setShowDeployModal(true)
     }
     setDeploying(false)
   }
@@ -306,25 +293,15 @@ export default function CustomerPortal({ params }) {
   async function handleCancelSubscription() {
     if (!subscription) return
     if (!window.confirm('구독을 해지하시겠습니까?\n남은 기간까지는 계속 이용하실 수 있습니다.')) return
-    const { error } = await supabase.from('subscriptions').update({
-      cancelled_at: new Date().toISOString(),
-      cancels_at: subscription.next_billing_date,
-      next_billing_date: null,
-    }).eq('subscription_id', subscription.subscription_id)
-    if (!error) setSubscription(prev => ({
-      ...prev,
-      cancelled_at: new Date().toISOString(),
-      cancels_at: subscription.next_billing_date,
-      next_billing_date: null,
-    }))
+    const res = await cancelSubscriptionAction(siteCode)
+    if (!res.ok) { alert(res.error); return }
+    setSubscription(res.data)
   }
 
   async function handleReinstate() {
-    const { error } = await supabase.from('subscriptions').update({
-      cancelled_at: null,
-      cancels_at: null,
-    }).eq('subscription_id', subscription.subscription_id)
-    if (!error) setSubscription(prev => ({ ...prev, cancelled_at: null, cancels_at: null }))
+    const res = await reinstateSubscriptionAction(siteCode)
+    if (!res.ok) { alert(res.error); return }
+    setSubscription(res.data)
   }
 
   async function handleLogout() {
@@ -514,7 +491,7 @@ export default function CustomerPortal({ params }) {
             <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 700, color: 'white' }}>{title}</h3>
             <p style={{ margin: 0, fontSize: 13, color: '#99f6e4' }}>{desc}</p>
           </div>
-          <button onClick={handleDeploy} disabled={deploying}
+          <button data-testid="admin-deploy" onClick={handleDeploy} disabled={deploying}
             style={{ padding: '10px 22px', background: 'white', color: '#0f766e', borderRadius: 8, border: 'none', fontSize: 13, fontWeight: 700, cursor: deploying ? 'default' : 'pointer', opacity: deploying ? 0.7 : 1, whiteSpace: 'nowrap', marginLeft: 20 }}>
             {deploying ? '처리 중...' : site.build_type === 'managed' ? '시작하기' : '배포하기'}
           </button>
@@ -676,6 +653,15 @@ export default function CustomerPortal({ params }) {
             <div style={css.card}>
               <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: '#111827' }}>기본 정보 수정</h3>
               <form onSubmit={saveSiteInfo}>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={css.label}>템플릿</label>
+                  <div style={{
+                    ...css.input, background: '#f9fafb', color: '#111827', fontWeight: 600,
+                    display: 'flex', alignItems: 'center', minHeight: 42,
+                  }}>
+                    {templateCategoryLabel(siteTemplateCategory(site))}
+                  </div>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                   {[
                     { key: 'name', label: '사이트명 *', ph: '홍길동 카페', req: true },
@@ -967,7 +953,7 @@ export default function CustomerPortal({ params }) {
                     ))}
                     <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid #f3f4f6', display: 'flex', justifyContent: 'flex-end' }}>
                       {canCancel && (
-                        <button onClick={handleCancelSubscription}
+                        <button data-testid="admin-cancel-sub" onClick={handleCancelSubscription}
                           style={{ fontSize: 12, color: '#ef4444', background: 'none', border: '1px solid #fecaca', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}>
                           구독 해지
                         </button>
@@ -979,7 +965,7 @@ export default function CustomerPortal({ params }) {
                         </button>
                       )}
                       {isCancelled && (
-                        <button onClick={() => router.push(paymentCardPath(siteCode))}
+                        <button data-testid="admin-resubscribe" onClick={() => router.push(paymentCardPath(siteCode))}
                           style={{ fontSize: 12, color: 'white', background: '#111827', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontWeight: 600 }}>
                           재구독하기 →
                         </button>

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { siteAdminPath, sitePublicPath, sitePublicHostname } from '@/lib/site-paths'
 import { codeLabel } from '@/lib/common-codes'
 import AuthUserBar from '@/components/AuthUserBar'
+import { siteTemplateCategory, templateCategoryLabel } from '@/lib/template-category'
 
 /**
  * 사장님 사이트 관리 — left 메뉴 셸 (아임웹식 섹션 > 대메뉴 > 소메뉴)
@@ -113,6 +114,7 @@ export default function SiteAdminShell({
   onLogout,
   children,
 }) {
+  const typeLabel = templateCategoryLabel(siteTemplateCategory(site), '')
   const sidebar = (
     <aside style={{
       width: 220, flexShrink: 0, background: '#fff', borderRight: '1px solid #e5e7eb',
@@ -132,7 +134,7 @@ export default function SiteAdminShell({
               {site?.name}
             </div>
             <div style={{ fontSize: 10, color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {sitePublicHostname(site?.subdomain)}
+              {typeLabel ? `${typeLabel} · ` : ''}{sitePublicHostname(site?.subdomain)}
             </div>
           </div>
         </div>
@@ -190,6 +192,7 @@ export default function SiteAdminShell({
                 <div key={item.key} style={{ marginBottom: 4 }}>
                   <button
                     type="button"
+                    data-testid={`admin-nav-${item.key}`}
                     onClick={() => {
                       if (hasChildren) { onToggleGroup(item.key); return }
                       onMenuChange(item.key)
@@ -215,6 +218,7 @@ export default function SiteAdminShell({
                           <button
                             key={child.key}
                             type="button"
+                            data-testid={`admin-nav-${child.key}`}
                             onClick={() => {
                               onMenuChange(child.key)
                               onMobileOpen?.(false)

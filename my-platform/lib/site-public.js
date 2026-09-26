@@ -39,20 +39,13 @@ export async function getVisitorSiteBundle(siteCode) {
       .eq('site_id', site.site_id)
   ).maybeSingle()
 
+  // 해지일 도래 — 쓰기는 청구 배치. 여기선 hidden 표시만
   if (sub?.cancels_at && new Date(sub.cancels_at) <= new Date() && !sub.cancelled_at) {
-    const now = new Date().toISOString()
-    await supabase.from('subscriptions')
-      .update({ cancelled_at: now, updated_at: now })
-      .eq('subscription_id', sub.subscription_id)
-    await supabase.from('sites')
-      .update({ status: 'suspended', updated_at: now })
-      .eq('site_id', site.site_id)
     const suspended = { ...site, status: 'suspended' }
-    const endedSub = { ...sub, cancelled_at: now }
     return {
       site: suspended,
       inquiry: null,
-      subscription: endedSub,
+      subscription: sub,
       ...resolveSiteVisibility(suspended),
     }
   }

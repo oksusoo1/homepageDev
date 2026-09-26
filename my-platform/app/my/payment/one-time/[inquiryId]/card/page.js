@@ -6,11 +6,11 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { requireAuthUser } from '@/lib/auth'
 import {
-  completeStageCardMock,
   getStageAmount,
   loadInquiryForPayment,
   stageMeta,
 } from '@/lib/payment/one-time'
+import { payStageCardMockAction } from '@/app/my/actions'
 import { oneTimePaymentMethodPath } from '@/lib/payment/paths'
 import DevFeeSummary from '@/components/DevFeeSummary'
 import PaymentResultPanel from '@/components/PaymentResultPanel'
@@ -23,8 +23,6 @@ function CardPageInner() {
   const stage = searchParams.get('stage') === 'down' ? 'down' : 'final'
   const meta = stageMeta(stage)
   const [inquiry, setInquiry] = useState(null)
-  const [customerId, setCustomerId] = useState(null)
-  const [linkedSiteId, setLinkedSiteId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [blocked, setBlocked] = useState('')
@@ -39,7 +37,6 @@ function CardPageInner() {
 
     const { data: cust } = await supabase.from('customers').select('customer_id').eq('auth_id', user.id).single()
     if (!cust) { router.push('/login'); return }
-    setCustomerId(cust.customer_id)
 
     const result = await loadInquiryForPayment(supabase, inquiryId, cust.customer_id, stage)
     if (!result.ok) {
@@ -49,31 +46,16 @@ function CardPageInner() {
     }
 
     setInquiry(result.inquiry)
-
-    const { data: site } = await supabase
-      .from('sites')
-      .select('site_id')
-      .eq('inquiry_id', inquiryId)
-      .eq('use_flag', 1)
-      .maybeSingle()
-    if (site) setLinkedSiteId(site.site_id)
-
     setLoading(false)
   }
 
   async function handleMockPay() {
     setError('')
     setSubmitting(true)
-    const { error } = await completeStageCardMock(supabase, {
-      inquiryId,
-      customerId,
-      siteId: linkedSiteId,
-      inquiry,
-      stage,
-    })
+    const res = await payStageCardMockAction(inquiryId, { stage })
     setSubmitting(false)
-    if (error) {
-      setError(error)
+    if (!res.ok) {
+      setError(res.error)
       return
     }
     setPaid(true)

@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { requireAuthUser, isPlatformAdmin } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
-import { deploySite as deployAction } from '@/lib/deploy'
-import { getBillingReadiness, paymentMethodUrl } from '@/lib/billing'
+import { paymentMethodUrl } from '@/lib/billing'
+import { deploySiteAction } from '@/app/s/[siteCode]/admin/actions'
 import {
   paymentCardPath,
   siteAdminPath,
@@ -297,36 +297,26 @@ export default function EditorPage({ params }) {
       setTimeout(() => setSaveMsg(''), 3500)
       return
     }
-    const { data: card } = await onlyActive(
-      supabase
-        .from('customer_payment_methods')
-        .select('payment_method_id, card_name, card_last4')
-        .eq('customer_id', customer.customer_id)
-    ).maybeSingle()
 
-    const { data: existingSub } = await onlyActive(
-      supabase.from('subscriptions').select('*').eq('site_id', site.site_id)
-    ).maybeSingle()
-
-    const billing = getBillingReadiness(card, existingSub, site)
-    if (!billing.ready) {
-      router.push(paymentMethodUrl(siteCode, 'deploy'))
+    setDeploying(true)
+    const res = await deploySiteAction(siteCode)
+    if (!res.ok) {
+      setSaveMsg('❌ ' + res.error)
+      setDeploying(false)
+      setTimeout(() => setSaveMsg(''), 3500)
       return
     }
 
-    setDeploying(true)
-    const { error, trialEndsAt } = await deployAction(
-      site.site_id, site.customer_id, existingSub, site, billing.method
-    )
-
-    if (!error) {
-      setSite(prev => ({ ...prev, status: 'trial', trial_ends_at: trialEndsAt }))
-      const { data: sub } = await onlyActive(
-        supabase.from('subscriptions').select('*').eq('site_id', site.site_id)
-      ).maybeSingle()
-      setDeployed({ trialEndsAt, card, subscription: sub })
-      setShowDeployModal(true)
+    if (res.data.requireBillingSetup) {
+      router.push(paymentMethodUrl(siteCode, 'deploy'))
+      setDeploying(false)
+      return
     }
+
+    const { trialEndsAt, card, subscription: sub } = res.data
+    setSite(prev => ({ ...prev, status: 'trial', trial_ends_at: trialEndsAt }))
+    setDeployed({ trialEndsAt, card, subscription: sub })
+    setShowDeployModal(true)
     setDeploying(false)
   }
 

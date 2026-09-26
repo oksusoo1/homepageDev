@@ -207,6 +207,7 @@ function LoginForm() {
                 <label style={labelStyle}>이메일</label>
                 <input
                   type="email" value={loginForm.email} required
+                  data-testid="login-email"
                   onChange={e => setLoginForm({ ...loginForm, email: e.target.value })}
                   placeholder="example@email.com" style={inputStyle}
                 />
@@ -215,6 +216,7 @@ function LoginForm() {
                 <label style={labelStyle}>비밀번호</label>
                 <input
                   type="password" value={loginForm.password} required
+                  data-testid="login-password"
                   onChange={e => setLoginForm({ ...loginForm, password: e.target.value })}
                   placeholder="••••••••" style={inputStyle}
                 />
@@ -226,7 +228,7 @@ function LoginForm() {
                 </div>
               )}
 
-              <button type="submit" disabled={loading} style={{
+              <button type="submit" disabled={loading} data-testid="login-submit" style={{
                 width: '100%', padding: '12px',
                 background: '#111827', color: 'white', border: 'none',
                 borderRadius: 8, fontSize: 14, fontWeight: 700,

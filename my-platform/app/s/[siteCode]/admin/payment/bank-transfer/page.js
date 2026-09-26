@@ -5,10 +5,10 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { requireAuthUser } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
-import { deploySite } from '@/lib/deploy'
 import { assertPaymentSetupAllowed } from '@/lib/billing'
-import { getBankAccountText, registerBankTransfer } from '@/lib/billing'
+import { getBankAccountText } from '@/lib/billing'
 import { paymentMethodPath, siteAdminPath } from '@/lib/site-paths'
+import { registerBankTransferAction } from '@/app/s/[siteCode]/admin/actions'
 
 function BankTransferForm() {
   const router = useRouter()
@@ -18,8 +18,6 @@ function BankTransferForm() {
   const redirectParam = searchParams.get('redirect')
 
   const [site, setSite] = useState(null)
-  const [customer, setCustomer] = useState(null)
-  const [subscription, setSubscription] = useState(null)
   const [depositorName, setDepositorName] = useState('')
   const [agreed, setAgreed] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -38,7 +36,6 @@ function BankTransferForm() {
       supabase.from('customers').select('*').eq('auth_id', user.id)
     ).single()
     if (!cust) { router.push('/login'); return }
-    setCustomer(cust)
     setDepositorName(cust.name || '')
 
     const { data: siteData } = await onlyActive(
@@ -56,9 +53,8 @@ function BankTransferForm() {
     setSite(siteData)
 
     const { data: sub } = await onlyActive(
-      supabase.from('subscriptions').select('*').eq('site_id', siteData.site_id)
+      supabase.from('subscriptions').select('depositor_name').eq('site_id', siteData.site_id)
     ).maybeSingle()
-    setSubscription(sub)
     if (sub?.depositor_name) setDepositorName(sub.depositor_name)
 
     setLoading(false)
@@ -70,30 +66,20 @@ function BankTransferForm() {
     if (!agreed) { setError('이용 안내에 동의해 주세요.'); return }
 
     setSubmitting(true)
-    const reg = await registerBankTransfer(supabase, {
-      customerId: customer.customer_id,
-      siteId: site.site_id,
+    const res = await registerBankTransferAction(siteCode, {
       depositorName,
+      alsoDeploy: redirectParam === 'deploy',
     })
-    if (reg.error) {
-      setError(reg.error)
+    if (!res.ok) {
+      setError(res.error)
       setSubmitting(false)
       return
     }
-
-    const { data: sub } = await onlyActive(
-      supabase.from('subscriptions').select('*').eq('site_id', site.site_id)
-    ).maybeSingle()
-
-    if (redirectParam === 'deploy' && site) {
-      const { error: deployErr } = await deploySite(
-        site.site_id, customer.customer_id, sub, site, 'manual'
-      )
-      if (deployErr) {
-        setError(deployErr)
-        setSubmitting(false)
-        return
-      }
+    if (res.data?.requireBillingSetup && redirectParam === 'deploy') {
+      router.push(paymentMethodPath(siteCode, 'deploy'))
+      return
+    }
+    if (redirectParam === 'deploy') {
       router.push(siteAdminPath(siteCode))
       return
     }

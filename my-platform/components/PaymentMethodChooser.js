@@ -29,7 +29,7 @@ export default function PaymentMethodChooser({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Link href={cardHref} style={paymentMethodCardStyle}>
+        <Link href={cardHref} data-testid="otp-choose-card" style={paymentMethodCardStyle}>
           <span style={{ fontSize: 28 }}>💳</span>
           <div>
             <div style={{ fontWeight: 700, fontSize: 15 }}>{cardTitle}</div>
@@ -37,7 +37,7 @@ export default function PaymentMethodChooser({
           </div>
         </Link>
 
-        <Link href={bankHref} style={paymentMethodCardStyle}>
+        <Link href={bankHref} data-testid="otp-choose-bank" style={paymentMethodCardStyle}>
           <span style={{ fontSize: 28 }}>🏦</span>
           <div>
             <div style={{ fontWeight: 700, fontSize: 15 }}>{bankTitle}</div>

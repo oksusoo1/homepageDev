@@ -38,18 +38,13 @@ function CardSuccessForm() {
         setStatus('error'); setErrorMsg('인증 정보가 없습니다.'); return
       }
 
-      const { data: cust } = await onlyActive(
-        supabase.from('customers').select('*').eq('auth_id', user.id)
-      ).single()
-
       const res = await fetch('/api/payment/billing-auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           authKey,
           customerKey,
-          customerId: cust.customer_id,
-          siteId: siteData?.site_id,
+          siteCode,
         }),
       })
 

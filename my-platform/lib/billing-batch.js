@@ -6,11 +6,19 @@
  * 카드: next_billing_date 다음날부터 결제 MOCK → billing_history paid, sites→subscribed
  * 계좌: D-5~D-day 매일 리마인드 로그 / 미납 +2일 초과 시 sites→suspended
  * 청구 대상: sites.status trial|subscribed + cancelled_at NULL
+ * 해지 예정일 도래(cancels_at ≤ asOf, cancelled_at NULL) → cancelled_at + sites.suspended
  */
 
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@supabase/supabase-js'
 import { onlyActive } from '@/lib/use-flag'
 import { isBillableSubscription } from '@/lib/subscription-life'
+
+function defaultClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  )
+}
 
 function parseDate(ymd) {
   const [y, m, d] = ymd.split('-').map(Number)
@@ -47,8 +55,8 @@ function periodFromDate(ymd) {
   return ymd.slice(0, 7) // YYYY-MM
 }
 
-async function logNotification({ type, siteId, customerId, subscriptionId, asOfDate, payload }) {
-  const { error } = await supabase.from('notification_logs').insert({
+async function logNotification(db, { type, siteId, customerId, subscriptionId, asOfDate, payload }) {
+  const { error } = await db.from('notification_logs').insert({
     type,
     channel: 'mock_alimtalk',
     site_id: siteId,
@@ -62,25 +70,55 @@ async function logNotification({ type, siteId, customerId, subscriptionId, asOfD
   return !error
 }
 
+function cancelDateYmd(sub) {
+  if (!sub?.cancels_at) return null
+  return String(sub.cancels_at).slice(0, 10)
+}
+
+/** 해지 예정일 당일·이후 — 청구·리마인드 제외 */
+function isPastCancelDate(sub, asOf) {
+  const due = cancelDateYmd(sub)
+  return !!due && due <= asOf
+}
+
+function normalizeSiteIds(siteIds) {
+  if (!Array.isArray(siteIds) || siteIds.length === 0) return null
+  const ids = [...new Set(siteIds.map(id => String(id || '').trim()).filter(Boolean))]
+  return ids.length ? ids : null
+}
+
+function withSiteIds(query, siteIds) {
+  return siteIds ? query.in('site_id', siteIds) : query
+}
+
 /**
- * @param {{ asOfDate?: string }} opts asOfDate 기본=실제 오늘
+ * @param {{ asOfDate?: string, siteIds?: string[] }} opts asOfDate 기본=실제 오늘. siteIds 있으면 그 사이트만
  * @returns {Promise<{ asOfDate: string, actions: object[] }>}
  */
-export async function runBillingBatch({ asOfDate } = {}) {
+export async function runBillingBatch({ asOfDate, client, siteIds } = {}) {
+  const db = client || defaultClient()
   const asOf = asOfDate || formatDate(new Date())
+  const onlySites = normalizeSiteIds(siteIds)
   const actions = []
 
+  // 1) 해지 예정일 도래부터 — 이후 청구 조회가 최신 cancelled_at/status를 보게
+  await applyDueCancellations(db, asOf, actions, onlySites)
+
   const { data: subs, error } = await onlyActive(
-    supabase
-      .from('subscriptions')
-      .select('*, sites(site_id, name, subdomain, status, customer_id)')
-      .is('cancelled_at', null)
-      .not('next_billing_date', 'is', null)
+    withSiteIds(
+      db
+        .from('subscriptions')
+        .select('*, sites(site_id, name, subdomain, status, customer_id)')
+        .is('cancelled_at', null)
+        .not('next_billing_date', 'is', null),
+      onlySites,
+    )
   )
 
   if (error) throw error
 
   for (const sub of subs || []) {
+    if (isPastCancelDate(sub, asOf)) continue
     const site = Array.isArray(sub.sites) ? sub.sites[0] : sub.sites
     if (!isBillableSubscription(site, sub)) continue
 
@@ -88,16 +126,65 @@ export async function runBillingBatch({ asOfDate } = {}) {
     const method = sub.payment_method // card | manual
 
     if (method === 'card') {
-      await runCardTask({ sub, site, due, asOf, actions })
+      await runCardTask(db, { sub, site, due, asOf, actions })
     } else if (method === 'manual') {
-      await runBankTasks({ sub, site, due, asOf, actions })
+      await runBankTasks(db, { sub, site, due, asOf, actions })
     }
   }
 
   return { asOfDate: asOf, actions, count: actions.length }
 }
 
-async function runCardTask({ sub, site, due, asOf, actions }) {
+/**
+ * 해지 예정일 도래 → cancelled_at 없으면 기록 + sites.suspended
+ */
+async function applyDueCancellations(db, asOf, actions, siteIds = null) {
+  const { data: dueSubs, error } = await onlyActive(
+    withSiteIds(
+      db
+        .from('subscriptions')
+        .select('subscription_id, cancels_at, cancelled_at, site_id, sites(site_id, name, subdomain, status)')
+        .not('cancels_at', 'is', null),
+      siteIds,
+    )
+  )
+  if (error) throw error
+
+  for (const sub of dueSubs || []) {
+    const due = cancelDateYmd(sub)
+    if (!due || due > asOf) continue
+
+    const site = Array.isArray(sub.sites) ? sub.sites[0] : sub.sites
+    const now = new Date().toISOString()
+    const alreadyEnded = !!sub.cancelled_at && site?.status === 'suspended'
+    if (alreadyEnded) continue
+
+    if (!sub.cancelled_at) {
+      const { error: subErr } = await db.from('subscriptions').update({
+        cancelled_at: now,
+        updated_at: now,
+      }).eq('subscription_id', sub.subscription_id)
+      if (subErr) throw subErr
+    }
+
+    if (site?.site_id && site.status !== 'suspended') {
+      const { error: siteErr } = await db.from('sites').update({
+        status: 'suspended',
+        updated_at: now,
+      }).eq('site_id', site.site_id)
+      if (siteErr) throw siteErr
+    }
+
+    actions.push({
+      task: 'cancel_due',
+      subscription_id: sub.subscription_id,
+      site: site?.subdomain,
+      cancels_at: due,
+    })
+  }
+}
+
+async function runCardTask(db, { sub, site, due, asOf, actions }) {
   // trial/청구일 다음날부터 결제
   const chargeFrom = addDays(due, 1)
   if (asOf < chargeFrom) return
@@ -105,7 +192,7 @@ async function runCardTask({ sub, site, due, asOf, actions }) {
   const period = periodFromDate(due)
 
   const { data: existing } = await onlyActive(
-    supabase
+    db
       .from('billing_history')
       .select('billing_id, status')
       .eq('subscription_id', sub.subscription_id)
@@ -118,7 +205,7 @@ async function runCardTask({ sub, site, due, asOf, actions }) {
   const amount = sub.amount || 30000
 
   if (existing) {
-    const { error } = await supabase.from('billing_history').update({
+    const { error } = await db.from('billing_history').update({
       status: 'paid',
       payment_method: 'card',
       paid_at: now,
@@ -127,7 +214,7 @@ async function runCardTask({ sub, site, due, asOf, actions }) {
     }).eq('billing_id', existing.billing_id)
     if (error) throw error
   } else {
-    const { error } = await supabase.from('billing_history').insert({
+    const { error } = await db.from('billing_history').insert({
       subscription_id: sub.subscription_id,
       period,
       amount,
@@ -141,21 +228,21 @@ async function runCardTask({ sub, site, due, asOf, actions }) {
   }
 
   const nextDue = addMonths(due, 1)
-  const { error: subErr } = await supabase.from('subscriptions').update({
+  const { error: subErr } = await db.from('subscriptions').update({
     next_billing_date: nextDue,
     updated_at: now,
   }).eq('subscription_id', sub.subscription_id)
   if (subErr) throw subErr
 
   if (site.status !== 'subscribed') {
-    const { error: siteErr } = await supabase.from('sites').update({
+    const { error: siteErr } = await db.from('sites').update({
       status: 'subscribed',
       updated_at: now,
     }).eq('site_id', site.site_id)
     if (siteErr) throw siteErr
   }
 
-  const logged = await logNotification({
+  const logged = await logNotification(db, {
     type: 'card_charged',
     siteId: site.site_id,
     customerId: site.customer_id || sub.customer_id,
@@ -175,13 +262,13 @@ async function runCardTask({ sub, site, due, asOf, actions }) {
   })
 }
 
-async function runBankTasks({ sub, site, due, asOf, actions }) {
+async function runBankTasks(db, { sub, site, due, asOf, actions }) {
   const daysUntilDue = -diffDays(asOf, due) // due - asOf: 양수면 아직 남음
   const daysPastDue = diffDays(asOf, due)   // asOf - due
 
   const period = periodFromDate(due)
   const { data: bill } = await onlyActive(
-    supabase
+    db
       .from('billing_history')
       .select('billing_id, status')
       .eq('subscription_id', sub.subscription_id)
@@ -192,7 +279,7 @@ async function runBankTasks({ sub, site, due, asOf, actions }) {
 
   // D-5 ~ D-day 리마인드 (미납일 때)
   if (!paid && daysUntilDue >= 0 && daysUntilDue <= 5) {
-    const logged = await logNotification({
+    const logged = await logNotification(db, {
       type: 'bank_remind',
       siteId: site.site_id,
       customerId: site.customer_id || sub.customer_id,
@@ -217,14 +304,14 @@ async function runBankTasks({ sub, site, due, asOf, actions }) {
   // 미납 +2일 초과 → 정지
   if (!paid && daysPastDue > 2) {
     if (site.status !== 'suspended') {
-      const { error } = await supabase.from('sites').update({
+      const { error } = await db.from('sites').update({
         status: 'suspended',
         updated_at: new Date().toISOString(),
       }).eq('site_id', site.site_id)
       if (error) throw error
     }
 
-    const logged = await logNotification({
+    const logged = await logNotification(db, {
       type: 'bank_suspend',
       siteId: site.site_id,
       customerId: site.customer_id || sub.customer_id,

@@ -98,7 +98,7 @@ export default function SiteVisibilityGate({ site, siteCode, visibility: visibil
   if (state === 'denied') {
     const isProducer = resolved === 'producer'
     return (
-      <div className="min-h-screen bg-[#fafaf9] flex items-center justify-center font-sans px-5">
+      <div className="min-h-screen bg-[#fafaf9] flex items-center justify-center font-sans px-5" data-testid="site-gate-blocked">
         <div className="text-center max-w-md">
           <div className="text-5xl mb-4">{isProducer ? '🛠' : '🔍'}</div>
           <h1 className="text-xl font-bold text-stone-900 mb-2">

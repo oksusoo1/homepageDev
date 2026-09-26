@@ -179,6 +179,7 @@ export async function submitStageBankTransfer(supabase, { inquiry, customerId, s
 
 /**
  * 카드 결제 목업 — 즉시 승인 (PG 연동 전)
+ * MOCK: 실결제 연동 시 PG 승인 확인 후에만 paid 처리
  * 선금: down_paid_at + sites.status=building · 잔금: final_paid_at + sites.status=pay_method
  */
 export async function completeStageCardMock(supabase, { inquiryId, customerId, siteId, inquiry, stage }) {

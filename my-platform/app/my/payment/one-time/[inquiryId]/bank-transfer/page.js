@@ -9,9 +9,9 @@ import { getBankAccountText } from '@/lib/payment/common'
 import {
   getStageAmount,
   loadInquiryForPayment,
-  submitStageBankTransfer,
   stageMeta,
 } from '@/lib/payment/one-time'
+import { requestStageBankConfirmAction } from '@/app/my/actions'
 import { oneTimePaymentMethodPath } from '@/lib/payment/paths'
 import DevFeeSummary from '@/components/DevFeeSummary'
 import PaymentResultPanel from '@/components/PaymentResultPanel'
@@ -24,8 +24,6 @@ function BankTransferPageInner() {
   const stage = searchParams.get('stage') === 'down' ? 'down' : 'final'
   const meta = stageMeta(stage)
   const [inquiry, setInquiry] = useState(null)
-  const [customer, setCustomer] = useState(null)
-  const [linkedSiteId, setLinkedSiteId] = useState(null)
   const [depositorName, setDepositorName] = useState('')
   const [agreed, setAgreed] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -44,7 +42,6 @@ function BankTransferPageInner() {
 
     const { data: cust } = await supabase.from('customers').select('*').eq('auth_id', user.id).single()
     if (!cust) { router.push('/login'); return }
-    setCustomer(cust)
     setDepositorName(cust.name || '')
 
     const result = await loadInquiryForPayment(supabase, inquiryId, cust.customer_id, stage)
@@ -55,15 +52,6 @@ function BankTransferPageInner() {
     }
 
     setInquiry(result.inquiry)
-
-    const { data: site } = await supabase
-      .from('sites')
-      .select('site_id')
-      .eq('inquiry_id', inquiryId)
-      .eq('use_flag', 1)
-      .maybeSingle()
-    if (site) setLinkedSiteId(site.site_id)
-
     setLoading(false)
   }
 
@@ -73,17 +61,11 @@ function BankTransferPageInner() {
     if (!agreed) { setError('안내 사항에 동의해 주세요.'); return }
 
     setSubmitting(true)
-    const reg = await submitStageBankTransfer(supabase, {
-      inquiry,
-      customerId: customer.customer_id,
-      siteId: linkedSiteId,
-      depositorName,
-      stage,
-    })
+    const res = await requestStageBankConfirmAction(inquiryId, { depositorName, stage })
     setSubmitting(false)
 
-    if (reg.error) {
-      setError(reg.error)
+    if (!res.ok) {
+      setError(res.error)
       return
     }
 
@@ -144,6 +126,7 @@ function BankTransferPageInner() {
 
           <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6 }}>입금자명</label>
           <input
+            data-testid="otp-depositor"
             value={depositorName}
             onChange={e => setDepositorName(e.target.value)}
             required
@@ -154,7 +137,7 @@ function BankTransferPageInner() {
           />
 
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: '#6b7280', marginBottom: 20, cursor: 'pointer' }}>
-            <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} style={{ marginTop: 3 }} />
+            <input type="checkbox" data-testid="otp-agree" checked={agreed} onChange={e => setAgreed(e.target.checked)} style={{ marginTop: 3 }} />
             <span>위 계좌로 입금했으며, 본사 확인 전에는 다음 단계로 넘어가지 않음을 이해합니다.</span>
           </label>
 
@@ -164,6 +147,7 @@ function BankTransferPageInner() {
 
           <button
             type="submit"
+            data-testid="otp-submit"
             disabled={submitting}
             style={{
               width: '100%', padding: '14px 0', background: submitting ? '#9ca3af' : '#111827',

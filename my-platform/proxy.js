@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
 
 const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN || 'localhost:3000'
 const SITE_HOST_ROOT = process.env.NEXT_PUBLIC_SITE_HOST_ROOT || 'myplatform.com'
@@ -14,37 +15,63 @@ function isPlatformHost(host) {
   return false
 }
 
+function withSessionCookies(response, cookiesToSet) {
+  cookiesToSet.forEach(({ name, value, options }) => {
+    response.cookies.set(name, value, options)
+  })
+  return response
+}
+
 /**
  * 고객 사이트 서브도메인 → /s/{code} 내부 rewrite
- * hongcafe.myplatform.com/board → /s/hongcafe/board
- * hongcafe.myplatform.com/admin → /s/hongcafe/admin
+ * + 세션 쿠키 갱신 (rewrite 경로는 그대로)
  */
-export function proxy(request) {
+export async function proxy(request) {
+  const cookiesToSet = []
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(toSet) {
+          toSet.forEach(({ name, value }) => request.cookies.set(name, value))
+          cookiesToSet.push(...toSet)
+        },
+      },
+    }
+  )
+
+  await supabase.auth.getUser()
+
   const host = request.headers.get('host') || ''
   const url = request.nextUrl.clone()
 
   if (isPlatformHost(host)) {
-    return NextResponse.next()
+    return withSessionCookies(NextResponse.next(), cookiesToSet)
   }
 
   const bareHost = host.split(':')[0]
   const rootSuffix = `.${SITE_HOST_ROOT}`
 
   if (!bareHost.endsWith(rootSuffix)) {
-    return NextResponse.next()
+    return withSessionCookies(NextResponse.next(), cookiesToSet)
   }
 
   const sub = bareHost.slice(0, -rootSuffix.length)
   if (!sub || sub === 'www' || sub.includes('.')) {
-    return NextResponse.next()
+    return withSessionCookies(NextResponse.next(), cookiesToSet)
   }
 
   if (url.pathname.startsWith('/s/')) {
-    return NextResponse.next()
+    return withSessionCookies(NextResponse.next(), cookiesToSet)
   }
 
   url.pathname = `/s/${sub}${url.pathname === '/' ? '' : url.pathname}`
-  return NextResponse.rewrite(url)
+  return withSessionCookies(NextResponse.rewrite(url), cookiesToSet)
 }
 
 export const config = {

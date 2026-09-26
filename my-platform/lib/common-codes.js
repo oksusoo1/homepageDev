@@ -14,6 +14,21 @@ export function clearCommonCodeCache() {
   cache = null
 }
 
+/** 서버에서 받은 행으로 캐시 (브라우저 supabase 조회 없이) */
+export function applyCommonCodesCache(codes) {
+  const byGroup = {}
+  for (const c of codes || []) {
+    if (c.use_flag === 0) continue
+    const gc = c.group_code
+    if (!gc) continue
+    if (!byGroup[gc]) byGroup[gc] = []
+    byGroup[gc].push(c)
+  }
+  const groups = Object.keys(byGroup).sort()
+  cache = { groups, byGroup, loadedAt: Date.now() }
+  return cache
+}
+
 /**
  * @param {{ force?: boolean }} [opts]
  */

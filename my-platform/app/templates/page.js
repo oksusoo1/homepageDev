@@ -5,17 +5,7 @@ import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import { onlyActive } from '@/lib/use-flag'
 import { requireAuthUser } from '@/lib/auth'
-
-// 카테고리 메타 정보
-const CATEGORY_META = {
-  all:        { label: '전체',     icon: '🗂' },
-  cafe:       { label: '카페',     icon: '☕' },
-  restaurant: { label: '식당',     icon: '🍽' },
-  salon:      { label: '미용실',   icon: '💇' },
-  clinic:     { label: '병원/의원', icon: '🏥' },
-  academy:    { label: '학원',     icon: '📚' },
-  general:    { label: '일반 소개', icon: '🏢' },
-}
+import { templateCategoryMeta } from '@/lib/template-category'
 
 // 카테고리별 썸네일 색상 (thumbnail_url 없을 때)
 const CATEGORY_COLOR = {
@@ -115,7 +105,7 @@ export default function TemplatesPage() {
         padding: '0 20px 32px', flexWrap: 'wrap',
       }}>
         {availableCategories.map(cat => {
-          const meta = CATEGORY_META[cat] || { label: cat, icon: '📁' }
+          const meta = templateCategoryMeta(cat)
           const isActive = activeTab === cat
           return (
             <button
@@ -144,11 +134,12 @@ export default function TemplatesPage() {
       }}>
         {filtered.map(template => {
           const color = CATEGORY_COLOR[template.category] || CATEGORY_COLOR.general
-          const meta = CATEGORY_META[template.category] || { label: template.category, icon: '📁' }
+          const meta = templateCategoryMeta(template.category)
 
           return (
             <div
               key={template.template_id}
+              data-testid="template-card"
               style={{
                 background: 'white', borderRadius: 14,
                 border: '1px solid #e5e7eb', overflow: 'hidden',

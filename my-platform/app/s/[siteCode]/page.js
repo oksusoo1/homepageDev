@@ -6,6 +6,7 @@ import { loadBoards } from '@/lib/user-board'
 import SiteVisibilityGate from '@/components/SiteVisibilityGate'
 import SiteHeader from '@/components/SiteHeader'
 import { onlyActive } from '@/lib/use-flag'
+import { isCancelDue } from '@/lib/subscription-life'
 
 /** 최근 공지 — 공지(notice) 게시판 글만 */
 async function getRecentNotices(supabase, noticeBoard) {
@@ -49,8 +50,7 @@ export default async function CustomerSitePage({ params }) {
   const { site, visibility } = bundle
 
   if (visibility === 'hidden') {
-    const ended = !!bundle.subscription?.cancelled_at
-      && (!bundle.subscription.cancels_at || new Date(bundle.subscription.cancels_at) <= new Date())
+    const ended = isCancelDue(bundle.subscription) || !!bundle.subscription?.cancelled_at
     return <HiddenSitePage cancelled={ended} />
   }
 

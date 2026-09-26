@@ -11,15 +11,19 @@
 ## 고객 플로우
 > 상세: @my-platform/docs/플로우.md — 진도 SSOT = `sites.status` (FLOW_STEP)
 - 루트 A 셀프: 가입 → 템플릿 선택 → 에디터 편집 → 결제수단 등록 → 14일 체험 → 구독
-  - `building → preview → pay_method → trial → subscribed`
+  - `building → pay_method → trial → subscribed`
 - 루트 B 대리: 가입 → 제작의뢰 → 견적·선금 → 본사 제작 → 검토 → 잔금 → 결제수단 등록 → 체험 → 구독
   - `intake → deposit → building → preview → balance → pay_method → trial → subscribed`
 - 공통: 체험 후 월 3만원 청구(카드 자동 / 계좌이체), 미납 시 `suspended`. 도메인 연결은 직원 대행(5만원 선택)
 
-## 인증 (v1.2)
+## 인증 (v1.3)
+- 세션: `@supabase/ssr` 쿠키 (브라우저 `lib/supabase.js` · 서버 `lib/supabase/server.js`)
 - 고객: `/login` 회원가입 → `auth.users` + `customers` → `/my`
 - 관리자: Supabase UI Create user + `staff` INSERT → `/platform` (`role=platform_admin`)
-- 코드: `lib/auth.js` — `requireAuthUser()`, `isPlatformAdmin()`, `getPostLoginPath()`
+- 브라우저 표시용: `lib/auth.js` — `requireAuthUser()`, `isPlatformAdmin()`, `getPostLoginPath()`
+- 서버 차단: `lib/server/guard.js` — `getServerUser()`, `requireStaff()`, `requireSiteOwner()`
+- `/platform` 은 `layout.js`에서 `requireStaff()` + DB는 `app/platform/actions.js` + `lib/supabase/admin.js` (service role)
+- 고객 결제·상태 전환: `app/s/[siteCode]/admin/actions.js` · `app/my/actions.js` (`requireOwnedSiteByCode` / `requireOwnedInquiry`)
 - 문서: `docs/플로우.md` · `docs/db/테이블명세.md` · `docs/db/ERD.md`
 
 ## 기술 스택
@@ -35,15 +39,15 @@
 - /app/templates → 템플릿 선택 → /app/setup → 사이트 기본정보 생성
 - /app/my → 고객 내 사이트·제작의뢰 목록
 - /app/my/payment/one-time/[inquiryId] → 대리제작 잔금 결제 (method/card/bank-transfer)
-- /app/platform → 본사 관리자 콘솔 — **사이트 중심 5메뉴**: 대시보드(처리 필요 사이트) · 사이트(필터·처리필요 뱃지, 상세에서 견적·선금·잔금·1회성결제·구독청구·요청 처리) · 회원 · 고객 요청 · 개발(테스트·공통코드·개발문서)
+- /app/platform → 본사 관리자 콘솔 (서버 가드 + Server Actions) — **사이트 중심 5메뉴**: 대시보드 · 사이트 · 회원 · 고객 요청 · 개발
 - /app/s/[siteCode] → 사용자(방문자) 사이트 (멀티테넌트, `siteCode` = subdomain 우선, 없으면 site_code)
   - /board/[boardKey] → 게시판 (사이트당 여러 개, `user_boards`·`user_posts`·`user_comments`). 문의도 `qna` 게시판 — `/board` 는 첫 게시판으로 이동
   - /admin → **사장님 관리자** (아임웹식: 🔔알림 · 사이트 운영[대시보드·콘텐츠(게시물 관리·게시판 관리)] · 관리[결제·설정] · 도움[본사 요청]) — 메뉴 정의 `components/SiteAdminShell.js` `SITE_ADMIN_NAV`
   - /admin/editor → 심플 패널 에디터
   - /admin/payment/* → 구독 결제수단 등록 (method/card/bank-transfer)
 - /app/api → `cron/billing`(청구 배치 목업) · `payment/billing-auth`(토스 빌링키) · `docs`(개발문서)
-- /lib → 플로우·결제 로직 (`flow-step`, `site-flow`, `site-visibility`, `managed-flow`, `deploy`, `billing`, `billing-batch`, `subscription-life`, `payment/*`, `common-codes`, `use-flag`) · 게시판 (`user-board`, `user-board-public`)
-- proxy.js → 서브도메인 라우팅 (`{sub}.myplatform.com` → `/s/{sub}`, Next 16 middleware)
+- /lib → 플로우·결제 (`flow-step`, `site-flow`, `site-visibility`, `managed-flow`, `deploy`, `trial`, `billing`, `billing-batch`, `subscription-life`, `payment/*`, `common-codes`, `use-flag`) · 게시판 (`user-board`, `user-board-public`) · 서버 (`supabase/server`, `supabase/admin`, `server/guard`)
+- proxy.js → 서브도메인 rewrite + 세션 쿠키 갱신 (Next 16)
 
 ## DB 스키마 (현행)
 > 명세: @my-platform/docs/플로우.md · @my-platform/docs/db/테이블명세.md · @my-platform/docs/db/ERD.md
@@ -94,7 +98,14 @@
 - 2차 목표: 각 기능 세부 완성도 개선
 - 3차 목표: GrapesJS 에디터 연동, 카드 결제(토스페이먼츠), 판매자 구조 추가
 
-## 현재 진행 상황 (2026-09-22 기준)
+## 현재 진행 상황 (2026-09-25 기준)
+
+### 보안 ①② (완료)
+- `/platform` DB 조회·쓰기 = Server Actions + service role. 브라우저 anon 직접 호출 없음
+- 세션 쿠키(`@supabase/ssr`) · `requireStaff()` 레이아웃 차단
+- 고객 결제·상태 전환(`/s/.../admin` 서비스시작·카드·계좌·해지, `/my` 선금·잔금·접수취소) = Server Actions
+- 셀프 흐름에 preview 없음 (`building → pay_method → trial → subscribed`)
+- ③사장님 편집 ④방문자 공개범위 ⑤RLS 잠금 은 다음 단계
 
 ### 결제·청구 (목업)
 - 카드 등록: `app/s/[siteCode]/admin/payment/card/page.js` `MOCK_MODE = true` (실서비스 전환 시 false + 토스 키)
@@ -106,6 +117,6 @@
 ### 다음 작업 후보 (미구현)
 - 청구 배치 자동 실행(cron) 연결
 - 토스페이먼츠 실결제 연동
-- RLS 정책 강화 (현재 전 테이블 `USING (true)` + 클라이언트 anon 키 직접 쓰기)
+- 보안 ③~⑤: 사장님 편집·방문자 게이트·RLS 잠금 (현재 전 테이블 `USING (true)`, 편집·게시판은 아직 anon)
 - 템플릿 고도화 (상위/left 메뉴 노코드 구성, 카드형 콘텐츠 등) · GrapesJS 에디터
 - 판매자(에이전시) 구조

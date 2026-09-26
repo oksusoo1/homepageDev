@@ -19,7 +19,9 @@ export function canStartManagedService(inquiry, site) {
 
 export function canAccessPaymentSetup(site, inquiry) {
   if (!isManagedSite(site)) return true
-  return canStartManagedService(inquiry, site)
+  if (!inquiry?.final_paid_at) return false
+  const st = site?.status
+  return ['pay_method', 'trial', 'subscribed', 'suspended'].includes(st)
 }
 
 export function managedNeedsGoLive(site, inquiry) {

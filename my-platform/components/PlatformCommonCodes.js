@@ -1,11 +1,18 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { supabase } from '@/lib/supabase'
-import { USE_FLAG_OFF, USE_FLAG_ON } from '@/lib/use-flag'
-import { clearCommonCodeCache, loadCommonCodes } from '@/lib/common-codes'
+import { USE_FLAG_ON } from '@/lib/use-flag'
+import { applyCommonCodesCache, clearCommonCodeCache } from '@/lib/common-codes'
 import { matchesSearchQuery } from '@/lib/platform-list-search'
 import PlatformListSearch from '@/components/PlatformListSearch'
+import {
+  fetchCommonCodes,
+  fetchCommonCodesByGroup,
+  updateCommonCode,
+  insertCommonCode,
+  softDeleteCommonCode,
+  saveAllCommonCodes,
+} from '@/app/platform/actions'
 
 function buildCodeSearchResults(query, groupCodes, allCodes) {
   const q = String(query || '').trim()
@@ -56,13 +63,9 @@ export default function PlatformCommonCodes() {
     setLoading(true)
     setMsg('')
     try {
-      const { data, error } = await supabase
-        .from('common_codes')
-        .select('*')
-        .order('group_code')
-        .order('sort_order')
-      if (error) throw error
-      const list = data || []
+      const res = await fetchCommonCodes()
+      if (!res.ok) throw new Error(res.error)
+      const list = res.data || []
       setAllCodes(list)
       const groups = [...new Set(list.map(c => c.group_code).filter(Boolean))].sort()
       setGroupCodes(groups)
@@ -75,22 +78,19 @@ export default function PlatformCommonCodes() {
   }
 
   async function refreshCodes(gc) {
-    const { data, error } = await supabase
-      .from('common_codes')
-      .select('*')
-      .eq('group_code', gc)
-      .order('sort_order')
-    if (error) {
-      setMsg('❌ ' + error.message)
+    const res = await fetchCommonCodesByGroup(gc)
+    if (!res.ok) {
+      setMsg('❌ ' + res.error)
       return
     }
-    setCodes(data || [])
+    const data = res.data || []
+    setCodes(data)
     setAllCodes(prev => {
       const others = prev.filter(c => c.group_code !== gc)
-      return [...others, ...(data || [])]
+      return [...others, ...data]
     })
     const d = {}
-    for (const c of data || []) {
+    for (const c of data) {
       d[c.common_code_id] = {
         label: c.label || '',
         description: c.description || '',
@@ -106,15 +106,14 @@ export default function PlatformCommonCodes() {
     if (!d) return
     setBusy(true)
     setMsg('')
-    const { error } = await supabase.from('common_codes').update({
+    const res = await updateCommonCode(id, {
       label: d.label.trim(),
       description: d.description.trim() || null,
       sort_order: Number(d.sort_order) || 10,
-      use_flag: d.use_flag ? USE_FLAG_ON : USE_FLAG_OFF,
-      updated_at: new Date().toISOString(),
-    }).eq('common_code_id', id)
+      use_flag: d.use_flag ? USE_FLAG_ON : 0,
+    })
     setBusy(false)
-    if (error) setMsg('❌ ' + error.message)
+    if (!res.ok) setMsg('❌ ' + res.error)
     else {
       setMsg('✅ 저장됨 — 「코드 적용」을 누르면 화면 표시에 반영')
       await refreshCodes(groupCode)
@@ -125,30 +124,21 @@ export default function PlatformCommonCodes() {
     if (!codes.length) return
     setBusy(true)
     setMsg('')
-    const now = new Date().toISOString()
-    let fail = null
-    for (const c of codes) {
+    const rows = codes.map(c => {
       const d = drafts[c.common_code_id]
-      if (!d) continue
-      const label = (d.label || '').trim()
-      if (!label) {
-        fail = `코드 "${c.code}" 표시명이 비어 있습니다`
-        break
+      if (!d) return null
+      return {
+        common_code_id: c.common_code_id,
+        code: c.code,
+        label: d.label,
+        description: d.description,
+        sort_order: d.sort_order,
+        use_flag: d.use_flag ? USE_FLAG_ON : 0,
       }
-      const { error } = await supabase.from('common_codes').update({
-        label,
-        description: (d.description || '').trim() || null,
-        sort_order: Number(d.sort_order) || 10,
-        use_flag: d.use_flag ? USE_FLAG_ON : USE_FLAG_OFF,
-        updated_at: now,
-      }).eq('common_code_id', c.common_code_id)
-      if (error) {
-        fail = error.message
-        break
-      }
-    }
+    }).filter(Boolean)
+    const res = await saveAllCommonCodes(rows)
     setBusy(false)
-    if (fail) setMsg('❌ ' + fail)
+    if (!res.ok) setMsg('❌ ' + res.error)
     else {
       setMsg(`✅ ${codes.length}건 일괄 저장됨 — 「코드 적용」을 누르면 화면 표시에 반영`)
       await refreshCodes(groupCode)
@@ -158,12 +148,9 @@ export default function PlatformCommonCodes() {
   async function softDeleteCode(id, code) {
     if (!window.confirm(`코드 "${code}" 를 사용안함(use_flag=0) 처리할까요?`)) return
     setBusy(true)
-    const { error } = await supabase.from('common_codes').update({
-      use_flag: USE_FLAG_OFF,
-      updated_at: new Date().toISOString(),
-    }).eq('common_code_id', id)
+    const res = await softDeleteCommonCode(id)
     setBusy(false)
-    if (error) setMsg('❌ ' + error.message)
+    if (!res.ok) setMsg('❌ ' + res.error)
     else {
       setMsg('✅ 사용안함 처리')
       await refreshCodes(groupCode)
@@ -179,7 +166,7 @@ export default function PlatformCommonCodes() {
       return
     }
     setBusy(true)
-    const { error } = await supabase.from('common_codes').insert({
+    const res = await insertCommonCode({
       group_code: groupCode,
       code,
       label,
@@ -187,7 +174,7 @@ export default function PlatformCommonCodes() {
       sort_order: Number(newCode.sort_order) || 99,
     })
     setBusy(false)
-    if (error) setMsg('❌ ' + error.message)
+    if (!res.ok) setMsg('❌ ' + res.error)
     else {
       setNewCode({ code: '', label: '', description: '', sort_order: 99 })
       setMsg('✅ 코드 추가됨')
@@ -206,7 +193,9 @@ export default function PlatformCommonCodes() {
     setBusy(true)
     try {
       clearCommonCodeCache()
-      await loadCommonCodes({ force: true })
+      const res = await fetchCommonCodes()
+      if (!res.ok) throw new Error(res.error)
+      applyCommonCodesCache(res.data)
       setMsg('✅ 코드 적용됨 (캐시 갱신) — 목록 화면을 다시 열거나 새로고침하세요')
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('common-codes-applied'))

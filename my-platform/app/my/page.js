@@ -19,12 +19,14 @@ import {
   resolveSelfFlowStep,
   customerNextLine,
 } from '@/lib/flow-step'
-import { canCancelManagedIntake, cancelManagedIntake } from '@/lib/managed-flow'
+import { canCancelManagedIntake } from '@/lib/managed-flow'
+import { cancelManagedIntakeAction } from '@/app/my/actions'
 import DevFeeSummary from '@/components/DevFeeSummary'
 import { onlyActive } from '@/lib/use-flag'
 import { loadCommonCodes, codeLabel } from '@/lib/common-codes'
 import AuthUserBar from '@/components/AuthUserBar'
 import { countUnansweredBySite } from '@/lib/user-board'
+import { siteTemplateCategory, templateCategoryMeta } from '@/lib/template-category'
 
 export default function MySitesPage() {
   const router = useRouter()
@@ -133,7 +135,7 @@ export default function MySitesPage() {
     const { data: siteList } = await onlyActive(
       supabase
         .from('sites')
-        .select('*, subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
+        .select('*, templates(name, category), subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
         .eq('customer_id', cust.customer_id)
     ).order('created_at', { ascending: false })
     setSites(siteList || [])
@@ -249,7 +251,7 @@ export default function MySitesPage() {
       const { data: siteList } = await onlyActive(
         supabase
           .from('sites')
-          .select('*, subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
+          .select('*, templates(name, category), subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
           .eq('customer_id', customer.customer_id)
       ).order('created_at', { ascending: false })
       setSites(siteList || [])
@@ -284,7 +286,7 @@ export default function MySitesPage() {
     const { data: siteList } = await onlyActive(
       supabase
         .from('sites')
-        .select('*, subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
+        .select('*, templates(name, category), subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
         .eq('customer_id', customer.customer_id)
     ).order('created_at', { ascending: false })
     setSites(siteList || [])
@@ -307,12 +309,12 @@ export default function MySitesPage() {
   async function handleCancelManaged(inquiryId) {
     if (!inquiryId) return
     if (!window.confirm('대리 제작 접수를 취소할까요?\n사이트와 문의가 삭제됩니다. (선금 납부 전만 가능)')) return
-    try {
-      await cancelManagedIntake(supabase, inquiryId)
-      await reloadMyLists()
-    } catch (err) {
-      alert(err.message || String(err))
+    const res = await cancelManagedIntakeAction(inquiryId)
+    if (!res.ok) {
+      alert(res.error)
+      return
     }
+    await reloadMyLists()
   }
 
   async function handleReactivate() {
@@ -325,7 +327,7 @@ export default function MySitesPage() {
     // 사이트 목록 다시 로드
     const { data: siteList } = await supabase
       .from('sites')
-      .select('*, subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
+      .select('*, templates(name, category), subscriptions(amount, next_billing_date, cancelled_at, cancels_at)')
       .eq('customer_id', customer.customer_id)
       .order('created_at', { ascending: false })
     setSites(siteList || [])
@@ -354,15 +356,6 @@ export default function MySitesPage() {
     subscribed: '#f0fdf4',
     suspended: '#fef2f2',
   }
-  const CATEGORY_ICON = {
-    cafe:     '☕',
-    restaurant: '🍽',
-    beauty:   '💇',
-    academy:  '📚',
-    hospital: '🏥',
-    default:  '🏪',
-  }
-
   // 카드 액션: 좁은 화면에서는 아래 줄로 내려감 (고정 폭 금지)
   const cardActionsStyle = {
     display: 'flex',
@@ -477,6 +470,7 @@ export default function MySitesPage() {
             </p>
             <button
               type="button"
+              data-testid="my-create-self"
               onClick={() => { setShowCreateChoice(false); router.push('/templates') }}
               style={{
                 width: '100%', textAlign: 'left', padding: '16px 18px', marginBottom: 10,
@@ -488,6 +482,7 @@ export default function MySitesPage() {
             </button>
             <button
               type="button"
+              data-testid="my-create-managed"
               onClick={openInquiryModal}
               style={{
                 width: '100%', textAlign: 'left', padding: '16px 18px', marginBottom: 16,
@@ -558,6 +553,7 @@ export default function MySitesPage() {
                 }}>
                   {BUSINESS_TYPES.map(({ value, label, icon }) => (
                     <button key={value} type="button"
+                      data-testid={`inquiry-type-${value}`}
                       onClick={() => patchInquiryForm({ business_type: value })}
                       style={{
                         padding: '12px 8px', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -574,6 +570,7 @@ export default function MySitesPage() {
 
                 <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: '#374151' }}>사이트명 *</p>
                 <input
+                  data-testid="inquiry-name"
                   value={inquiryForm.site_name}
                   onChange={e => patchInquiryForm({ site_name: e.target.value })}
                   placeholder="예) 마곡카페"
@@ -590,6 +587,7 @@ export default function MySitesPage() {
                 </p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
                   <input
+                    data-testid="inquiry-subdomain"
                     value={inquiryForm.subdomain}
                     onChange={e => patchInquiryForm({
                       subdomain: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
@@ -609,6 +607,7 @@ export default function MySitesPage() {
                 <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: '#374151' }}>원하는 사이트 설명 *</p>
                 <textarea
                   id="inquiry-description"
+                  data-testid="inquiry-description"
                   value={inquiryForm.description}
                   onChange={e => patchInquiryForm({ description: e.target.value })}
                   placeholder="예) 강남에 있는 카페인데요, 메뉴 소개랑 영업시간, 인스타 링크를 넣고 싶어요."
@@ -645,7 +644,7 @@ export default function MySitesPage() {
                   </p>
                 )}
 
-                <button type="button" onClick={handleInquirySubmit} disabled={inquirySubmitting} style={{
+                <button type="button" data-testid="inquiry-submit" onClick={handleInquirySubmit} disabled={inquirySubmitting} style={{
                   width: '100%', padding: '13px 0', background: inquirySubmitting ? '#9ca3af' : '#111827',
                   color: 'white', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 700,
                   cursor: inquirySubmitting ? 'default' : 'pointer',
@@ -690,6 +689,7 @@ export default function MySitesPage() {
           </div>
           <button
             type="button"
+            data-testid="my-new-site"
             onClick={openCreateChoice}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
@@ -796,6 +796,7 @@ export default function MySitesPage() {
 
               {payStage && !payBlocked && (
                 <button
+                  data-testid={payStage === 'down' ? 'my-pay-down' : 'my-pay-final'}
                   onClick={() => router.push(oneTimePaymentMethodPath(inq.inquiry_id, payStage))}
                   style={{
                     alignSelf: 'flex-start',
@@ -849,7 +850,9 @@ export default function MySitesPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {sites.map(site => {
               const sub = site.subscriptions?.[0]
-              const icon = CATEGORY_ICON[site.category] || CATEGORY_ICON.default
+              const tmplCat = siteTemplateCategory(site)
+              const tmplMeta = templateCategoryMeta(tmplCat || 'general')
+              const icon = tmplMeta.icon
               const statusColor = STATUS_COLOR[site.status] || '#6b7280'
               const statusBg = STATUS_BG[site.status] || '#f9fafb'
               const statusLabel = codeLabel('FLOW_STEP', site.status, flowStepLabel(site.status))
@@ -888,6 +891,10 @@ export default function MySitesPage() {
                           <span style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
                             {site.name}
                           </span>
+                          <span style={{
+                            fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
+                            background: '#eff6ff', color: '#1d4ed8',
+                          }}>{tmplMeta.label}</span>
                           <span style={{
                             fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
                             background: statusBg, color: statusColor,
@@ -936,7 +943,7 @@ export default function MySitesPage() {
                           <a href={sitePublicPath(site.subdomain)} target="_blank" style={btnView(false)}>
                             사이트 보기
                           </a>
-                          <Link href={siteAdminPath(site.subdomain)} style={btnManage(false)}>
+                          <Link href={siteAdminPath(site.subdomain)} data-testid={`my-site-admin-${site.subdomain}`} style={btnManage(false)}>
                             사이트 관리
                           </Link>
                         </>
@@ -985,6 +992,7 @@ export default function MySitesPage() {
                         {payStage && !payBlocked && (
                           <button
                             type="button"
+                            data-testid={payStage === 'down' ? 'my-pay-down' : 'my-pay-final'}
                             onClick={() => router.push(oneTimePaymentMethodPath(inq.inquiry_id, payStage))}
                             style={{
                               padding: '10px 16px', background: '#111827', color: 'white',

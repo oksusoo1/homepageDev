@@ -1,8 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
-import { getAuthStaff } from '@/lib/auth'
 import DocsBrowser from '@/components/DocsBrowser'
 import PlatformDevTools from '@/components/PlatformDevTools'
 import PlatformSiteDetail from '@/components/PlatformSiteDetail'
@@ -10,14 +8,12 @@ import PlatformCustomerDetail from '@/components/PlatformCustomerDetail'
 import PlatformCommonCodes from '@/components/PlatformCommonCodes'
 import PlatformListSearch from '@/components/PlatformListSearch'
 import PlatformTicketCard from '@/components/PlatformTicketCard'
-import { loadTicketMessages, addTicketMessage, markTicketMessagesRead, unreadFrom } from '@/lib/support-ticket'
-import { loadTicketQuotes, sendQuote, cancelQuote } from '@/lib/payment/extra'
+import { unreadFrom } from '@/lib/support-ticket'
 import AuthUserBar from '@/components/AuthUserBar'
 import { sitePublicPath, siteAdminPath } from '@/lib/site-paths'
 import { getSitePeriodInfo } from '@/lib/site-period'
-import { loadCommonCodes, codeLabel, codeColor } from '@/lib/common-codes'
+import { applyCommonCodesCache, codeLabel, codeColor } from '@/lib/common-codes'
 import { matchesSearchQuery } from '@/lib/platform-list-search'
-import { onlyActive, softDelete } from '@/lib/use-flag'
 import {
   flowStepLabel,
   resolveManagedFlowStep,
@@ -25,7 +21,29 @@ import {
   resolveHqInquiryAction,
   canOpenHqEditor,
 } from '@/lib/flow-step'
-import { cancelManagedIntake } from '@/lib/managed-flow'
+import {
+  getStaffMe,
+  fetchPlatformData,
+  createSite as createSiteAction,
+  updateSiteStatus as updateSiteStatusAction,
+  saveDevFee as saveDevFeeAction,
+  confirmDownPayment as confirmDownPaymentAction,
+  startDepositStep as startDepositStepAction,
+  handleCancelManagedIntake as cancelManagedIntakeAction,
+  saveAdminNote as saveAdminNoteAction,
+  confirmFinalPayment as confirmFinalPaymentAction,
+  deleteSite as deleteSiteAction,
+  saveSiteFields as saveSiteFieldsAction,
+  saveCustomerFields as saveCustomerFieldsAction,
+  deleteCustomer as deleteCustomerAction,
+  sendTicketQuote as sendTicketQuoteAction,
+  cancelTicketQuote as cancelTicketQuoteAction,
+  readTicketMsgs as readTicketMsgsAction,
+  addTicketMsg as addTicketMsgAction,
+  updateTicket as updateTicketAction,
+  markBillingPaid as markBillingPaidAction,
+  markOneTimePaid as markOneTimePaidAction,
+} from './actions'
 
 /**
  * 본사 콘솔 — 사이트 중심
@@ -128,45 +146,36 @@ export default function AdminConsole() {
   }, [])
 
   async function checkAdminAuth() {
-    const auth = await getAuthStaff()
-    if (auth?.staff?.role !== 'platform_admin') {
+    const auth = await getStaffMe()
+    if (!auth.ok) {
       router.push('/login')
       return
     }
-    setStaff(auth.staff)
+    setStaff(auth.data.staff)
     setAuthChecked(true)
     fetchAll()
   }
 
   async function fetchAll() {
-    const [s, sub, t, otp, tmpl, inq, cust, bh] = await Promise.all([
-      onlyActive(supabase.from('sites').select('*, customers(name, email, phone)')).order('created_at', { ascending: false }),
-      onlyActive(supabase.from('subscriptions').select('*, sites(site_name:name, subdomain, status), customers(name)')).order('created_at', { ascending: false }),
-      onlyActive(supabase.from('support_tickets').select('*, sites(name), customers(name, email, phone)')).order('created_at', { ascending: false }),
-      onlyActive(supabase.from('one_time_payments').select('*, customers(name), sites(name)')).order('created_at', { ascending: false }),
-      onlyActive(supabase.from('templates').select('*')).order('sort_order'),
-      onlyActive(supabase.from('inquiries').select('*, customers(name, email, phone)')).order('created_at', { ascending: false }),
-      onlyActive(supabase.from('customers').select('*')).order('created_at', { ascending: false }),
-      onlyActive(supabase.from('billing_history').select('*')).order('period', { ascending: false }),
-    ])
-    setSites(s.data || [])
-    setSubscriptions(sub.data || [])
-    setTickets(t.data || [])
-    setOneTimePays(otp.data || [])
-    setTemplates(tmpl.data || [])
-    setInquiries(inq.data || [])
-    setCustomers(cust.data || [])
-    setBillings(bh.data || [])
-    setLoadedAt(Date.now())
-    const ticketIds = (t.data || []).map(x => x.ticket_id)
-    setTicketMsgs(await loadTicketMessages(supabase, ticketIds))
-    setTicketQuotes(await loadTicketQuotes(supabase, ticketIds))
-    try {
-      await loadCommonCodes({ force: true })
-      setCodesTick(t => t + 1)
-    } catch (e) {
-      console.warn('common codes load failed', e)
+    const res = await fetchPlatformData()
+    if (!res.ok) {
+      setMessage('❌ ' + res.error)
+      return
     }
+    const d = res.data
+    setSites(d.sites)
+    setSubscriptions(d.subscriptions)
+    setTickets(d.tickets)
+    setOneTimePays(d.oneTimePays)
+    setTemplates(d.templates)
+    setInquiries(d.inquiries)
+    setCustomers(d.customers)
+    setBillings(d.billings)
+    setTicketMsgs(d.ticketMsgs)
+    setTicketQuotes(d.ticketQuotes)
+    setLoadedAt(Date.now())
+    applyCommonCodesCache(d.commonCodes)
+    setCodesTick(t => t + 1)
   }
 
   useEffect(() => {
@@ -188,70 +197,12 @@ export default function AdminConsole() {
     setLoading(true)
     setMessage('')
     try {
-      const subdomain = (form.subdomain || '').trim().toLowerCase()
-      if (!/^[a-z0-9-]+$/.test(subdomain)) {
-        throw new Error('서브도메인은 영문 소문자·숫자·하이픈만 가능합니다.')
-      }
-      if (!form.site_name?.trim()) throw new Error('사이트명을 입력하세요.')
-
-      // 1. 고객 — 가입 회원 ID 우선
-      let customer
-      if (form.customer_id) {
-        const { data: byId, error: idErr } = await onlyActive(
-          supabase.from('customers').select('*').eq('customer_id', form.customer_id)
-        ).maybeSingle()
-        if (idErr) throw new Error('회원 조회 오류: ' + idErr.message)
-        if (!byId) throw new Error('가입 회원을 찾을 수 없습니다. 회원 메뉴를 확인하세요.')
-        customer = byId
-      } else if (form.customer_email?.trim()) {
-        const email = form.customer_email.trim()
-        const { data: existing } = await onlyActive(
-          supabase.from('customers').select('*').eq('email', email)
-        ).maybeSingle()
-        if (existing) {
-          customer = existing
-        } else {
-          const { data: newCust, error: cErr } = await supabase
-            .from('customers')
-            .insert([{
-              email,
-              name: form.customer_name || email,
-              phone: form.customer_phone || null,
-            }])
-            .select()
-            .single()
-          if (cErr) throw new Error('고객 생성 오류: ' + cErr.message)
-          customer = newCust
-        }
-      } else {
-        throw new Error('회원을 선택하거나 이메일을 입력하세요.')
-      }
-
-      // 2. 사이트 생성
-      const site_code = subdomain + '_' + Date.now()
-      const { data: newSite, error: sErr } = await supabase
-        .from('sites')
-        .insert([{
-          site_code,
-          customer_id: customer.customer_id,
-          template_id: form.template_id || null,
-          name: form.site_name.trim(),
-          subdomain,
-          description: form.description || null,
-          address: form.address || null,
-          phone: form.phone || customer.phone || null,
-          email: form.email || customer.email || null,
-          build_type: 'self',
-          status: 'building',
-        }])
-        .select('site_id, subdomain, name')
-        .single()
-      if (sErr) throw new Error('사이트 생성 오류: ' + sErr.message)
-
+      const res = await createSiteAction(form)
+      if (!res.ok) throw new Error(res.error)
       closeCreateModal()
-      setMessage(`✅ 「${newSite.name}」개설됨 · 회원 ${customer.name || customer.email}`)
+      setMessage(`✅ 「${res.data.name}」개설됨 · 회원 ${res.data.customerName}`)
       await fetchAll()
-      setSelectedSiteId(newSite.site_id)
+      setSelectedSiteId(res.data.site_id)
     } catch (err) {
       setMessage('❌ ' + err.message)
     }
@@ -260,37 +211,7 @@ export default function AdminConsole() {
 
   /** sites.status = FLOW_STEP 설정 */
   async function updateSiteStatus(siteId, flowStep) {
-    const now = new Date()
-    const { data: siteInfo } = await onlyActive(
-      supabase.from('sites').select('build_type, inquiry_id, trial_started_at').eq('site_id', siteId)
-    ).maybeSingle()
-
-    const next = flowStep
-
-    await supabase.from('sites')
-      .update({ status: next, updated_at: now.toISOString() })
-      .eq('site_id', siteId)
-      .eq('use_flag', 1)
-
-    if (next === 'trial' && siteInfo?.build_type === 'self' && !siteInfo.trial_started_at) {
-      const trialEnds = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
-      const nextBilling = new Date(trialEnds)
-      nextBilling.setMonth(nextBilling.getMonth() + 1)
-      const { data: sub } = await onlyActive(
-        supabase.from('subscriptions').select('subscription_id').eq('site_id', siteId)
-      ).maybeSingle()
-      if (sub) {
-        await supabase.from('subscriptions').update({
-          next_billing_date: nextBilling.toISOString().split('T')[0],
-          updated_at: now.toISOString(),
-        }).eq('subscription_id', sub.subscription_id)
-      }
-      await supabase.from('sites').update({
-        trial_started_at: now.toISOString(),
-        trial_ends_at: trialEnds.toISOString(),
-      }).eq('site_id', siteId)
-    }
-
+    await updateSiteStatusAction(siteId, flowStep)
     fetchAll()
   }
 
@@ -302,77 +223,23 @@ export default function AdminConsole() {
    * 고객은 /my 에서 단계에 맞는 결제 화면으로 진입
    */
   async function saveDevFee(inquiryId, amount) {
-    const num = parseInt(amount, 10)
-    if (isNaN(num) || num <= 0) { setMessage('❌ 올바른 금액을 입력해 주세요.'); return }
-    const now = new Date().toISOString()
-    const inq = inquiries.find(i => i.inquiry_id === inquiryId)
-    const site = sites.find(s => s.inquiry_id === inquiryId)
-    const half = Math.floor(num / 2)
-
-    await supabase.from('inquiries').update({ dev_fee_total: num, updated_at: now }).eq('inquiry_id', inquiryId)
-
-    // 단계별 결제 행 — 이미 납부·신청된 행은 금액만 맞춘다
-    for (const stage of ['down', 'final']) {
-      const paidAt = stage === 'down' ? inq?.down_paid_at : inq?.final_paid_at
-      const existing = oneTimePays.find(p =>
-        p.type === 'dev_fee' && p.stage === stage && p.customer_id === inq?.customer_id
-        && (site ? p.site_id === site.site_id : !p.site_id))
-      const payload = {
-        amount: half,
-        note: `개발비 ${stage === 'down' ? '선금' : '잔금'} 50%`,
-        status: paidAt ? 'paid' : (existing?.status === 'pending_confirm' ? 'pending_confirm' : 'unpaid'),
-      }
-      if (existing) {
-        await supabase.from('one_time_payments').update(payload).eq('payment_id', existing.payment_id)
-      } else if (inq?.customer_id) {
-        await supabase.from('one_time_payments').insert({
-          customer_id: inq.customer_id, site_id: site?.site_id || null,
-          type: 'dev_fee', stage, use_flag: 1, ...payload,
-        })
-      }
-    }
-
-    if (site && (site.status === 'intake' || site.status === 'deposit')) {
-      await supabase.from('sites').update({ status: 'deposit', updated_at: now }).eq('site_id', site.site_id)
-    }
-    setMessage(`✅ 견적 ${num.toLocaleString()}원 저장 · 선금/잔금 각 ${half.toLocaleString()}원 청구`)
+    const res = await saveDevFeeAction(inquiryId, amount)
+    if (!res.ok) { setMessage('❌ ' + res.error); return }
+    setMessage(res.data.message)
     fetchAll()
   }
 
   // 선금 확인 → 결제 행 paid + sites.status = building
   async function confirmDownPayment(inquiryId) {
     if (!window.confirm('선금 납부를 확인하셨나요?\n다음 단계: 제작')) return
-    const now = new Date().toISOString()
-    const inq = inquiries.find(i => i.inquiry_id === inquiryId)
-    await supabase.from('inquiries')
-      .update({ down_paid_at: now, updated_at: now })
-      .eq('inquiry_id', inquiryId)
-    const site = sites.find(s => s.inquiry_id === inquiryId)
-    if (inq?.customer_id) {
-      let q = supabase.from('one_time_payments')
-        .update({ status: 'paid', paid_at: now })
-        .eq('customer_id', inq.customer_id)
-        .eq('type', 'dev_fee')
-        .eq('stage', 'down')
-        .in('status', ['unpaid', 'pending_confirm'])
-      await (site ? q.eq('site_id', site.site_id) : q)
-    }
-    if (site) {
-      await supabase.from('sites')
-        .update({ status: 'building', updated_at: now })
-        .eq('site_id', site.site_id)
-    }
+    const res = await confirmDownPaymentAction(inquiryId)
+    if (!res.ok) setMessage('❌ ' + res.error)
     fetchAll()
   }
 
   // 접수 → 선금 단계
   async function startDepositStep(inquiryId) {
-    const site = sites.find(s => s.inquiry_id === inquiryId)
-    if (site) {
-      await supabase.from('sites')
-        .update({ status: 'deposit', updated_at: new Date().toISOString() })
-        .eq('site_id', site.site_id)
-    }
+    await startDepositStepAction(inquiryId)
     fetchAll()
   }
 
@@ -380,20 +247,18 @@ export default function AdminConsole() {
   async function handleCancelManagedIntake(inquiryId) {
     if (!inquiryId) return
     if (!window.confirm('대리 접수를 취소할까요?\n연결된 사이트·문의가 목록에서 삭제됩니다. (선금 확인 전만 가능)')) return
-    try {
-      await cancelManagedIntake(supabase, inquiryId)
-      setSelectedSiteId(null)
-      setMessage('✅ 대리 접수 취소됨')
-      await fetchAll()
-    } catch (err) {
-      setMessage('❌ ' + (err.message || err))
+    const res = await cancelManagedIntakeAction(inquiryId)
+    if (!res.ok) {
+      setMessage('❌ ' + res.error)
+      return
     }
+    setSelectedSiteId(null)
+    setMessage('✅ 대리 접수 취소됨')
+    await fetchAll()
   }
 
   async function saveAdminNote(inquiryId, text) {
-    await supabase.from('inquiries')
-      .update({ admin_note: text, updated_at: new Date().toISOString() })
-      .eq('inquiry_id', inquiryId)
+    await saveAdminNoteAction(inquiryId, text)
     setMessage('메모 저장됨')
     fetchAll()
   }
@@ -401,27 +266,8 @@ export default function AdminConsole() {
   // 잔금 확인 → sites.status = pay_method
   async function confirmFinalPayment(inquiryId) {
     if (!window.confirm('잔금 50% 납부를 확인하셨나요?\n다음: 카드/계좌 등록')) return
-    const now = new Date().toISOString()
-    const { data: inq } = await supabase
-      .from('inquiries').select('customer_id').eq('inquiry_id', inquiryId).maybeSingle()
-    await supabase.from('inquiries')
-      .update({ final_paid_at: now, updated_at: now })
-      .eq('inquiry_id', inquiryId)
-    const site = sites.find(s => s.inquiry_id === inquiryId)
-    if (inq?.customer_id) {
-      let q = supabase.from('one_time_payments')
-        .update({ status: 'paid', paid_at: now })
-        .eq('customer_id', inq.customer_id)
-        .eq('type', 'dev_fee')
-        .eq('stage', 'final')
-        .in('status', ['unpaid', 'pending_confirm'])
-      await (site ? q.eq('site_id', site.site_id) : q)
-    }
-    if (site) {
-      await supabase.from('sites')
-        .update({ status: 'pay_method', updated_at: now })
-        .eq('site_id', site.site_id)
-    }
+    const res = await confirmFinalPaymentAction(inquiryId)
+    if (!res.ok) setMessage('❌ ' + res.error)
     fetchAll()
   }
 
@@ -430,33 +276,26 @@ export default function AdminConsole() {
       `"${site.name}" 를 삭제(use_flag=0) 처리할까요?\n데이터는 남고 목록에서만 숨깁니다.\n복구는 DB에서 sites.use_flag=1 로 가능합니다.`
     )) return
 
-    try {
-      await softDelete(supabase, 'sites', 'site_id', site.site_id)
-      setMessage('🗑️ 사이트 use_flag=0 (목록에서 숨김)')
-      if (selectedSiteId === site.site_id) setSelectedSiteId(null)
-      fetchAll()
-    } catch (err) {
-      alert('삭제 실패: ' + err.message)
-      throw err
+    const res = await deleteSiteAction(site.site_id)
+    if (!res.ok) {
+      alert('삭제 실패: ' + res.error)
+      throw new Error(res.error)
     }
+    setMessage('🗑️ 사이트 use_flag=0 (목록에서 숨김)')
+    if (selectedSiteId === site.site_id) setSelectedSiteId(null)
+    fetchAll()
   }
 
   async function saveSiteFields(siteId, patch) {
-    const { error } = await supabase
-      .from('sites')
-      .update({ ...patch, updated_at: new Date().toISOString() })
-      .eq('site_id', siteId)
-    if (error) throw new Error(error.message)
+    const res = await saveSiteFieldsAction(siteId, patch)
+    if (!res.ok) throw new Error(res.error)
     setMessage('✅ 사이트 정보가 저장되었습니다.')
     await fetchAll()
   }
 
   async function saveCustomerFields(customerId, patch) {
-    const { error } = await supabase
-      .from('customers')
-      .update({ ...patch, updated_at: new Date().toISOString() })
-      .eq('customer_id', customerId)
-    if (error) throw new Error(error.message)
+    const res = await saveCustomerFieldsAction(customerId, patch)
+    if (!res.ok) throw new Error(res.error)
     setMessage('✅ 회원 정보가 저장되었습니다.')
     await fetchAll()
   }
@@ -465,15 +304,14 @@ export default function AdminConsole() {
     if (!window.confirm(
       `"${customer.name}" (${customer.email}) 를 삭제(use_flag=0) 처리할까요?\n회원은 목록에서 숨겨집니다. 보유 사이트는 그대로입니다.`
     )) return
-    try {
-      await softDelete(supabase, 'customers', 'customer_id', customer.customer_id)
-      setMessage('🗑️ 회원 use_flag=0 (목록에서 숨김)')
-      if (selectedCustomerId === customer.customer_id) setSelectedCustomerId(null)
-      fetchAll()
-    } catch (err) {
-      alert('삭제 실패: ' + err.message)
-      throw err
+    const res = await deleteCustomerAction(customer.customer_id)
+    if (!res.ok) {
+      alert('삭제 실패: ' + res.error)
+      throw new Error(res.error)
     }
+    setMessage('🗑️ 회원 use_flag=0 (목록에서 숨김)')
+    if (selectedCustomerId === customer.customer_id) setSelectedCustomerId(null)
+    fetchAll()
   }
 
   function openCustomerDetail(customerId) {
@@ -490,100 +328,50 @@ export default function AdminConsole() {
 
   /** 유료 작업 견적 — 보내기 / 취소 / 입금 확인 */
   async function sendTicketQuote(ticket, { amount, note }) {
-    await sendQuote(supabase, { ticket, amount, note })
-    await addTicketMessage(supabase, {
-      ticketId: ticket.ticket_id, authorType: 'staff', author: staff?.name || '본사',
-      content: [
-        '유료 작업 견적을 보내드립니다.',
-        `금액: ${parseInt(amount, 10).toLocaleString()}원`,
-        note ? `작업: ${note}` : null,
-        '결제 후 작업을 시작합니다.',
-      ].filter(Boolean).join('\n'),
-    })
-    if (ticket.status === 'open') {
-      await supabase.from('support_tickets')
-        .update({ status: 'in_progress', handled_by: staff?.staff_id || null, updated_at: new Date().toISOString() })
-        .eq('ticket_id', ticket.ticket_id)
-    }
+    const res = await sendTicketQuoteAction(ticket, { amount, note })
+    if (!res.ok) throw new Error(res.error)
     await fetchAll()
   }
 
   async function cancelTicketQuote(paymentId) {
-    await cancelQuote(supabase, paymentId)
+    const res = await cancelTicketQuoteAction(paymentId)
+    if (!res.ok) throw new Error(res.error)
     await fetchAll()
   }
 
   /** 요청 카드를 펼치면 사장님 메시지 읽음 처리 */
   async function readTicketMsgs(ticketId) {
-    const changed = await markTicketMessagesRead(supabase, [ticketId], 'staff')
-    if (changed) fetchAll()
+    const res = await readTicketMsgsAction(ticketId)
+    if (res.ok && res.data.changed) fetchAll()
   }
 
   /** 고객 요청 대화 — 고객에게 보내기 / 내부 메모 */
   async function addTicketMsg(ticketId, { content, isInternal }) {
-    await addTicketMessage(supabase, {
-      ticketId, authorType: 'staff', author: staff?.name || '본사', content, isInternal,
-    })
+    const res = await addTicketMsgAction(ticketId, { content, isInternal })
+    if (!res.ok) throw new Error(res.error)
     await fetchAll()
   }
 
   /** 고객 요청 저장 — 상태·답변·담당자 (PlatformTicketCard 공용) */
   async function updateTicket(ticketId, patch) {
-    const { error } = await supabase.from('support_tickets')
-      .update({ ...patch, updated_at: new Date().toISOString() })
-      .eq('ticket_id', ticketId)
-    if (error) throw new Error(error.message)
+    const res = await updateTicketAction(ticketId, patch)
+    if (!res.ok) throw new Error(res.error)
     await fetchAll()
   }
 
   // 납부 확인: billing_history upsert + next_billing_date +1달 (수동결제)
   async function markBillingPaid(sub, amount, period, paymentMethod) {
-    const subId = sub.subscription_id
-    const siteId = sub.site_id
-    try {
-      const { data: existing } = await supabase
-        .from('billing_history')
-        .select('billing_id, status')
-        .eq('subscription_id', subId)
-        .eq('period', period)
-        .maybeSingle()
-
-      if (existing?.status === 'paid') {
-        setMessage('이미 납부 확인된 내역입니다.')
-        return
-      }
-
-      const now = new Date().toISOString()
-      if (existing) {
-        await supabase.from('billing_history')
-          .update({ status: 'paid', paid_at: now })
-          .eq('billing_id', existing.billing_id)
-      } else {
-        await supabase.from('billing_history').insert([{
-          subscription_id: subId, period, amount,
-          status: 'paid', payment_method: paymentMethod || 'manual', paid_at: now,
-        }])
-      }
-
-      if (!paymentMethod || paymentMethod === 'manual') {
-        const next = new Date()
-        next.setMonth(next.getMonth() + 1)
-        await supabase.from('subscriptions')
-          .update({ next_billing_date: next.toISOString().split('T')[0] })
-          .eq('subscription_id', subId)
-      }
-
-      if (siteId) {
-        await supabase.from('sites')
-          .update({ status: 'subscribed', updated_at: now })
-          .eq('site_id', siteId)
-      }
-
-      setMessage(`✅ ${period} 납부 확인 완료`)
-      fetchAll()
-    } catch (err) {
-      setMessage('❌ 오류: ' + err.message)
+    const res = await markBillingPaidAction(sub, amount, period, paymentMethod)
+    if (!res.ok) {
+      setMessage('❌ 오류: ' + res.error)
+      return
     }
+    if (res.data.already) {
+      setMessage(res.data.message)
+      return
+    }
+    setMessage(res.data.message)
+    fetchAll()
   }
 
   /**
@@ -593,7 +381,6 @@ export default function AdminConsole() {
    */
   async function markOneTimePaid(paymentId) {
     const pay = oneTimePays.find(p => p.payment_id === paymentId)
-    const now = new Date().toISOString()
 
     if (pay?.type === 'dev_fee') {
       const isDown = pay.stage === 'down'
@@ -603,52 +390,9 @@ export default function AdminConsole() {
       if (!window.confirm(msg)) return
     }
 
-    const { error } = await supabase.from('one_time_payments')
-      .update({ status: 'paid', paid_at: now })
-      .eq('payment_id', paymentId)
-    if (error) { alert(error.message); return }
-
-    if (pay?.type === 'dev_fee' && pay.stage === 'down' && pay.customer_id) {
-      const site = pay.site_id ? sites.find(s => s.site_id === pay.site_id) : null
-      const inquiryId = site?.inquiry_id
-        || inquiries.find(i => i.customer_id === pay.customer_id && !i.down_paid_at)?.inquiry_id
-        || null
-      if (inquiryId) {
-        await supabase.from('inquiries').update({ down_paid_at: now, updated_at: now }).eq('inquiry_id', inquiryId)
-      }
-      const target = site || sites.find(s => s.inquiry_id === inquiryId) || null
-      if (target && ['intake', 'deposit'].includes(target.status)) {
-        await supabase.from('sites').update({ status: 'building', updated_at: now }).eq('site_id', target.site_id)
-      }
-      fetchAll()
-      return
-    }
-
-    if (pay?.type === 'dev_fee' && pay.customer_id) {
-      let site = pay.site_id ? sites.find(s => s.site_id === pay.site_id) : null
-      let inquiryId = site?.inquiry_id || null
-      if (!inquiryId) {
-        const candidate = inquiries.find(i =>
-          i.customer_id === pay.customer_id && !i.final_paid_at
-        )
-        inquiryId = candidate?.inquiry_id || null
-        if (!site && inquiryId) site = sites.find(s => s.inquiry_id === inquiryId) || null
-      }
-      if (inquiryId) {
-        const { error: inqErr } = await supabase.from('inquiries')
-          .update({ final_paid_at: now, updated_at: now })
-          .eq('inquiry_id', inquiryId)
-        if (inqErr) { alert(inqErr.message); return }
-      }
-      if (site) {
-        await supabase.from('sites')
-          .update({ status: 'pay_method', updated_at: now })
-          .eq('site_id', site.site_id)
-      } else if (!inquiryId) {
-        alert('결제 행은 납부완료 처리됐지만, 연결 사이트/문의를 찾지 못했습니다. 사이트 상세에서 「잔금 확인」을 눌러 주세요.')
-      }
-    }
-
+    const res = await markOneTimePaidAction(paymentId)
+    if (!res.ok) { alert(res.error); return }
+    if (res.data?.warn) alert(res.data.warn)
     fetchAll()
   }
 
@@ -945,6 +689,7 @@ export default function AdminConsole() {
             return (
               <button
                 key={item.key}
+                data-testid={`platform-nav-${item.key}`}
                 onClick={() => setNav(item.key)}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', gap: 10,
@@ -978,7 +723,12 @@ export default function AdminConsole() {
             marginBottom: 4, padding: '8px 10px', borderRadius: 8,
             background: '#0f172a', border: '1px solid #1e293b',
           }}>
-            <AuthUserBar variant="dark" />
+            <AuthUserBar
+              variant="dark"
+              preset={staff
+                ? { status: 'ok', kind: 'staff', name: staff.name || '본사', email: staff.email || '' }
+                : { status: 'loading', kind: null, name: '', email: '' }}
+            />
           </div>
         </div>
       </aside>
@@ -1268,6 +1018,7 @@ export default function AdminConsole() {
                           return (
                             <tr
                               key={site.site_id}
+                              data-testid={`platform-site-${site.subdomain}`}
                               onClick={() => setSelectedSiteId(site.site_id)}
                               style={{
                                 cursor: 'pointer',

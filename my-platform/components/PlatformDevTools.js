@@ -1,9 +1,16 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
-import { USE_FLAG_OFF } from '@/lib/use-flag'
-import { loadCommonCodes, codeLabel, codesInGroup } from '@/lib/common-codes'
+import { codeLabel, codesInGroup } from '@/lib/common-codes'
+import {
+  updateDevSite,
+  updateDevInquiry,
+  deleteDevBillingThenSub,
+  softDeleteDevFeeOtps,
+  updateDevOtp,
+  rewindDevSite,
+  runBillingBatchAction,
+} from '@/app/platform/actions'
 
 /** 개발용: 한글라벨 (code) — 캐시 없으면 code만 */
 function devOpt(group, code) {
@@ -72,20 +79,11 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
   const [busy, setBusy] = useState(false)
   const [asOfOffset, setAsOfOffset] = useState(0)
   const [batchLog, setBatchLog] = useState('')
-  const [codesTick, setCodesTick] = useState(0)
-
   useEffect(() => {
     if (!siteId && sites[0]) setSiteId(sites[0].site_id)
   }, [sites, siteId])
 
-  useEffect(() => {
-    loadCommonCodes()
-      .then(() => setCodesTick(t => t + 1))
-      .catch(() => {})
-  }, [])
-
   const site = sites.find(s => s.site_id === siteId) || null
-  void codesTick // 공통코드 로드 후 옵션 라벨 재렌더
   const inquiry = site?.inquiry_id
     ? inquiries.find(i => i.inquiry_id === site.inquiry_id) || null
     : null
@@ -109,103 +107,41 @@ export default function PlatformDevTools({ sites, inquiries, subscriptions, oneT
   }
 
   async function updateSite(patch) {
-    const { error } = await supabase.from('sites').update({ ...patch, updated_at: new Date().toISOString() }).eq('site_id', siteId)
-    if (error) throw error
+    const res = await updateDevSite(siteId, patch)
+    if (!res.ok) throw new Error(res.error)
   }
 
   async function updateInquiry(patch) {
     if (!inquiry) throw new Error('연결된 inquiries 행이 없습니다.')
-    const { error } = await supabase.from('inquiries').update({ ...patch, updated_at: new Date().toISOString() }).eq('inquiry_id', inquiry.inquiry_id)
-    if (error) throw error
-  }
-
-  async function updateSub(patch) {
-    if (!sub) throw new Error('subscriptions 행이 없습니다.')
-    const { error } = await supabase.from('subscriptions').update({ ...patch, updated_at: new Date().toISOString() }).eq('subscription_id', sub.subscription_id)
-    if (error) throw error
+    const res = await updateDevInquiry(inquiry.inquiry_id, patch)
+    if (!res.ok) throw new Error(res.error)
   }
 
   async function deleteBillingThenSub() {
     if (!sub) return
-    await supabase.from('billing_history').delete().eq('subscription_id', sub.subscription_id)
-    const { error } = await supabase.from('subscriptions').delete().eq('subscription_id', sub.subscription_id)
-    if (error) throw error
+    const res = await deleteDevBillingThenSub(sub.subscription_id)
+    if (!res.ok) throw new Error(res.error)
   }
 
-  async function deleteDevFeeOtps() {
-    for (const p of otps.filter(o => o.type === 'dev_fee')) {
-      const { error } = await supabase.from('one_time_payments')
-        .update({ use_flag: USE_FLAG_OFF })
-        .eq('payment_id', p.payment_id)
-      if (error) throw error
-    }
+  async function deleteDevFeeOtpsLocal() {
+    const ids = otps.filter(o => o.type === 'dev_fee').map(p => p.payment_id)
+    const res = await softDeleteDevFeeOtps(ids)
+    if (!res.ok) throw new Error(res.error)
   }
 
   async function rewindTo(step) {
-    const now = new Date().toISOString()
     if (!site) throw new Error('사이트를 선택하세요.')
-
-    if (step === 'preview') {
-      await updateSite({ status: 'preview', trial_started_at: null, trial_ends_at: null })
-      if (inquiry) await updateInquiry({ final_paid_at: null })
-      await deleteDevFeeOtps()
-      await deleteBillingThenSub()
-    }
-
-    if (step === 'deposit_pending') {
-      await updateSite({ status: 'balance', trial_started_at: null, trial_ends_at: null })
-      if (inquiry) await updateInquiry({ final_paid_at: null })
-      const existing = otps.find(o => o.type === 'dev_fee')
-      if (existing) {
-        const { error } = await supabase.from('one_time_payments').update({
-          status: 'pending_confirm',
-          paid_at: null,
-          note: existing.note || `잔금 입금 확인 요청 · 입금자: ${site.customers?.name || ''}`,
-        }).eq('payment_id', existing.payment_id)
-        if (error) throw error
-      } else if (inquiry) {
-        const { error } = await supabase.from('one_time_payments').insert({
-          customer_id: site.customer_id,
-          site_id: site.site_id,
-          type: 'dev_fee',
-          amount: Math.floor((inquiry.dev_fee_total || 200000) / 2),
-          status: 'pending_confirm',
-          note: `잔금 입금 확인 요청 · 입금자: ${site.customers?.name || ''}`,
-        })
-        if (error) throw error
-      }
-      await deleteBillingThenSub()
-    }
-
-    if (step === 'ready_golive') {
-      await updateSite({ status: 'pay_method', trial_started_at: null, trial_ends_at: null })
-      if (inquiry) await updateInquiry({ final_paid_at: now })
-      const existing = otps.find(o => o.type === 'dev_fee')
-      if (existing) {
-        const { error } = await supabase.from('one_time_payments').update({ status: 'paid', paid_at: now }).eq('payment_id', existing.payment_id)
-        if (error) throw error
-      } else if (inquiry) {
-        const { error } = await supabase.from('one_time_payments').insert({
-          customer_id: site.customer_id,
-          site_id: site.site_id,
-          type: 'dev_fee',
-          amount: Math.floor((inquiry.dev_fee_total || 200000) / 2),
-          status: 'paid',
-          paid_at: now,
-          note: '잔금 확인 (테스트)',
-        })
-        if (error) throw error
-      }
-      await deleteBillingThenSub()
-    }
-
-    if (step === 'building') {
-      // 정방향: 선금 확인 → building + down_paid_at. 선금 유지, 잔금만 되돌림.
-      await updateSite({ status: 'building', trial_started_at: null, trial_ends_at: null })
-      if (inquiry) await updateInquiry({ final_paid_at: null })
-      await deleteDevFeeOtps()
-      await deleteBillingThenSub()
-    }
+    const res = await rewindDevSite({
+      siteId,
+      step,
+      inquiryId: inquiry?.inquiry_id || null,
+      subscriptionId: sub?.subscription_id || null,
+      otps,
+      customerId: site.customer_id,
+      customerName: site.customers?.name || '',
+      devFeeTotal: inquiry?.dev_fee_total,
+    })
+    if (!res.ok) throw new Error(res.error)
   }
 
   const presets = [
@@ -418,7 +354,7 @@ one_time_payments.paid_at → 납부확인일
                   if (!window.confirm(
                     `DELETE FROM one_time_payments\nWHERE type=dev_fee (이 사이트/고객)\n\n${otps.length}행을 모두 삭제할까요?`
                   )) return
-                  run(() => deleteDevFeeOtps(), `DELETE one_time_payments × ${otps.length}`)
+                  run(() => deleteDevFeeOtpsLocal(), `DELETE one_time_payments × ${otps.length}`)
                 }}
                 style={{ ...ghostBtn, color: '#fca5a5', borderColor: '#7f1d1d', marginBottom: 14 }}
               >
@@ -438,11 +374,11 @@ one_time_payments.paid_at → 납부확인일
                         value={p.status}
                         onChange={e => run(async () => {
                           const next = e.target.value
-                          const { error } = await supabase.from('one_time_payments').update({
+                          const res = await updateDevOtp(p.payment_id, {
                             status: next,
                             paid_at: next === 'paid' ? new Date().toISOString() : null,
-                          }).eq('payment_id', p.payment_id)
-                          if (error) throw error
+                          })
+                          if (!res.ok) throw new Error(res.error)
                         }, 'UPDATE one_time_payments.status')}
                         style={selectStyle}
                       >
@@ -455,10 +391,8 @@ one_time_payments.paid_at → 납부확인일
                     onClick={() => {
                       if (!window.confirm(`SOFT DELETE one_time_payments\nWHERE payment_id=${p.payment_id}\n(use_flag=0)`)) return
                       run(async () => {
-                        const { error } = await supabase.from('one_time_payments')
-                          .update({ use_flag: USE_FLAG_OFF })
-                          .eq('payment_id', p.payment_id)
-                        if (error) throw error
+                        const res = await softDeleteDevFeeOtps([p.payment_id])
+                        if (!res.ok) throw new Error(res.error)
                       }, 'SOFT DELETE one_time_payments (use_flag=0)')
                     }}
                     style={{ ...ghostBtn, color: '#fca5a5', borderColor: '#7f1d1d', marginBottom: 12 }}
@@ -502,14 +436,9 @@ POST /api/cron/billing  { "asOf": "YYYY-MM-DD" }`}
               const m = String(base.getMonth() + 1).padStart(2, '0')
               const d = String(base.getDate()).padStart(2, '0')
               const asOf = `${y}-${m}-${d}`
-              const res = await fetch('/api/cron/billing', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ asOf }),
-              })
-              const json = await res.json()
-              if (!res.ok || !json.ok) throw new Error(json.error || '배치 실패')
-              setBatchLog(JSON.stringify(json, null, 2))
+              const res = await runBillingBatchAction(asOf)
+              if (!res.ok) throw new Error(res.error || '배치 실패')
+              setBatchLog(JSON.stringify({ ok: true, ...res.data }, null, 2))
             }, `청구 배치 실행 (asOf=오늘+${asOfOffset}일)`)}
             style={{
               padding: '10px 18px', background: '#f59e0b', color: '#1c1917',

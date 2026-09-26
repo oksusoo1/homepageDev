@@ -63,7 +63,7 @@ function MethodChooser() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <Link href={paymentCardPath(siteCode, redirect)} style={cardStyle}>
+          <Link href={paymentCardPath(siteCode, redirect)} data-testid="pay-choose-card" style={cardStyle}>
             <span style={{ fontSize: 28 }}>💳</span>
             <div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>카드 자동결제</div>
@@ -71,7 +71,7 @@ function MethodChooser() {
             </div>
           </Link>
 
-          <Link href={paymentBankTransferPath(siteCode, redirect)} style={cardStyle}>
+          <Link href={paymentBankTransferPath(siteCode, redirect)} data-testid="pay-choose-bank" style={cardStyle}>
             <span style={{ fontSize: 28 }}>🏦</span>
             <div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>계좌이체</div>

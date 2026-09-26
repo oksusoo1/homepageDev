@@ -24,7 +24,6 @@ export const FLOW_STEPS = [
 /** @type {FlowStepCode[]} */
 export const SELF_FLOW_STEPS = [
   'building',
-  'preview',
   'pay_method',
   'trial',
   'subscribed',
@@ -109,6 +108,7 @@ export function resolveManagedFlowStep(_inquiry, ctx = {}) {
 export function resolveSelfFlowStep(site, _ctx = {}) {
   if (!site) return 'building'
   const st = site.status
+  if (st === 'preview') return 'building'
   return isFlowStepCode(st) ? /** @type {FlowStepCode} */ (st) : 'building'
 }
 

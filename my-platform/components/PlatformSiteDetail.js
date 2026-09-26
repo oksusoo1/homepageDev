@@ -404,6 +404,7 @@ export default function PlatformSiteDetail({
           {primaryLabel && (
             <button
               type="button"
+              data-testid="hq-primary"
               onClick={runHqPrimary}
               style={{
                 padding: '9px 14px', background: '#2563eb', color: 'white',
@@ -464,12 +465,12 @@ export default function PlatformSiteDetail({
           </Row>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #1e293b', flexWrap: 'wrap' }}>
             <span style={{ fontSize: 11, color: '#64748b', flexShrink: 0 }}>총 개발비(견적)</span>
-            <input id="hq-dev-fee" type="number" value={fee} onChange={e => setFee(e.target.value)} placeholder="금액"
+            <input id="hq-dev-fee" data-testid="hq-dev-fee" type="number" value={fee} onChange={e => setFee(e.target.value)} placeholder="금액"
               disabled={!!inquiry.down_paid_at}
               style={{ ...inputStyle, width: 120, padding: '4px 8px', marginLeft: 'auto' }} />
             <span style={{ fontSize: 12, color: '#64748b' }}>원</span>
             {!inquiry.down_paid_at && (
-              <button type="button" onClick={() => onSaveDevFee?.(inquiry.inquiry_id, fee)}
+              <button type="button" data-testid="hq-save-fee" onClick={() => onSaveDevFee?.(inquiry.inquiry_id, fee)}
                 style={{ ...{ padding: '5px 10px', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: 'pointer', border: 'none', color: 'white', background: '#16a34a' }, background: '#334155' }}>저장</button>
             )}
           </div>

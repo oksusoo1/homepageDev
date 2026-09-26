@@ -1,24 +1,29 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-import { USE_FLAG_OFF } from '@/lib/use-flag'
-
-// 서버사이드 Supabase (서비스 롤 키 사용)
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-)
+import { requireOwnedSiteByCode } from '@/lib/server/guard'
+import { onlyActive } from '@/lib/use-flag'
+import {
+  isResubscribeCharge,
+  replaceCustomerCard,
+  applyCardResubscribe,
+} from '@/lib/payment/card-policy'
 
 export async function POST(req) {
   try {
-    const { authKey, customerKey, customerId, siteId } = await req.json()
+    const { authKey, customerKey, siteCode } = await req.json()
 
-    if (!authKey || !customerKey || !customerId) {
+    if (!authKey || !customerKey || !siteCode) {
       return NextResponse.json({ error: '필수 파라미터 누락' }, { status: 400 })
     }
 
-    // 토스페이먼츠 빌링키 발급 API 호출
+    const gate = await requireOwnedSiteByCode(siteCode)
+    if (!gate.ok) {
+      return NextResponse.json({ error: gate.error }, { status: 401 })
+    }
+
+    const { db, site, customer } = gate
+
     const secretKey = process.env.TOSS_SECRET_KEY
-    const encoded   = Buffer.from(secretKey + ':').toString('base64')
+    const encoded = Buffer.from(secretKey + ':').toString('base64')
 
     const tossRes = await fetch(
       `https://api.tosspayments.com/v1/billing/authorizations/${authKey}`,
@@ -38,101 +43,66 @@ export async function POST(req) {
     }
 
     const { billingKey, card } = tossData
+    const last4 = card?.number?.slice(-4) || null
 
-    // 기존 카드 soft delete → 새 카드 insert
-    await supabase.from('customer_payment_methods')
-      .update({ use_flag: USE_FLAG_OFF })
-      .eq('customer_id', customerId)
-      .eq('use_flag', 1)
-
-    const { error: pmError } = await supabase
-      .from('customer_payment_methods')
-      .insert({
-        customer_id:    customerId,
-        pg_provider:    'toss',
-        pg_customer_id: billingKey,
-        card_last4:     card?.number?.slice(-4) || null,
-        card_brand:     card?.company           || null,
-        card_name:      card?.ownerType         || null,
-      })
-
-    if (pmError) throw new Error(pmError.message)
-
-    // 구독 조회
-    let sub = null
-    if (siteId) {
-      const { data } = await supabase
-        .from('subscriptions')
-        .select('subscription_id, next_billing_date, cancelled_at')
-        .eq('site_id', siteId)
-        .maybeSingle()
-      sub = data
-    }
-
-    // 즉시 결제 청구 (토스 빌링 API)
-    // next_billing_date는 deploy 시 trial_ends + 1달로 설정된 값 유지
-    const now = new Date()
-    const orderId = `order_${siteId}_${now.getTime()}`
-    const chargeRes = await fetch(`https://api.tosspayments.com/v1/billing/${billingKey}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${encoded}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        customerKey,
-        amount: 30000,
-        orderId,
-        orderName: '홈페이지 월 구독료',
-      }),
+    await replaceCustomerCard(db, customer.customer_id, {
+      billingKey,
+      last4,
+      brand: card?.company || null,
+      name: card?.ownerType || null,
     })
-    const chargeData = await chargeRes.json()
-    if (!chargeRes.ok) {
-      return NextResponse.json({ error: chargeData.message || '즉시 결제 실패' }, { status: 400 })
-    }
 
-    // 구독 업데이트 (재구독 시 cancelled_at/cancels_at 리셋 + next_billing_date 갱신)
-    const isResubscription = !!sub?.cancelled_at
-    const newNextBillingDate = (() => { const d = new Date(now); d.setMonth(d.getMonth() + 1); return d.toISOString().split('T')[0] })()
+    const { data: sub } = await onlyActive(
+      db.from('subscriptions')
+        .select('subscription_id, next_billing_date, cancelled_at, amount')
+        .eq('site_id', site.site_id)
+    ).maybeSingle()
 
-    if (siteId) {
-      await supabase.from('subscriptions').update({
-        payment_method: 'card',
-        cancelled_at: null,
-        cancels_at: null,
-        updated_at: now.toISOString(),
-        ...(isResubscription && { next_billing_date: newNextBillingDate }),
-      }).eq('site_id', siteId)
+    const now = new Date()
+    const resubscribe = isResubscribeCharge(site, sub)
 
-      // 재구독 시 사이트도 subscribed로 복원
-      if (isResubscription) {
-        await supabase.from('sites').update({ status: 'subscribed', updated_at: now.toISOString() }).eq('site_id', siteId)
+    // 즉시 결제: 재구독(해지·정지)일 때만. 체험 전·중은 청구 배치가 첫 결제
+    // next_billing_date = 체험 종료일 (lib/trial.js calcTrialWindow)
+    if (resubscribe && sub) {
+      const chargeRes = await fetch(`https://api.tosspayments.com/v1/billing/${billingKey}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${encoded}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          customerKey,
+          amount: sub.amount || 30000,
+          orderId: `order_${site.site_id}_${now.getTime()}`,
+          orderName: '홈페이지 월 구독료',
+        }),
+      })
+      const chargeData = await chargeRes.json()
+      if (!chargeRes.ok) {
+        return NextResponse.json({ error: chargeData.message || '즉시 결제 실패' }, { status: 400 })
       }
-    }
 
-    // billing_history — 이번 달 즉시 결제 'paid' 기록
-    // upsert: 이미 manual로 생성된 레코드가 있어도 card로 덮어씀
-    if (sub?.subscription_id) {
-      const period = now.toISOString().slice(0, 7)
-      await supabase.from('billing_history').upsert({
-        subscription_id: sub.subscription_id,
-        period,
-        amount: 30000,
-        status: 'paid',
+      await applyCardResubscribe(db, {
+        site,
+        sub,
+        now,
+        pgTransactionId: chargeData.paymentKey || null,
+        note: '재구독 즉시 결제',
+      })
+    } else if (sub) {
+      await db.from('subscriptions').update({
         payment_method: 'card',
-        paid_at: now.toISOString(),
-        pg_transaction_id: chargeData.paymentKey || null,
-      }, { onConflict: 'subscription_id,period' })
+        updated_at: now.toISOString(),
+      }).eq('site_id', site.site_id)
     }
 
     return NextResponse.json({
       success: true,
       card: {
-        last4: card?.number?.slice(-4),
+        last4,
         brand: card?.company,
       },
     })
-
   } catch (e) {
     console.error('[billing-auth]', e)
     return NextResponse.json({ error: e.message }, { status: 500 })

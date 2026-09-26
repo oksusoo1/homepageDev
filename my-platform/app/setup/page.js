@@ -6,15 +6,7 @@ import { requireAuthUser } from '@/lib/auth'
 import { onlyActive } from '@/lib/use-flag'
 import Link from 'next/link'
 import { Suspense } from 'react'
-
-const CATEGORY_META = {
-  cafe:       { label: '카페',      icon: '☕' },
-  restaurant: { label: '식당',      icon: '🍽' },
-  salon:      { label: '미용실',    icon: '💇' },
-  clinic:     { label: '병원/의원', icon: '🏥' },
-  academy:    { label: '학원',      icon: '📚' },
-  general:    { label: '일반 소개', icon: '🏢' },
-}
+import { templateCategoryMeta } from '@/lib/template-category'
 
 function SetupForm() {
   const router = useRouter()
@@ -121,7 +113,7 @@ function SetupForm() {
     }
   }
 
-  const meta = CATEGORY_META[category] || CATEGORY_META.general
+  const meta = templateCategoryMeta(category)
 
   const css = {
     label: { display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6 },
@@ -220,6 +212,7 @@ function SetupForm() {
               </label>
               <input
                 type="text"
+                data-testid="setup-name"
                 value={form.name}
                 onChange={e => handleNameChange(e.target.value)}
                 placeholder="예: 마곡카페"
@@ -245,6 +238,7 @@ function SetupForm() {
               }}>
                 <input
                   type="text"
+                  data-testid="setup-subdomain"
                   value={form.subdomain}
                   onChange={e => handleSubdomainChange(e.target.value)}
                   placeholder="예: magokcafe"
@@ -339,6 +333,7 @@ function SetupForm() {
           {/* 제출 버튼 */}
           <button
             type="submit"
+            data-testid="setup-submit"
             disabled={loading || subdomainStatus === 'taken' || subdomainStatus === 'invalid' || subdomainStatus === 'checking'}
             style={{
               width: '100%', marginTop: 20, padding: '15px',

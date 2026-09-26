@@ -30,6 +30,7 @@ export default function PlatformListSearch({
     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 }}>
       <input
         type="text"
+        data-testid="platform-search-input"
         value={value}
         onChange={e => onChange?.(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -43,6 +44,7 @@ export default function PlatformListSearch({
       />
       <button
         type="button"
+        data-testid="platform-search-submit"
         onClick={() => onSearch?.()}
         disabled={busy}
         style={{

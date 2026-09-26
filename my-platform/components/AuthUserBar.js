@@ -16,14 +16,18 @@ import { siteAdminPath } from '@/lib/site-paths'
  *
  * siteCode: 공개 사이트 헤더에서 전달 — **그 사이트 주인에게만** 「관리자」 링크 표시
  *
- * @param {{ variant?: 'dark'|'light', showLogout?: boolean, className?: string, siteCode?: string }} props
+ * @param {{ variant?: 'dark'|'light', showLogout?: boolean, className?: string, siteCode?: string, preset?: { status: string, kind: string, name: string, email: string }|null }} props
  */
-export default function AuthUserBar({ variant = 'dark', showLogout = true, className = '', siteCode = '' }) {
+export default function AuthUserBar({ variant = 'dark', showLogout = true, className = '', siteCode = '', preset = null }) {
   const pathname = usePathname()
   const [auth, setAuth] = useState({ status: 'loading', kind: null, name: '', email: '' })
   const [isOwner, setIsOwner] = useState(false)
 
   useEffect(() => {
+    if (preset) {
+      setAuth(preset)
+      return
+    }
     let cancelled = false
     ;(async () => {
       const user = await requireAuthUser()
@@ -75,7 +79,7 @@ export default function AuthUserBar({ variant = 'dark', showLogout = true, class
       setAuth({ status: 'guest', kind: null, name: '', email: '' })
     })()
     return () => { cancelled = true }
-  }, [siteCode])
+  }, [siteCode, preset?.kind, preset?.name, preset?.email])
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -149,7 +153,7 @@ export default function AuthUserBar({ variant = 'dark', showLogout = true, class
             <Link href="/platform" style={linkStyle}>콘솔</Link>
           )}
           {showLogout && (
-            <button type="button" onClick={handleLogout} style={linkStyle}>
+            <button type="button" data-testid="auth-logout" onClick={handleLogout} style={linkStyle}>
               로그아웃
             </button>
           )}

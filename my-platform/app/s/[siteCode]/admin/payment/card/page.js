@@ -3,10 +3,10 @@ import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams, useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { requireAuthUser } from '@/lib/auth'
-import { onlyActive, USE_FLAG_OFF } from '@/lib/use-flag'
-import { deploySite } from '@/lib/deploy'
+import { onlyActive } from '@/lib/use-flag'
 import { assertPaymentSetupAllowed } from '@/lib/billing'
 import { paymentCardSuccessPath, siteAdminPath, sitePublicHostname } from '@/lib/site-paths'
+import { registerCardMockAction } from '@/app/s/[siteCode]/admin/actions'
 
 // TODO: 실제 서비스 시 아래 플래그를 false로 변경 후 토스 연동
 const MOCK_MODE = true
@@ -19,7 +19,6 @@ function CardRegisterForm() {
   const redirectParam = searchParams.get('redirect')
 
   const [site, setSite] = useState(null)
-  const [customer, setCustomer] = useState(null)
   const [subscription, setSubscription] = useState(null)
   const [loading, setLoading] = useState(true)
   const [registering, setRegistering] = useState(false)
@@ -38,7 +37,6 @@ function CardRegisterForm() {
       supabase.from('customers').select('*').eq('auth_id', user.id)
     ).single()
     if (!cust) { router.push('/login'); return }
-    setCustomer(cust)
 
     const { data: siteData } = await onlyActive(
       supabase.from('sites').select('*').eq('subdomain', siteCode).eq('customer_id', cust.customer_id)
@@ -85,67 +83,25 @@ function CardRegisterForm() {
     await new Promise(r => setTimeout(r, 1200))
 
     const last4 = cardNum.replace(/\s/g, '').slice(-4)
-    const mockBillingKey = `MOCK_BILLING_${customer.customer_id}_${Date.now()}`
-
-    // 기존 카드 soft delete → 새 카드 insert
-    await supabase.from('customer_payment_methods')
-      .update({ use_flag: USE_FLAG_OFF })
-      .eq('customer_id', customer.customer_id)
-      .eq('use_flag', 1)
-
-    await supabase.from('customer_payment_methods').insert({
-      customer_id:    customer.customer_id,
-      pg_provider:    'toss',
-      pg_customer_id: mockBillingKey,
-      card_last4:     last4,
-      card_brand:     '테스트카드',
-      card_name:      '개인',
-    })
-
-    // redirect=deploy: 카드 등록 완료 후 자동 배포 (trial 구독은 deploySite에서 생성)
-    if (redirectParam === 'deploy' && site && customer) {
-      await deploySite(site.site_id, customer.customer_id, subscription, site, 'card')
-      router.push(siteAdminPath(siteCode))
+    if (!/^\d{4}$/.test(last4)) {
+      alert('카드 번호를 입력해주세요.')
+      setRegistering(false)
       return
     }
 
-    // 재구독: 기존 구독의 카드 결제 전환 (해지 후 재등록)
-    if (site) {
-      const siteId = site.site_id
-      const { data: sub } = await onlyActive(
-        supabase.from('subscriptions').select('subscription_id, cancelled_at').eq('site_id', siteId)
-      ).maybeSingle()
+    const res = await registerCardMockAction(siteCode, {
+      cardLast4: last4,
+      alsoDeploy: redirectParam === 'deploy',
+    })
+    if (!res.ok) {
+      alert(res.error)
+      setRegistering(false)
+      return
+    }
 
-      if (sub) {
-        const isResubscription = !!sub.cancelled_at
-        const now = new Date()
-        const newNextBillingDate = (() => { const d = new Date(now); d.setMonth(d.getMonth() + 1); return d.toISOString().split('T')[0] })()
-
-        await supabase.from('subscriptions').update({
-          payment_method: 'card',
-          cancelled_at: null,
-          cancels_at: null,
-          updated_at: now.toISOString(),
-          next_billing_date: newNextBillingDate,
-        }).eq('site_id', siteId)
-
-        // 재구독 시 사이트도 subscribed로 복구
-        if (isResubscription) {
-          await supabase.from('sites').update({ status: 'subscribed', updated_at: now.toISOString() }).eq('site_id', siteId)
-        }
-
-        // 즉시 결제 처리 (재구독 시 이번 달치 결제)
-        const period = now.toISOString().slice(0, 7)
-        await supabase.from('billing_history').upsert({
-          subscription_id: sub.subscription_id,
-          period,
-          amount: 30000,
-          status: 'paid',
-          payment_method: 'card',
-          paid_at: now.toISOString(),
-          note: '[MOCK] 재구독 즉시 결제',
-        }, { onConflict: 'subscription_id,period' })
-      }
+    if (redirectParam === 'deploy') {
+      router.push(siteAdminPath(siteCode))
+      return
     }
 
     router.push(paymentCardSuccessPath(siteCode, true))
@@ -200,15 +156,16 @@ function CardRegisterForm() {
           <h3 style={{ margin: '0 0 20px', fontSize: 14, fontWeight: 700, color: '#374151' }}>카드 정보 입력</h3>
 
           {[
-            { label: '카드 번호', value: cardNum, setter: v => setCardNum(formatCardNum(v)), placeholder: '1234 5678 1234 5678', maxLen: 19 },
-            { label: '유효기간 (MM/YY)', value: expiry, setter: v => setExpiry(formatExpiry(v)), placeholder: '12/26', maxLen: 5 },
-            { label: '생년월일 6자리', value: birth, setter: v => setBirth(v.replace(/\D/g, '').slice(0, 6)), placeholder: '901201', maxLen: 6 },
-            { label: '카드 비밀번호 앞 2자리', value: pw, setter: v => setPw(v.replace(/\D/g, '').slice(0, 2)), placeholder: '••', maxLen: 2, type: 'password' },
-          ].map(({ label, value, setter, placeholder, maxLen, type }) => (
+            { label: '카드 번호', testid: 'card-number', value: cardNum, setter: v => setCardNum(formatCardNum(v)), placeholder: '1234 5678 1234 5678', maxLen: 19 },
+            { label: '유효기간 (MM/YY)', testid: 'card-expiry', value: expiry, setter: v => setExpiry(formatExpiry(v)), placeholder: '12/26', maxLen: 5 },
+            { label: '생년월일 6자리', testid: 'card-birth', value: birth, setter: v => setBirth(v.replace(/\D/g, '').slice(0, 6)), placeholder: '901201', maxLen: 6 },
+            { label: '카드 비밀번호 앞 2자리', testid: 'card-pw', value: pw, setter: v => setPw(v.replace(/\D/g, '').slice(0, 2)), placeholder: '••', maxLen: 2, type: 'password' },
+          ].map(({ label, testid, value, setter, placeholder, maxLen, type }) => (
             <div key={label} style={{ marginBottom: 14 }}>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6 }}>{label}</label>
               <input
                 type={type || 'text'}
+                data-testid={testid}
                 value={value}
                 onChange={e => setter(e.target.value)}
                 placeholder={placeholder}
@@ -225,7 +182,7 @@ function CardRegisterForm() {
         </div>
 
         {/* 카드 등록 버튼 */}
-        <button onClick={handleCardRegister} disabled={registering} style={{
+        <button data-testid="card-submit" onClick={handleCardRegister} disabled={registering} style={{
           width: '100%', padding: '15px 0', background: registering ? '#9ca3af' : '#111827',
           color: 'white', border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 700,
           cursor: registering ? 'default' : 'pointer', marginBottom: 12,
